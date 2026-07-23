@@ -1,0 +1,3 @@
+THIS IS A toy kernel for arch RISC-V
+enjoy it.
+ps: still working on it.....
