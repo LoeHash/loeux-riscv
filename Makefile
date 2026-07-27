@@ -9,7 +9,11 @@ ABI := lp64
 CFLAGS := -march=$(ARCH) -mabi=$(ABI) -nostdlib -ffreestanding -Iinclude
 LDFLAGS := -T kernel/kernel.lds -nostdlib
 
-OBJS := boot/entry.o kernel/start.o kernel/printk.o
+OBJS := boot/entry.o\
+	kernel/start.o\
+	kernel/printk.o\
+	kernel/fdt.o\
+	mm/memory.o
 
 TARGET := kernel.elf
 TARGET_BIN := kernel.bin
@@ -39,8 +43,10 @@ $(OBJS):
 
 # 手工保持依赖关系（暂时不自动生成 .d 文件）
 boot/entry.o: boot/entry.S
-kernel/start.o: kernel/start.c kernel/sbi.h kernel/printk.h
+kernel/start.o: kernel/start.c kernel/sbi.h kernel/printk.h 
 kernel/printk.o: kernel/printk.c kernel/printk.h
+kernel/fdt.o: kernel/fdt.c kernel/fdt.h
+mm/memory.o: mm/memory.c mm/memory.h
 
 clean:
 	$(MAKE) -C boot clean
