@@ -24,6 +24,63 @@ void skip_prop(uint8_t **start_ptr)
         *start_ptr = p;
 }
 
+/// @brief 读取对应数据，写回到dest 大端
+///        写回的数据必须由调用者维护
+/// @param start        node 节点开始
+/// @param prop_name    属性名称
+/// @param dest         写回地址指针
+/// @param _size        写回地址的缓冲区大小
+/// @return             len: success, 0: not, -1: get wrong
+int read_node_prop(uint8_t *start, char *prop_name, void *dest, int _size)
+{
+        if ((uint32_t)bte32(start) != FDT_BEGIN_NODE)
+        {
+                printk("read_node_prop: the start ptr is not a node!\n");
+                return -1;
+        }
+
+        int len = strlen(start + 4);
+        if (len > CHAR_BUFF_SIZE - 1)
+        {
+                printk("read_node_prop: excepted the length of node prop name less than %u!\n", CHAR_BUFF_SIZE);
+                return -1;
+        }
+        start += 4;
+        start += len + 1;
+        start = (uint8_t *)ALIGN_UP((uintptr_t)start, 4);
+
+        while (bte32(start) == FDT_PROP)
+        {
+                start += 4;
+                len = (uint32_t)bte32(start);
+                start += 4;
+                int name_off = (uint32_t)bte32(start);
+                start += 4;
+                if (strcmp((char *)GET_STR_OFFSET(name_off), prop_name) != 0)
+                {
+                        // move to next prop.
+                        start += len;
+                        start = (uint8_t *)ALIGN_UP((uintptr_t)start, 4);
+                        while ((uint32_t)bte32(start) == FDT_NOP)
+                        {
+                                start += 4;
+                        }
+                        continue;
+                }
+
+                if (len > _size)
+                {
+                        printk("too short for dest size!\n");
+                        return -1;
+                }
+
+                memcpy(dest, start, len);
+
+                return len;
+        }
+        return 0;
+}
+
 // 需要start 为node起始
 void read_node_name(uint8_t *start, char *buf)
 {

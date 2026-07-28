@@ -25,5 +25,8 @@ SECTIONS
         /* 接下来定义栈空间 */
         /* 在bss结尾处, 预留 4mb 的栈空间 */
         . += 4194304;
-        _stack_top = .; 
+        _stack_top = .;
+        . = ALIGN(256);
+        _phy_start = .;
+ 
 }

@@ -74,4 +74,6 @@ void fdt_walk_nodes(unsigned long dtb,
                                     void *node_ptr,
                                     void *data),
                     void *data);
+void read_node_name(uint8_t *start, char *buf);
+int read_node_prop(uint8_t *start, char *prop_name, void *dest, int _size);
 #endif

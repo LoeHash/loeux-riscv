@@ -28,6 +28,9 @@ boot:
 
 kernel:
 	$(MAKE) -C kernel
+	
+mm:
+	$(MAKE) -C mm	
 
 # 链接
 $(TARGET): $(OBJS)
@@ -51,6 +54,7 @@ mm/memory.o: mm/memory.c mm/memory.h
 clean:
 	$(MAKE) -C boot clean
 	$(MAKE) -C kernel clean
+	$(MAKE) -C mm clean
 	rm -f $(TARGET) $(TARGET_BIN)
 qemu:
 	qemu-system-riscv64 -machine virt -smp 1 -m 2048M -nographic -kernel /work/os/loeux-riscv/kernel.elf
