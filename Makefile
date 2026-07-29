@@ -13,7 +13,10 @@ OBJS := boot/entry.o\
 	kernel/start.o\
 	kernel/printk.o\
 	kernel/fdt.o\
-	mm/memory.o
+	kernel/panic.o\
+	mm/memory.o\
+	mm/vm.o
+
 
 TARGET := kernel.elf
 TARGET_BIN := kernel.bin
@@ -49,7 +52,9 @@ boot/entry.o: boot/entry.S
 kernel/start.o: kernel/start.c kernel/sbi.h kernel/printk.h 
 kernel/printk.o: kernel/printk.c kernel/printk.h
 kernel/fdt.o: kernel/fdt.c kernel/fdt.h
+kernel/panic.o: kernel/panic.c kernel/panic.h
 mm/memory.o: mm/memory.c mm/memory.h
+mm/vm.o: mm/vm.c mm/vm.h
 
 clean:
 	$(MAKE) -C boot clean

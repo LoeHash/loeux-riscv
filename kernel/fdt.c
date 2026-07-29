@@ -241,57 +241,6 @@ void fdt_walk_nodes(unsigned long dtb,
         }
 }
 
-// // call back返回值：
-// //  0 表示继续遍历，包括子节点
-// //  1 表示跳过子节点，遍历下一个节点
-// // -1 表示停止遍历
-// void fdt_walk_nodes(unsigned long dtb,
-//                     int (*callback)(const char *name, int depth,
-//                                     void *node_ptr,
-//                                     void *data),
-//                     void *data)
-// {
-
-//         uint8_t *start_ptr = (uint8_t *)dtb;
-//         int dep = 1;
-//         char buf[CHAR_BUFF_SIZE];
-//         int call_back_res;
-//         while (1)
-//         {
-//                 if (bte32(start_ptr) == FDT_BEGIN_NODE)
-//                 {
-//                         read_node_name(start_ptr, buf);
-//                         call_back_res = callback(buf, dep, start_ptr, data);
-
-//                         if (call_back_res == -1)
-//                         {
-//                                 break;
-//                         }
-
-//                         while (bte32(start_ptr) == FDT_BEGIN_NODE)
-//                         {
-//                                 skip_node(&start_ptr, call_back_res, &dep);
-//                                 if (bte32(start_ptr) == FDT_END_NODE)
-//                                 {
-//                                         continue;
-//                                 }
-
-//                                 read_node_name(start_ptr, buf);
-//                                 call_back_res = callback(buf, dep, start_ptr, data);
-//                         }
-//                 }
-//                 else if (bte32(start_ptr) == FDT_END_NODE)
-//                 {
-//                         return;
-//                 }
-//                 else
-//                 {
-//                         printk("fdt_walk_nodes: unexcepted token! %d\n", bte32(start_ptr));
-//                         return;
-//                 }
-//         }
-// }
-
 /*
  * ============================================================================
  *                        DTB (Device Tree Blob) 内存布局
