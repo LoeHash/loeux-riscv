@@ -3,6 +3,7 @@
 #include "printk.h"
 #include "riscv.h"
 #include "../mm/memory.h"
+#include "../mm/vm.h"
 
 unsigned long ft_base_addr;
 
@@ -22,25 +23,28 @@ int walk_fdt(const char *name, int depth,
 void init_fdt(unsigned long ft_addr)
 {
         ft_base_addr = ft_addr;
-        printk("ft_base_addr = 0x%lx\n", ft_base_addr);
+        // printk("ft_base_addr = 0x%lx\n", ft_base_addr);
         fdt_header_init();
         printk("fdt header and root node has been inited :) \n");
         fdt_walk_nodes((uint64_t)sub_node_base_addr, walk_fdt, 0);
         printk("Successfully Detected the fdt infomation! :)\n");
+        printk("the fdt size = %ld\n", fh_struct.totalsize);
+        printk("Successfully inited the fdt! :)\n");
 }
+
 void kstart(unsigned long hart_id, unsigned long ft_addr)
 {
 
         // fdt solve.
         init_fdt(ft_addr);
-        printk("the fdt size = %ld\n", fh_struct.totalsize);
-        printk("Successfully inited the fdt! :)\n");
-
         init_memory();
-        printk("Successfully inited the memory! :)\n");
+        // 构建内核页表
+        init_kvmmap();
+        // 启动mmu！
+        init_kvmhart();
 
-        uint64_t satp_val = r_satp();
-        printk("satp = %lx, MODE = %ld\n", satp_val, (satp_val >> 60) & 0xf);
+        // we are in mmu!
+        printk("here we are!\n");
 
         while (1)
                 ;

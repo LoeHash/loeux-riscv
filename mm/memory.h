@@ -2,12 +2,12 @@
 // 系统调用不切换页表（只改变特权级和栈）
 #ifndef _INC_MEMORY_
 #include "../include/stdint.h"
+#include "memlayout.h"
 #define _INC_MEMORY_
 #define NR_BANKS_SIZE 16
 #define PG_4K_SHIFT 12
 #define PG_4K_SIZE (1 << 12)
-#define KERNEL_START 0x80200000
-#define MEMORY_START 0x80000000
+
 #define PHY_TO_PAGE(phys) \
         (&((struct page *)_phy_start)[((phys_addr_t)(phys) - MEMORY_START) >> PG_4K_SHIFT])
 
@@ -24,8 +24,6 @@
 #define PG_FLAG_FREE 0
 #define PG_FLAG_RESERVED 1 << 0
 #define PG_FLAG_USED 1 << 1
-
-#define MAX_VA (1ULL << (38)) // 使用 sv39能达到的最高的虚拟地址，实际上应该-1
 
 typedef unsigned long phys_addr_t;
 typedef unsigned long vir_addr_t;
@@ -67,6 +65,7 @@ struct memory_info
 extern struct memory_info mem_info;
 extern struct gloal_memory_descriptor gmd;
 extern uint64_t MEMORY_SIZE;
+
 int detect_memory_info(const char *name, int depth,
                        void *node_ptr,
                        void *data);

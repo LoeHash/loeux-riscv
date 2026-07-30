@@ -182,7 +182,7 @@ void init_memory()
                gmd.free_tail->prev, gmd.free_tail->next);
         test_page_alloc_free();
         print_fdt_list();
-        print_memory_info();
+        printk("Successfully inited the memory! :)\n");
 }
 
 void *alloc_page()
@@ -194,7 +194,7 @@ void *alloc_page()
         }
         struct page *pg = gmd.free_head;
         pg->flags |= PG_FLAG_USED;
-        printk("alloc the page flag: %0#x\n", pg->flags);
+
         // 我们保证是头部
         // 我们把双向节点的node当作单向节点！
         gmd.free_head = pg->next;

@@ -2,7 +2,7 @@
 
 CROSS_COMPILE ?= riscv64-linux-gnu-
 CC := $(CROSS_COMPILE)gcc
-CFLAGS := -march=rv64gc -mabi=lp64 -nostdlib -ffreestanding -I.
+CFLAGS := -march=rv64gc -mabi=lp64 -nostdlib -ffreestanding -I -g
 
 SRC_C := $(wildcard *.c)
 OBJS  := $(SRC_C:.c=.o)

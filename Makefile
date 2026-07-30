@@ -6,7 +6,7 @@ OBJCOPY := $(CROSS_COMPILE)objcopy
 
 ARCH := rv64gc
 ABI := lp64
-CFLAGS := -march=$(ARCH) -mabi=$(ABI) -nostdlib -ffreestanding -Iinclude
+CFLAGS := -g -march=$(ARCH) -mabi=$(ABI) -nostdlib -ffreestanding -Iinclude
 LDFLAGS := -T kernel/kernel.lds -nostdlib
 
 OBJS := boot/entry.o\
@@ -62,4 +62,7 @@ clean:
 	$(MAKE) -C mm clean
 	rm -f $(TARGET) $(TARGET_BIN)
 qemu:
-	qemu-system-riscv64 -machine virt -smp 1 -m 2048M -nographic -kernel /work/os/loeux-riscv/kernel.elf
+	make -j16 && qemu-system-riscv64 -machine virt -smp 1 -m 2048M -nographic -kernel /work/os/loeux-riscv/kernel.elf
+
+gdb:
+	qemu-system-riscv64 -machine virt -smp 1 -m 2048M -nographic -kernel /work/os/loeux-riscv/kernel.elf -s -S

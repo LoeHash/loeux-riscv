@@ -7,6 +7,7 @@
 #define PTE_W (1L << 2)
 #define PTE_X (1L << 3)
 #define PTE_U (1L << 4)    // user can access
+#define PTE_G (1L << 5)    // user can access
 #define PTE_A (1L << 6)    // is accessed
 #define PTE_D (1L << 7)    // is writen
 #define PTE_C (1L << 8)    // is cow pte?
@@ -22,7 +23,10 @@
 
 typedef uint64_t pte;
 typedef uint64_t *page_table;
+extern page_table kernel_pt;
 
 pte *pte_walk(page_table pt, vir_addr_t va, int create);
 int kvminit(page_table pt, vir_addr_t va, phys_addr_t pa, uint64_t pages, uint32_t flags);
+void init_kvmmap();
+void init_kvmhart();
 #endif

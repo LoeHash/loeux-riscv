@@ -2,7 +2,80 @@
 #include "memory.h"
 #include "../include/stdint.h"
 #include "../include/stddef.h"
+#include "../include/lib.h"
 #include "../kernel/panic.h"
+#include "../kernel/printk.h"
+#include "../kernel/riscv.h"
+page_table kernel_pt = 0;
+
+// turn on the paging
+void init_kvmhart()
+{
+        sfence_vma();
+        w_satp(MAKE_SATP(kernel_pt));
+        sfence_vma();
+}
+
+void init_kvmmap()
+{
+        kernel_pt = (page_table)alloc_page();
+        memset(kernel_pt, 0, 4096);
+
+        printk("[init_kvmmap] ========== Starting kernel VA/PA mappings ==========\n");
+
+        // 1. 映射内核代码和数据
+        kvminit(kernel_pt,
+                KERNEL_START,
+                KERNEL_START,
+                ((gmd.kernel_tail->paddr - KERNEL_START) / PG_4K_SIZE) + 1,
+                PTE_V | PTE_R | PTE_W | PTE_X);
+
+        // 2. 映射设备树 (FDT)
+        kvminit(kernel_pt,
+                gmd.fdt_head->paddr,
+                gmd.fdt_head->paddr,
+                ((gmd.fdt_tail->paddr - gmd.fdt_head->paddr) / PG_4K_SIZE) + 1,
+                PTE_V | PTE_R);
+
+        printk("uart va: %0#lx\n", (uint64_t)((uint64_t)UART_BASE + (uint64_t)MMIO_OFFEST));
+
+        // 映射空闲内存
+        kvminit(kernel_pt,
+                gmd.free_head->paddr,
+                gmd.free_head->paddr,
+                ((gmd.free_tail->paddr - gmd.fdt_head->paddr) / PG_4K_SIZE) + 1,
+                PTE_V | PTE_R | PTE_W);
+
+        // 映射 UART MMIO
+        kvminit(kernel_pt,
+                MMIO_UART_OFFEST,
+                UART_BASE,
+                UART_PAGE_SIZE,
+                PTE_V | PTE_R | PTE_W);
+
+        // 映射 VirtIO MMIO
+        kvminit(kernel_pt,
+                MMIO_VIRTIO_OFFEST,
+                VIRTIO_MMIO_BASE,
+                VIRTIO_PAGE_SIZE,
+                PTE_V | PTE_R | PTE_W);
+
+        // 映射 CLINT MMIO
+        kvminit(kernel_pt,
+                MMIO_CLINT_OFFEST,
+                CLINT_BASE,
+                CLINT_PAGE_SIZE,
+                PTE_V | PTE_R | PTE_W);
+
+        // 映射 PLIC MMIO
+        kvminit(kernel_pt,
+                MMIO_PLIC_OFFEST,
+                PLIC_BASE,
+                PLIC_PAGE_SIZE,
+                PTE_V | PTE_R | PTE_W | PTE_X);
+
+        printk("[init_kvmmap] ========== All mappings completed ==========\n");
+}
 
 /// @brief 将 va起始和pa起始构建对应的页表
 /// @param pt           根页表
@@ -20,9 +93,12 @@ int kvminit(page_table pt, vir_addr_t va, phys_addr_t pa, uint64_t pages, uint32
 
         while (count < pages)
         {
+                // 打印参数
+                printk("[kvminit] va = %0#lx, pa = %#x, pages = %lu, flags = %#x\n",
+                       vad, pad, pages, flags);
                 // pte_walk
                 // 如果遇到没有分配的就会创建
-                p = pte_walk(pt, va, 1);
+                p = pte_walk(pt, vad, 1);
                 if (!p)
                 {
                         panic(PANIC_ERROR, "kvminit: out of memory!\n");
@@ -68,6 +144,7 @@ pte *pte_walk(page_table pt, vir_addr_t va, int create)
                 {
                         if (!create || (pt = alloc_page()) == NULL)
                         {
+                                printk("really out!\n");
                                 return 0;
                         }
 
