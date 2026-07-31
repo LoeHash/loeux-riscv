@@ -2,6 +2,8 @@
 #define _INC_VM_
 #include "../include/stdint.h"
 #include "memory.h"
+#include "../kernel/spinlock.h"
+
 #define PTE_V (1L << 0) // valid, 默认分配的所有pte都会加上
 #define PTE_R (1L << 1)
 #define PTE_W (1L << 2)
@@ -24,9 +26,12 @@
 typedef uint64_t pte;
 typedef uint64_t *page_table;
 extern page_table kernel_pt;
+extern uint8_t vm_init_status;
+extern spinlock_t vm_init_lock;
 
 pte *pte_walk(page_table pt, vir_addr_t va, int create);
 int kvminit(page_table pt, vir_addr_t va, phys_addr_t pa, uint64_t pages, uint32_t flags);
 void init_kvmmap();
 void init_kvmhart();
+void kvm_do_mapping(page_table pgtable);
 #endif

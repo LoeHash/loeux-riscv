@@ -1,40 +1,30 @@
 #include "sbi.h"
 #include "fdt.h"
 #include "printk.h"
+#include "spinlock.h"
 #include "riscv.h"
 #include "../mm/memory.h"
+#include "../mm/memlayout.h"
 #include "../mm/vm.h"
+#include "proc.h"
+
+extern char _sec_entry64[];
 
 unsigned long ft_base_addr;
-
-int walk_fdt(const char *name, int depth,
-             void *node_ptr,
-             void *data)
-{
-        // 打印缩进
-        for (int i = 0; i < depth; i++)
-                printk("  ");
-
-        // 打印节点名称和地址
-        printk("%s (0x%p)\n", name, node_ptr);
-
-        return 0;
-}
-void init_fdt(unsigned long ft_addr)
-{
-        ft_base_addr = ft_addr;
-        // printk("ft_base_addr = 0x%lx\n", ft_base_addr);
-        fdt_header_init();
-        printk("fdt header and root node has been inited :) \n");
-        fdt_walk_nodes((uint64_t)sub_node_base_addr, walk_fdt, 0);
-        printk("Successfully Detected the fdt infomation! :)\n");
-        printk("the fdt size = %ld\n", fh_struct.totalsize);
-        printk("Successfully inited the fdt! :)\n");
-}
+__attribute__((aligned(16))) char _stack_[4096 * 4 * NCPUS];
+uint64_t main_core = 0;
+uint8_t kernel_inited = 0;
+void secondary_start(uint64_t hart_id, uint64_t data_addr);
 
 void kstart(unsigned long hart_id, unsigned long ft_addr)
 {
+        // write tp to save ours hart id to
+        // get cput struct in anywhere
+        w_tp(hart_id);
+        init_cpu();
+        main_core = hart_id;
 
+        // 绕过所有函数调用，直接测锁
         // fdt solve.
         init_fdt(ft_addr);
         init_memory();
@@ -43,9 +33,39 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         // 启动mmu！
         init_kvmhart();
 
-        // we are in mmu!
-        printk("here we are!\n");
+        printk("here we are! hart id: %d\n", hart_id);
+
+        __atomic_store_n(&kernel_inited, 1, __ATOMIC_RELEASE);
+        // 唤醒多核
+        for (int i = 0; i < NCPUS; i++)
+        {
+                if (i == main_core)
+                {
+                        continue;
+                }
+                sbi_hart_start(i, (uint64_t)_sec_entry64, (uint64_t)NULL);
+        }
+
+        __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
         while (1)
+        {
+                // we are in mmu!
+        }
+}
+
+void secondary_start(uint64_t hart_id, uint64_t data_addr)
+{
+        while (!__atomic_load_n(&kernel_inited, __ATOMIC_ACQUIRE))
                 ;
+        __atomic_thread_fence(__ATOMIC_SEQ_CST);
+
+        w_tp(hart_id);
+        init_cpu();
+
+        printk("secondary start! hart id: %d\n", hart_id);
+        while (1)
+        {
+                // we are in mmu!
+        }
 }

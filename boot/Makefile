@@ -6,9 +6,9 @@ CFLAGS := -march=rv64gc -mabi=lp64 -nostdlib -ffreestanding -g
 
 .PHONY: all clean
 
-all: entry.o
+all: entry.o sec_entry.o
 
-entry.o: entry.S
+%.o: %.S
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:

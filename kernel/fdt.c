@@ -10,6 +10,47 @@ struct fdt_header fh_struct = {0};
 struct fdt_root_info fri_struct = {0};
 uint8_t *sub_node_base_addr;
 
+// init things....
+uint8_t fdt_init_status = 0;
+spinlock_t fdt_init_lock = {0};
+
+// this is callback!
+int walk_fdt(const char *name, int depth,
+             void *node_ptr,
+             void *data)
+{
+        // 打印缩进
+        for (int i = 0; i < depth; i++)
+                printk("  ");
+
+        // 打印节点名称和地址
+        printk("%s (0x%p)\n", name, node_ptr);
+
+        return 0;
+}
+
+void init_fdt(unsigned long ft_addr)
+{
+        acquire(&fdt_init_lock);
+        if (fdt_init_status == 1)
+        {
+                release(&fdt_init_lock);
+                return;
+        }
+
+        ft_base_addr = ft_addr;
+        // printk("ft_base_addr = 0x%lx\n", ft_base_addr);
+        fdt_header_init();
+        printk("fdt header and root node has been inited :) \n");
+        fdt_walk_nodes((uint64_t)sub_node_base_addr, walk_fdt, 0);
+        printk("Successfully Detected the fdt infomation! :)\n");
+        printk("the fdt size = %ld\n", fh_struct.totalsize);
+        printk("Successfully inited the fdt! :)\n");
+
+        fdt_init_status = 1;
+        release(&fdt_init_lock);
+}
+
 // 当前指针指向 FDT_PROP
 // 返回后指向下一个 FDT_PROP/ FDT_END_NODE / FDT_BEGIN_NODE
 void skip_prop(uint8_t **start_ptr)

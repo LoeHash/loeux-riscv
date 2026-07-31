@@ -160,6 +160,17 @@ static inline unsigned long sbi_ecall(
         return a0;
 }
 
+static inline unsigned long sbi_hart_start(unsigned long hartid,
+                                           unsigned long start_addr,
+                                           unsigned long opaque)
+{
+        return sbi_ecall(SBI_EXT_HSM,
+                         SBI_EXT_HSM_HART_START,
+                         hartid,
+                         start_addr,
+                         opaque, 0, 0, 0);
+}
+
 // putchar
 static inline unsigned long sbi_putchar(char c)
 {

@@ -5,6 +5,8 @@
 #include "sbi.h"
 #include "printk.h"
 
+spinlock_t printing_lock = {0};
+
 #define is_digit(c) ((c) >= '0' && (c) <= '9')
 
 // 辅助：将整数写入 num 缓冲区，返回字符数
@@ -43,7 +45,6 @@ static int format_number(char *num, unsigned long long value, int base,
         return len;
 }
 
-// 主函数：格式化输出到 buf
 int vsprintf(char *buf, const char *fmt, va_list args)
 {
         char *str, *s;
@@ -241,11 +242,14 @@ void printk(char *fmt, ...)
         va_start(args, fmt);
         vsprintf(buf, fmt, args); // 将 va_list 传递给 vsprintf
         va_end(args);
+
+        acquire(&printing_lock);
         while (*p != '\0')
         {
                 sbi_putchar(*p);
                 p++;
         }
+        release(&printing_lock);
 }
 
 int skip_atoi(const char **s)
@@ -256,16 +260,15 @@ int skip_atoi(const char **s)
                 i = i * 10 + *((*s)++) - '0';
         return i;
 }
-// do_div 的C语言版本
+// do_div
 static int do_div(unsigned long long *n, int base)
 {
         unsigned long long quotient = *n / base;
-        int remainder = (int)(*n - quotient * base); // 等价于 %，但更快
+        int remainder = (int)(*n - quotient * base); // 等价于 %
         *n = quotient;
         return remainder;
 }
 
-// 原 number 函数（只改了 do_div 调用）
 static char *number(char *str, long num, int base, int size, int precision, int type)
 {
         char c, sign, tmp[50];

@@ -1,6 +1,7 @@
 #ifndef _INC_FDT
 #define _INC_FDT
 #include "../include/stdint.h"
+#include "spinlock.h"
 
 /* token */
 // 所有token长度全部都是 32bit
@@ -65,6 +66,8 @@ extern struct fdt_header fh_struct;
 extern struct fdt_root_info fri_struct;
 extern struct fdt_root_info fri_struct;
 extern uint8_t *sub_node_base_addr;
+extern uint8_t fdt_init_status;
+extern spinlock_t fdt_init_lock;
 
 void fdt_header_init();
 uint32_t bte32(uint8_t *p);
@@ -76,4 +79,5 @@ void fdt_walk_nodes(unsigned long dtb,
                     void *data);
 void read_node_name(uint8_t *start, char *buf);
 int read_node_prop(uint8_t *start, char *prop_name, void *dest, int _size);
+void init_fdt(unsigned long ft_addr);
 #endif

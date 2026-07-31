@@ -7,6 +7,8 @@
 struct memory_info mem_info = {0};
 struct gloal_memory_descriptor gmd = {0};
 uint64_t MEMORY_SIZE = 0;
+uint8_t memory_init_status = 0;
+spinlock_t memory_init_lock = {0};
 
 static const uint32_t mem_buff_size = 128;
 extern char _phy_start[];
@@ -56,6 +58,14 @@ int detect_memory_info(const char *name, int depth,
 
 void init_memory()
 {
+        acquire(&memory_init_lock);
+        if (memory_init_status == 1)
+        {
+                printk("bumped into the gap!\n hart id: %d", get_cpu_id());
+                release(&memory_init_lock);
+                return;
+        }
+
         char mem_buff[mem_buff_size];
         fdt_walk_nodes((uint64_t)sub_node_base_addr, detect_memory_info, mem_buff);
         // 接下来对于内存进行分配
@@ -183,6 +193,9 @@ void init_memory()
         test_page_alloc_free();
         print_fdt_list();
         printk("Successfully inited the memory! :)\n");
+
+        memory_init_status = 1;
+        release(&memory_init_lock);
 }
 
 void *alloc_page()

@@ -6,16 +6,20 @@ OBJCOPY := $(CROSS_COMPILE)objcopy
 
 ARCH := rv64gc
 ABI := lp64
-CFLAGS := -g -march=$(ARCH) -mabi=$(ABI) -nostdlib -ffreestanding -Iinclude
+CFLAGS := -g -march=$(ARCH) -mabi=$(ABI) -nostdlib -ffreestanding -Iinclude -Wall -Werro
 LDFLAGS := -T kernel/kernel.lds -nostdlib
 
 OBJS := boot/entry.o\
+	boot/sec_entry.o\
 	kernel/start.o\
 	kernel/printk.o\
 	kernel/fdt.o\
 	kernel/panic.o\
+	kernel/spinlock.o\
+	kernel/proc.o\
 	mm/memory.o\
-	mm/vm.o
+	mm/vm.o\
+	
 
 
 TARGET := kernel.elf
@@ -49,10 +53,13 @@ $(OBJS):
 
 # 手工保持依赖关系（暂时不自动生成 .d 文件）
 boot/entry.o: boot/entry.S
+boot/sec_entry.o: boot/sec_entry.S
 kernel/start.o: kernel/start.c kernel/sbi.h kernel/printk.h 
 kernel/printk.o: kernel/printk.c kernel/printk.h
 kernel/fdt.o: kernel/fdt.c kernel/fdt.h
 kernel/panic.o: kernel/panic.c kernel/panic.h
+kernel/spinlock.o: kernel/spinlock.c kernel/spinlock.h
+kernel/proc.o: kernel/proc.c kernel/proc.h
 mm/memory.o: mm/memory.c mm/memory.h
 mm/vm.o: mm/vm.c mm/vm.h
 
@@ -62,7 +69,7 @@ clean:
 	$(MAKE) -C mm clean
 	rm -f $(TARGET) $(TARGET_BIN)
 qemu:
-	make -j16 && qemu-system-riscv64 -machine virt -smp 1 -m 2048M -nographic -kernel /work/os/loeux-riscv/kernel.elf
+	make -j16 && qemu-system-riscv64 -machine virt -smp 4 -m 2048M -nographic -kernel /work/os/loeux-riscv/kernel.elf
 
 gdb:
-	qemu-system-riscv64 -machine virt -smp 1 -m 2048M -nographic -kernel /work/os/loeux-riscv/kernel.elf -s -S
+	qemu-system-riscv64 -machine virt -smp 4 -m 2048M -nographic -kernel /work/os/loeux-riscv/kernel.elf -s -S

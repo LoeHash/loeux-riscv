@@ -3,6 +3,7 @@
 #ifndef _INC_MEMORY_
 #include "../include/stdint.h"
 #include "memlayout.h"
+#include "../kernel/spinlock.h"
 #define _INC_MEMORY_
 #define NR_BANKS_SIZE 16
 #define PG_4K_SHIFT 12
@@ -65,6 +66,8 @@ struct memory_info
 extern struct memory_info mem_info;
 extern struct gloal_memory_descriptor gmd;
 extern uint64_t MEMORY_SIZE;
+extern uint8_t memory_init_status;
+extern spinlock_t memory_init_lock;
 
 int detect_memory_info(const char *name, int depth,
                        void *node_ptr,

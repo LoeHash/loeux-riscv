@@ -6,8 +6,15 @@ _entry64:
         mv s1, a1
 
         # 设置栈指针
-        # la 是加载地址
-        la sp, _stack_top
+        # 根据不同的核心id, 对 栈进行划分
+        # 使用 _stack_
+        li t1, 4096 * 4
+
+        addi a0, a0, 1
+        
+        mul t0, a0, t1
+        la t1, _stack_
+        add sp, t1, t0
 
         # bss 段清零
         la t0, _bss_start
@@ -19,8 +26,8 @@ fill_zero:
 
 jmp_to_kernel:
         # 恢复
-        mv a0, s0  
-        mv a1, s1  
+        mv a0, s0
+        mv a1, s1
         call kstart
 dead:
         j dead  # jump to dead

@@ -2,6 +2,7 @@
 #define _INC_PRINTK
 
 #include "../include/stdarg.h"
+#include "spinlock.h"
 #define NULL ((void *)0)
 
 #define PRINT_BUFFER_SIZE 1024
@@ -26,4 +27,5 @@ int skip_atoi(const char **s);
 
 static char *number(char *str, long num, int base, int size, int precision, int type);
 
+extern spinlock_t printing_lock;
 #endif
