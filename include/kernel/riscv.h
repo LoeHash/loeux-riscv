@@ -134,4 +134,39 @@ w_stvec(uint64_t x)
 {
         asm volatile("csrw stvec, %0" : : "r"(x));
 }
+
+static inline uint64_t
+r_sstatus_spp()
+{
+        return (r_sstatus() >> 8) & 1;
+}
+
+static inline uint64_t
+r_sepc()
+{
+        uint64_t x;
+        asm volatile("csrr %0, sepc" : "=r"(x));
+        return x;
+}
+
+static inline void
+w_sepc(uint64_t x)
+{
+        asm volatile("csrw sepc, %0" : : "r"(x));
+}
+
+static inline uint64_t
+r_scause()
+{
+        uint64_t x;
+        asm volatile("csrr %0, scause" : "=r"(x));
+        return x;
+}
+
+static inline void
+w_scause(uint64_t x)
+{
+        asm volatile("csrw scause, %0" : : "r"(x));
+}
+
 #endif

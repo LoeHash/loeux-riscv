@@ -10,6 +10,11 @@ struct task_struct tasks[NTASKS];
 struct cpu cpus[NCPUS];
 extern char *_trampoline_jump[];
 
+struct task_struct *get_task()
+{
+        return get_cpu()->ts;
+}
+
 struct cpu *get_cpu()
 {
         return &cpus[r_tp()];

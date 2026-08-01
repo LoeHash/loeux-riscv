@@ -66,8 +66,8 @@ struct trapframe
         /*   0 */ uint64_t kernel_satp;   // kernel page table
         /*   8 */ uint64_t kernel_sp;     // 每一个进程对应的唯一的内核栈
         /*  16 */ uint64_t kernel_trap;   // usertrap()
-        /*  24 */ uint64_t epc;           // saved user program counter
-        /*  32 */ uint64_t kernel_hartid; // saved kernel tp
+        /*  24 */ uint64_t kernel_hartid; // saved kernel tp
+        /*  32 */ uint64_t sepc;          // 不要在刚枪的时候右键。。。
         /*  40 */ uint64_t ra;
         /*  48 */ uint64_t sp;
         /*  56 */ uint64_t gp;

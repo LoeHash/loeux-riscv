@@ -15,6 +15,6 @@
 
 void init_kernel_trap_vec();
 void kernel_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval);
-void user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval);
-
+uint64_t user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval);
+void setup_return_trapframe(struct task_struct *ts);
 #endif
