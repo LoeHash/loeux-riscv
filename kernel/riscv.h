@@ -120,4 +120,18 @@ static inline uint64_t r_sp()
         asm volatile("mv %0, sp" : "=r"(x));
         return x;
 }
+
+static inline uint64_t
+r_stvec()
+{
+        uint64_t x;
+        asm volatile("csrr %0, stvec" : "=r"(x));
+        return x;
+}
+
+static inline void
+w_stvec(uint64_t x)
+{
+        asm volatile("csrw stvec, %0" : : "r"(x));
+}
 #endif

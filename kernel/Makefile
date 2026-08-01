@@ -6,10 +6,13 @@ CFLAGS := -march=rv64gc -mabi=lp64 -nostdlib -ffreestanding -I -g
 
 SRC_C := $(wildcard *.c)
 OBJS  := $(SRC_C:.c=.o)
+SRC_S := $(wildcard *.S)
+ASMOBJS := $(SRC_S:.S=.o)
 
 .PHONY: all clean
 
-all: $(OBJS)
+
+all: $(OBJS) $(ASMOBJS)
 
 # 模式规则：将每个 .c 编译为对应的 .o
 %.o: %.c

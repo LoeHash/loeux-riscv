@@ -12,4 +12,5 @@
 //      sie     	中断使能寄存器
 //      sip     	中断挂起寄存器
 
+void init_kernel_trap_vec();
 #endif

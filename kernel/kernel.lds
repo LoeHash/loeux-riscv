@@ -7,6 +7,13 @@ SECTIONS
 
         .text : {
                 *(.text._entry64) /* 定死 0x80200000 处必为入口汇编 */
+        }
+
+        .kernel_trap : ALIGN(4) {
+                *(.text.kernel_trap_vec)
+        }
+
+        .text :{
                 *(.text*)
         }
 

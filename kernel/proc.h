@@ -6,22 +6,21 @@
 // 内核现场
 struct context
 {
-        uint64_t ra;
-        uint64_t sp;
-
+        /*  0 */ uint64_t ra;
+        /*  8 */ uint64_t sp;
         // callee-saved
-        uint64_t s0;
-        uint64_t s1;
-        uint64_t s2;
-        uint64_t s3;
-        uint64_t s4;
-        uint64_t s5;
-        uint64_t s6;
-        uint64_t s7;
-        uint64_t s8;
-        uint64_t s9;
-        uint64_t s10;
-        uint64_t s11;
+        /* 16 */ uint64_t s0;
+        /* 24 */ uint64_t s1;
+        /* 32 */ uint64_t s2;
+        /* 40 */ uint64_t s3;
+        /* 48 */ uint64_t s4;
+        /* 56 */ uint64_t s5;
+        /* 64 */ uint64_t s6;
+        /* 72 */ uint64_t s7;
+        /* 80 */ uint64_t s8;
+        /* 88 */ uint64_t s9;
+        /* 96 */ uint64_t s10;
+        /* 104 */ uint64_t s11;
 };
 
 // 用户进程现场

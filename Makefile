@@ -9,7 +9,9 @@ ABI := lp64
 CFLAGS := -g -march=$(ARCH) -mabi=$(ABI) -nostdlib -ffreestanding -Iinclude -Wall -Werro
 LDFLAGS := -T kernel/kernel.lds -nostdlib
 
-OBJS := boot/entry.o\
+	
+OBJS := asm/kernel_trap_vec.o\
+	boot/entry.o\
 	boot/sec_entry.o\
 	kernel/start.o\
 	kernel/printk.o\
@@ -17,6 +19,7 @@ OBJS := boot/entry.o\
 	kernel/panic.o\
 	kernel/spinlock.o\
 	kernel/proc.o\
+	kernel/trap.o\
 	mm/memory.o\
 	mm/vm.o\
 	
@@ -38,6 +41,8 @@ kernel:
 	
 mm:
 	$(MAKE) -C mm	
+asm:
+	$(MAKE) -C asm	
 
 # 链接
 $(TARGET): $(OBJS)
@@ -52,6 +57,7 @@ $(OBJS):
 	$(MAKE) -C $(dir $@)
 
 # 手工保持依赖关系（暂时不自动生成 .d 文件）
+asm/kernel_trap_vec.o: asm/kernel_trap_vec.S
 boot/entry.o: boot/entry.S
 boot/sec_entry.o: boot/sec_entry.S
 kernel/start.o: kernel/start.c kernel/sbi.h kernel/printk.h 
@@ -60,6 +66,7 @@ kernel/fdt.o: kernel/fdt.c kernel/fdt.h
 kernel/panic.o: kernel/panic.c kernel/panic.h
 kernel/spinlock.o: kernel/spinlock.c kernel/spinlock.h
 kernel/proc.o: kernel/proc.c kernel/proc.h
+kernel/trap.o: kernel/trap.c kernel/trap.h
 mm/memory.o: mm/memory.c mm/memory.h
 mm/vm.o: mm/vm.c mm/vm.h
 
