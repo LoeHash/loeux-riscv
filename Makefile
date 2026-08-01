@@ -3,14 +3,23 @@ CROSS_COMPILE ?= riscv64-linux-gnu-
 CC := $(CROSS_COMPILE)gcc
 LD := $(CROSS_COMPILE)ld
 OBJCOPY := $(CROSS_COMPILE)objcopy
-
+# 根目录 Makefile
+INCLUDES := -I. \
+            -I./include \
+            -I./include/kernel \
+            -I./include/mm \
+            -I./kernel \
+            -I./mm \
+            -I./boot \
+            -I./asm
 ARCH := rv64gc
 ABI := lp64
-CFLAGS := -g -march=$(ARCH) -mabi=$(ABI) -nostdlib -ffreestanding -Iinclude -Wall -Werro
+CFLAGS := -g -march=$(ARCH) -mabi=$(ABI) -nostdlib -ffreestanding $(INCLUDES) -Wall -Werro
 LDFLAGS := -T kernel/kernel.lds -nostdlib
 
 	
 OBJS := asm/kernel_trap_vec.o\
+	asm/trampoline.o\
 	boot/entry.o\
 	boot/sec_entry.o\
 	kernel/start.o\
@@ -58,17 +67,19 @@ $(OBJS):
 
 # 手工保持依赖关系（暂时不自动生成 .d 文件）
 asm/kernel_trap_vec.o: asm/kernel_trap_vec.S
+asm/trampoline.o: asm/trampoline.S
 boot/entry.o: boot/entry.S
 boot/sec_entry.o: boot/sec_entry.S
-kernel/start.o: kernel/start.c kernel/sbi.h kernel/printk.h 
-kernel/printk.o: kernel/printk.c kernel/printk.h
-kernel/fdt.o: kernel/fdt.c kernel/fdt.h
-kernel/panic.o: kernel/panic.c kernel/panic.h
-kernel/spinlock.o: kernel/spinlock.c kernel/spinlock.h
-kernel/proc.o: kernel/proc.c kernel/proc.h
-kernel/trap.o: kernel/trap.c kernel/trap.h
-mm/memory.o: mm/memory.c mm/memory.h
-mm/vm.o: mm/vm.c mm/vm.h
+
+kernel/start.o: kernel/start.c 
+kernel/printk.o: kernel/printk.c
+kernel/fdt.o: kernel/fdt.c
+kernel/panic.o: kernel/panic.c
+kernel/spinlock.o: kernel/spinlock.c
+kernel/proc.o: kernel/proc.c
+kernel/trap.o: kernel/trap.c
+mm/memory.o: mm/memory.c 
+mm/vm.o: mm/vm.c 
 
 clean:
 	$(MAKE) -C boot clean

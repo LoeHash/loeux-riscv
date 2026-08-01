@@ -1,9 +1,10 @@
 // 关于内存:
 // 系统调用不切换页表（只改变特权级和栈）
 #ifndef _INC_MEMORY_
-#include "../include/stdint.h"
-#include "memlayout.h"
-#include "../kernel/spinlock.h"
+#define _INC_MEMORY_
+#include <stdint.h>
+#include <memlayout.h>
+#include <type.h>
 #define _INC_MEMORY_
 #define NR_BANKS_SIZE 16
 #define PG_4K_SHIFT 12
@@ -25,37 +26,6 @@
 #define PG_FLAG_FREE 0
 #define PG_FLAG_RESERVED 1 << 0
 #define PG_FLAG_USED 1 << 1
-
-typedef unsigned long phys_addr_t;
-typedef unsigned long vir_addr_t;
-
-/// @brief 表示一页的管理信息
-struct page
-{
-        phys_addr_t paddr;
-        int32_t refcount;
-        uint64_t flags;
-        struct page *prev;
-        struct page *next;
-};
-
-struct gloal_memory_descriptor
-{
-        struct page *pg;
-        struct page *kernel_head; // 保留节点的头
-        struct page *kernel_tail; // 保留节点的尾
-        struct page *fdt_head;    // fdt设备树保留节点的头
-        struct page *fdt_tail;    // fdt设备树保留节点的尾
-        struct page *free_head;   // 空闲节点的头
-        struct page *free_tail;   // 空闲节点的尾
-        uint64_t page_length;
-};
-
-struct bank
-{
-        phys_addr_t base;
-        phys_addr_t size;
-};
 
 struct memory_info
 {

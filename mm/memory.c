@@ -1,8 +1,9 @@
-#include "memory.h"
-#include "vm.h"
-#include "../kernel/printk.h"
-#include "../kernel/fdt.h"
-#include "../include/lib.h"
+#include <mm/memory.h>
+#include <mm/vm.h>
+#include <printk.h>
+#include <fdt.h>
+#include <lib.h>
+#include <spinlock.h>
 
 struct memory_info mem_info = {0};
 struct gloal_memory_descriptor gmd = {0};

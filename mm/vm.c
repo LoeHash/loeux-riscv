@@ -1,15 +1,18 @@
-#include "vm.h"
-#include "memory.h"
-#include "../include/stdint.h"
-#include "../include/stddef.h"
-#include "../include/lib.h"
-#include "../kernel/panic.h"
-#include "../kernel/printk.h"
-#include "../kernel/riscv.h"
+#include <vm.h>
+#include <memory.h>
+#include <stdint.h>
+#include <stddef.h>
+#include <lib.h>
+#include <panic.h>
+#include <printk.h>
+#include <riscv.h>
+#include <spinlock.h>
+
 page_table kernel_pt = 0;
 uint8_t vm_init_status = 0;
 spinlock_t vm_init_lock = {0};
 
+extern char *_trampoline_jump[];
 // turn on the paging
 void init_kvmhart()
 {
@@ -88,6 +91,13 @@ void kvm_do_mapping(page_table pgtable)
                 PLIC_BASE,
                 PLIC_PAGE_SIZE,
                 PTE_V | PTE_R | PTE_W | PTE_X);
+
+        // 映射 trampline
+        kvminit(pgtable,
+                TRAMPOLINE,
+                (uint64_t)_trampoline_jump,
+                PLIC_PAGE_SIZE,
+                PTE_V | PTE_R | PTE_U | PTE_X);
 }
 
 /// @brief 将 va起始和pa起始构建对应的页表
@@ -95,7 +105,7 @@ void kvm_do_mapping(page_table pgtable)
 /// @param va           虚拟地址起始
 /// @param pa           物理地址起始
 /// @param pages        映射的页数
-/// @return
+/// @return count 映射的页数 0 错误
 int kvminit(page_table pt, vir_addr_t va, phys_addr_t pa, uint64_t pages, uint32_t flags)
 {
         // 所有地址，全部向下4kb对其

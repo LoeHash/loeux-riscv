@@ -2,7 +2,9 @@
 
 CROSS_COMPILE ?= riscv64-linux-gnu-
 CC := $(CROSS_COMPILE)gcc
-CFLAGS := -march=rv64gc -mabi=lp64 -nostdlib -ffreestanding -I  -g
+# 根目录 Makefile
+INCLUDES := -I. -I../include -I../include/mm -I../include/kernel
+CFLAGS := -march=rv64gc -mabi=lp64 -nostdlib -ffreestanding $(INCLUDES)  -g
 
 SRC_C := $(wildcard *.c)
 OBJS  := $(SRC_C:.c=.o)

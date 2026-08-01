@@ -1,8 +1,8 @@
 #ifndef _INC_VM_
 #define _INC_VM_
-#include "../include/stdint.h"
-#include "memory.h"
-#include "../kernel/spinlock.h"
+#include <stdint.h>
+#include <mm/memory.h>
+#include <type.h>
 
 #define PTE_V (1L << 0) // valid, 默认分配的所有pte都会加上
 #define PTE_R (1L << 1)
@@ -23,8 +23,6 @@
 #define PGROUNDDOWN(a) (((a)) & ~(0xFFF))
 #define PGROUNDUP(sz) (((sz) + PG_4K_SIZE - 1) & ~(PG_4K_SIZE - 1))
 
-typedef uint64_t pte;
-typedef uint64_t *page_table;
 extern page_table kernel_pt;
 extern uint8_t vm_init_status;
 extern spinlock_t vm_init_lock;

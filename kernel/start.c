@@ -1,13 +1,13 @@
-#include "sbi.h"
-#include "fdt.h"
-#include "printk.h"
-#include "spinlock.h"
-#include "riscv.h"
-#include "../mm/memory.h"
-#include "../mm/memlayout.h"
-#include "../mm/vm.h"
-#include "proc.h"
-#include "trap.h"
+#include <sbi.h>
+#include <fdt.h>
+#include <printk.h>
+#include <spinlock.h>
+#include <riscv.h>
+#include <memory.h>
+#include <memlayout.h>
+#include <vm.h>
+#include <proc.h>
+#include <trap.h>
 
 extern char _sec_entry64[];
 
@@ -33,6 +33,7 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         init_kvmmap();
         // 启动mmu！
         init_kvmhart();
+        init_tasks();
         // 开启内核中断异常处理
         init_kernel_trap_vec();
 

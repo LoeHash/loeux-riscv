@@ -1,7 +1,43 @@
-#ifndef __INC_PROC
-#define __INC_PROC
-#include "../include/stdint.h"
-#include "../mm/memlayout.h"
+#ifndef _INC_TYPE
+#define _INC_TYPE
+#include <stdint.h>
+struct spinlock
+{
+        uint64_t val;
+        struct cpu *holder;
+};
+
+typedef unsigned long phys_addr_t;
+typedef unsigned long vir_addr_t;
+typedef struct spinlock spinlock_t;
+
+/// @brief 表示一页的管理信息
+struct page
+{
+        phys_addr_t paddr;
+        int32_t refcount;
+        uint64_t flags;
+        struct page *prev;
+        struct page *next;
+};
+
+struct gloal_memory_descriptor
+{
+        struct page *pg;
+        struct page *kernel_head; // 保留节点的头
+        struct page *kernel_tail; // 保留节点的尾
+        struct page *fdt_head;    // fdt设备树保留节点的头
+        struct page *fdt_tail;    // fdt设备树保留节点的尾
+        struct page *free_head;   // 空闲节点的头
+        struct page *free_tail;   // 空闲节点的尾
+        uint64_t page_length;
+};
+
+struct bank
+{
+        phys_addr_t base;
+        phys_addr_t size;
+};
 
 // 内核现场
 struct context
@@ -28,7 +64,7 @@ struct context
 struct trapframe
 {
         /*   0 */ uint64_t kernel_satp;   // kernel page table
-        /*   8 */ uint64_t kernel_sp;     // top of process's kernel stack
+        /*   8 */ uint64_t kernel_sp;     // 每一个进程对应的唯一的内核栈
         /*  16 */ uint64_t kernel_trap;   // usertrap()
         /*  24 */ uint64_t epc;           // saved user program counter
         /*  32 */ uint64_t kernel_hartid; // saved kernel tp
@@ -65,21 +101,42 @@ struct trapframe
         /* 280 */ uint64_t t6;
 };
 
-#define NCPUS 4
+enum TASK_STATE
+{
+        UNINITLIZED,
+        INITLIZED,
+        RUNNABLE,
+        RUNNING,
+        BLOCKED,
+        SLEEP,
+        DEAD
+};
+typedef uint64_t pte;
+typedef uint64_t *page_table;
+
+struct task_struct
+{
+        struct trapframe *utf; // 用户现场
+        enum TASK_STATE state; // 状态
+        spinlock_t lk;         // 进程锁
+
+        page_table pg; // 进程页表
+
+        struct context ctx;         // 各个进程的内核态现场
+        int pid;                    // 进程id
+        struct task_struct *parent; // 父亲进程
+        char name[32];              // 进程name
+        int return_val;             // 进程运行完毕后的返回值
+};
 
 struct cpu
 {
-        struct trapframe *tf; // 当前cpu的所有通用寄存器上下文
-        struct context *ctx;  // 内核态的现场
+        struct task_struct *ts; // 当前cpu运行的任务
+        struct context ctx;     // 内核态的现场
         uint64_t hart_id;
 
         int noff;   // 调用pushoff的深度
         int intena; // 第一次push_off 的中断状态
 };
 
-extern struct cpu cpus[NCPUS];
-
-struct cpu *get_cpu();
-uint64_t get_cpu_id();
-void init_cpu();
 #endif

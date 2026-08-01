@@ -1,7 +1,7 @@
-#include "spinlock.h"
-#include "proc.h"
-#include "riscv.h"
-#include "panic.h"
+#include <spinlock.h>
+#include <proc.h>
+#include <riscv.h>
+#include <panic.h>
 
 void init_spinlock(spinlock_t *lk)
 {

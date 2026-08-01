@@ -1,7 +1,9 @@
-#include "fdt.h"
-#include "printk.h"
-#include "../mm/memory.h"
-#include "../include/lib.h"
+#include <fdt.h>
+#include <printk.h>
+#include <memory.h>
+#include <lib.h>
+#include <type.h>
+#include <spinlock.h>
 
 static void print_fdt_header(struct fdt_header *hdr);
 static uint32_t CHAR_BUFF_SIZE = 128;

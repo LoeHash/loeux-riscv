@@ -6,7 +6,7 @@ CFLAGS := -march=rv64gc -mabi=lp64 -nostdlib -ffreestanding -g
 
 .PHONY: all clean
 
-all: kernel_trap_vec.o
+all: kernel_trap_vec.o trampoline.o
 
 %.o: %.S
 	$(CC) $(CFLAGS) -c $< -o $@

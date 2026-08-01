@@ -1,5 +1,6 @@
 #ifndef _INC_MEMLAYOUT_
 #define _INC_MEMLAYOUT_
+#include <stdint.h>
 // Sv39 虚拟地址空间 (64位)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 0x0000000000000000  ─┐
@@ -49,7 +50,6 @@
 #define MEMORY_START 0x80000000LU
 
 #define STACK_SIZE_PER_CPU 4096 * 2 // 2 pages
-#define KSTACK(hartId) (_stack_top - (hartId * STACK_SIZE_PER_CPU))
 
 #define MMIO_OFFEST ((uint64_t)(MAX_VA - (uint64_t)0x08000000UL))
 #define MMIO_UART_OFFEST MMIO_OFFEST
@@ -68,9 +68,17 @@
 #define PLIC_PAGE_SIZE 0x600LU
 
 // TRAMPLINE 与 MMIO 之间的保护页
-#define GUARD_BT_TRAMP_MMIO TRAMPLINE MMIO_OFFEST - PG_4K_SIZE
+#define GUARD_BT_TRAMP_MMIO MMIO_OFFEST - PG_4K_SIZE
 
 // 蹦床页
-#define TRAMPLINE GUARD_BT_TRAMP_MMIO - PG_4K_SIZE;
+#define TRAMPOLINE GUARD_BT_TRAMP_MMIO - PG_4K_SIZE
+
+// 每一个进程对应的trapframe 一页
+#define TRAPFRAME_MAPPING TRAMPOLINE - 2 * PG_4K_SIZE
+
+// 进程栈顶, 与 TRAMPLINE 保持4KB距离
+#define TASK_KERNEL_STACK_TOP (TRAPFRAME_MAPPING - 2 * PG_4K_SIZE)
+
+#define TASK_KERNEL_STACK(t) (TASK_KERNEL_STACK_TOP - (t + 1) * PG_4K_SIZE)
 
 #endif

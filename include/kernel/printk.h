@@ -1,8 +1,8 @@
 #ifndef _INC_PRINTK
 #define _INC_PRINTK
 
-#include "../include/stdarg.h"
-#include "spinlock.h"
+#include <stdarg.h>
+#include <type.h>
 #define NULL ((void *)0)
 
 #define PRINT_BUFFER_SIZE 1024

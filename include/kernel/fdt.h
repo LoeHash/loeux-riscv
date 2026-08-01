@@ -1,7 +1,6 @@
 #ifndef _INC_FDT
 #define _INC_FDT
-#include "../include/stdint.h"
-#include "spinlock.h"
+#include <type.h>
 
 /* token */
 // 所有token长度全部都是 32bit

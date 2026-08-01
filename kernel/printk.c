@@ -1,9 +1,11 @@
-#include "../include/stdarg.h"
-#include "../include/stddef.h"
-#include "../include/stdint.h"
-#include "../include/lib.h"
-#include "sbi.h"
-#include "printk.h"
+#include <stdarg.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <lib.h>
+#include <sbi.h>
+#include <printk.h>
+#include <type.h>
+#include <spinlock.h>
 
 spinlock_t printing_lock = {0};
 

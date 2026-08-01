@@ -1,6 +1,6 @@
-#include "panic.h"
-#include "printk.h"
-#include "../include/stdarg.h"
+#include <panic.h>
+#include <printk.h>
+#include <stdarg.h>
 
 void print_notice_flag(int panic_id)
 {

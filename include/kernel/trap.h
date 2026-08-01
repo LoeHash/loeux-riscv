@@ -1,5 +1,6 @@
 #ifndef _INC_TRAP
 #define _INC_TRAP
+#include <stdint.h>
 
 // 异常处理需要使用到CSR寄存器
 //      CSR	        作用
@@ -13,4 +14,7 @@
 //      sip     	中断挂起寄存器
 
 void init_kernel_trap_vec();
+void kernel_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval);
+void user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval);
+
 #endif
