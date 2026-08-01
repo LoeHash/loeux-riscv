@@ -1,7 +1,7 @@
 #ifndef _INC_VM_
 #define _INC_VM_
 #include <stdint.h>
-#include <mm/memory.h>
+#include <mm/vm.h>
 #include <type.h>
 
 #define PTE_V (1L << 0) // valid, 默认分配的所有pte都会加上
