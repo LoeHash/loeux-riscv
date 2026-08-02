@@ -4,3 +4,4 @@
 *.dbi
 .vscode
 .vscode/*
+.gdb_history
