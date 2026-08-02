@@ -78,8 +78,8 @@ _trampoline_jump:
         csrr a0, scause
         csrr a1, sepc
         csrr a2, stval
-         
-        jalr t0
+        
+        jalr ra, t0
         
 _trampoline_ret:
         # 回到这里 a0寄存器保留了

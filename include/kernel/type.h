@@ -24,13 +24,15 @@ struct page
 struct gloal_memory_descriptor
 {
         struct page *pg;
-        struct page *kernel_head; // 保留节点的头
-        struct page *kernel_tail; // 保留节点的尾
-        struct page *fdt_head;    // fdt设备树保留节点的头
-        struct page *fdt_tail;    // fdt设备树保留节点的尾
-        struct page *free_head;   // 空闲节点的头
-        struct page *free_tail;   // 空闲节点的尾
-        uint64_t page_length;
+        struct page *kernel_head;  // 保留节点的头
+        struct page *kernel_tail;  // 保留节点的尾
+        struct page *fdt_head;     // fdt设备树保留节点的头
+        struct page *fdt_tail;     // fdt设备树保留节点的尾
+        struct page *free_head;    // 空闲节点的头
+        struct page *free_tail;    // 空闲节点的尾
+        phys_addr_t free_start_at; // 绝对，空闲起始
+        phys_addr_t free_end_at;   // 绝对，空闲结束
+        uint64_t page_length;      // 页表长度
 };
 
 struct bank
@@ -40,6 +42,10 @@ struct bank
 };
 
 // 内核现场
+// 不管是什么原因
+// 进程切换时必然发生在内核态中
+// switch函数将实现：保存当前的context要求的寄存器到对应的位置
+//                 同时加载新的寄存器到当前寄存器，同时保存到cpu结构体的context
 struct context
 {
         /*  0 */ uint64_t ra;

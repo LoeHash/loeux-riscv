@@ -15,6 +15,9 @@ struct cpu *get_cpu();
 uint64_t get_cpu_id();
 void init_cpu();
 void init_tasks();
-
+void scheduler() __attribute__((noreturn));
 struct task_struct *get_task();
+void yield();
+void sched();
+void swtch();
 #endif

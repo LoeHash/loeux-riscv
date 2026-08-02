@@ -151,6 +151,11 @@ void init_memory()
         // 记录第一个，没有被reserved的pg
         gmd.free_head = pg;
 
+        // 现在的free_start 就是绝对意义上的 第一个空闲页
+        gmd.free_start_at = gmd.free_head->paddr;
+        gmd.free_end_at = gmd.free_tail->paddr;
+        // 现在的free_tail 就是绝对意义上的 最后一个空闲页
+
         // 将空闲节点的prev断开
         gmd.free_head->prev = NULL;
         gmd.free_tail->next = NULL;
@@ -182,17 +187,18 @@ void init_memory()
         {
                 struct page *p = PHY_TO_PAGE(addr);
                 p->flags |= PG_FLAG_RESERVED;
+                printk("fdt checking: %0#x\n", p->paddr);
         }
 
-        printk("After disconnect:\n");
-        printk("Free head: paddr=%#x, flags=%#x, prev=%p, next=%p\n",
-               gmd.free_head->paddr, gmd.free_head->flags,
-               gmd.free_head->prev, gmd.free_head->next);
-        printk("Free tail: paddr=%#x, flags=%#x, prev=%p, next=%p\n",
-               gmd.free_tail->paddr, gmd.free_tail->flags,
-               gmd.free_tail->prev, gmd.free_tail->next);
-        test_page_alloc_free();
-        print_fdt_list();
+        // printk("After disconnect:\n");
+        // printk("Free head: paddr=%#x, flags=%#x, prev=%p, next=%p\n",
+        //        gmd.free_head->paddr, gmd.free_head->flags,
+        //        gmd.free_head->prev, gmd.free_head->next);
+        // printk("Free tail: paddr=%#x, flags=%#x, prev=%p, next=%p\n",
+        //        gmd.free_tail->paddr, gmd.free_tail->flags,
+        //        gmd.free_tail->prev, gmd.free_tail->next);
+        // test_page_alloc_free();
+        // print_fdt_list();
         printk("Successfully inited the memory! :)\n");
 
         memory_init_status = 1;
@@ -213,6 +219,8 @@ void *alloc_page()
         // 我们把双向节点的node当作单向节点！
         gmd.free_head = pg->next;
         pg->next = NULL;
+        memset((char *)pg->paddr, 0, PG_4K_SIZE);
+
         return (void *)pg->paddr;
 }
 

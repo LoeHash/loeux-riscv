@@ -3,7 +3,7 @@ CROSS_COMPILE ?= riscv64-linux-gnu-
 CC := $(CROSS_COMPILE)gcc
 LD := $(CROSS_COMPILE)ld
 OBJCOPY := $(CROSS_COMPILE)objcopy
-# 根目录 Makefile
+
 INCLUDES := -I. \
             -I./include \
             -I./include/kernel \
@@ -20,6 +20,7 @@ LDFLAGS := -T kernel/kernel.lds -nostdlib
 	
 OBJS := asm/kernel_trap_vec.o\
 	asm/trampoline.o\
+	asm/switch.o\
 	boot/entry.o\
 	boot/sec_entry.o\
 	kernel/start.o\
@@ -68,6 +69,7 @@ $(OBJS):
 # 手工保持依赖关系（暂时不自动生成 .d 文件）
 asm/kernel_trap_vec.o: asm/kernel_trap_vec.S
 asm/trampoline.o: asm/trampoline.S
+asm/switch.o: asm/switch.S
 boot/entry.o: boot/entry.S
 boot/sec_entry.o: boot/sec_entry.S
 

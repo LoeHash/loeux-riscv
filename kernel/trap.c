@@ -18,13 +18,18 @@ void kernel_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
 {
         intr_off();
 
+        if (r_sstatus_spp() != 1)
+        {
+                panic(PANIC_ERROR, "kernel_trap_hanlder: NOT FOMR KERNEL!\n");
+        }
+
         printk("Wrong with the cpu id: %d\n", get_cpu_id());
         printk("   scause 保存异常发生时的 PC: %0#lx\n", scause);
         printk("   sepc   保存异常发生时的 PC: %0#lx\n", sepc);
         printk("   stval  异常的附加信息:%0#lx\n", stval);
-
         while (1)
         {
+                /* code */
         }
 
         intr_on();

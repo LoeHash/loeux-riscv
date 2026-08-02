@@ -33,4 +33,5 @@ int kvminit(page_table pt, vir_addr_t va, phys_addr_t pa, uint64_t pages, uint32
 void init_kvmmap();
 void init_kvmhart();
 void kvm_do_mapping(page_table pgtable);
+void vmprint(page_table pgtb);
 #endif

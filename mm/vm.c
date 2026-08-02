@@ -34,6 +34,8 @@ void init_kvmmap()
         kernel_pt = (page_table)alloc_page();
         memset(kernel_pt, 0, 4096);
         kvm_do_mapping(kernel_pt);
+        // vmprint(kernel_pt);
+
         printk("Finished the kernel mapping. \n");
         printk("opening the MMU...\n");
         init_kvmhart();
@@ -59,9 +61,9 @@ void kvm_do_mapping(page_table pgtable)
 
         // 映射空闲内存
         kvminit(pgtable,
-                gmd.free_head->paddr,
-                gmd.free_head->paddr,
-                ((gmd.free_tail->paddr - gmd.fdt_head->paddr) / PG_4K_SIZE) + 1,
+                gmd.free_start_at,
+                gmd.free_start_at,
+                ((gmd.free_end_at - gmd.free_start_at) / PG_4K_SIZE) + 1,
                 PTE_V | PTE_R | PTE_W);
 
         // 映射 UART MMIO
@@ -150,14 +152,17 @@ int kvminit(page_table pt, vir_addr_t va, phys_addr_t pa, uint64_t pages, uint32
 ///     这个ppn是4kb对齐的
 pte *pte_walk(page_table pt, vir_addr_t va, int create)
 {
+
         if (va > MAX_VA)
         {
                 return NULL;
         }
+
         pte *p;
         for (int level = 2; level > 0; level--)
         {
                 p = &pt[PX(level, va)];
+
                 if (*p & PTE_V)
                 {
                         // 已分配的PTE
@@ -177,4 +182,51 @@ pte *pte_walk(page_table pt, vir_addr_t va, int create)
                 }
         }
         return &(pt[PX(0, va)]);
+}
+
+int is_valid(pte p)
+{
+        return (p & PTE_V) && (p & (PTE_R | PTE_W | PTE_X)) == 0;
+}
+
+void vmprint(page_table pgtb)
+{
+        printk("page table %p\n", pgtb);
+
+        for (int i = 0; i < 512; i++)
+        {
+                // 获取当前的叶子节点
+                pte pi = pgtb[i];
+                // 所有的非叶子节点都是v为1, 且 rwx为0
+                if (!is_valid(pi))
+                {
+                        continue;
+                }
+                page_table ichild = ((page_table)PTE2PA(pi));
+                printk(" ..%d: pte %p\t\tpa: %p\n", i, (uint64_t *)pi, (uint64_t *)ichild);
+
+                for (int j = 0; j < 512; j++)
+                {
+
+                        pte pj = ichild[j];
+                        if (!is_valid(pj))
+                        {
+                                continue;
+                        }
+
+                        page_table jchild = ((page_table)PTE2PA(pj));
+                        printk(" ..");
+                        printk(" ..%d: pte %p\tpa: %p\n", j, (uint64_t *)pj, (uint64_t *)jchild);
+
+                        for (int k = 0; k < 512; k++)
+                        {
+                                pte pk = jchild[k];
+                                if ((pk & PTE_V))
+                                {
+                                        printk(" .. ..");
+                                        printk(" ..%d: pte %p\tpa: %p\n", k, (uint64_t *)pk, (uint64_t *)PTE2PA(pk));
+                                }
+                        }
+                }
+        }
 }

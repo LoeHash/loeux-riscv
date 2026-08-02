@@ -29,15 +29,15 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         // fdt solve.
         init_fdt(ft_addr);
         init_memory();
-        // 构建内核页表
+        // 构建内核页表 同時啓動mmu
         init_kvmmap();
-        // 启动mmu！
-        init_kvmhart();
-        init_tasks();
         // 开启内核中断异常处理
         init_kernel_trap_vec();
+        // 初始化task
+        init_tasks();
 
         __atomic_store_n(&kernel_inited, 1, __ATOMIC_RELEASE);
+
         // 唤醒多核
         for (int i = 0; i < NCPUS; i++)
         {
@@ -50,20 +50,7 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
 
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
-        printk("main core: %0#x\n", r_stvec());
-
-        // 在 ecall 之前
-        printk("sstatus: %0#lx\n", r_sstatus());
-        printk("sie: %0#lx\n", r_sie());
-        printk("stvec: %0#lx\n", r_stvec());
-
-        asm volatile(".word 0x00000000");
-        printk("After ecall!\n"); // 如果看到这行，说明 ecall 返回了
-
-        while (1)
-        {
-                // we are in mmu!
-        }
+        scheduler();
 }
 
 void secondary_start(uint64_t hart_id, uint64_t data_addr)
@@ -78,8 +65,6 @@ void secondary_start(uint64_t hart_id, uint64_t data_addr)
         init_kernel_trap_vec();
 
         printk("secondary start! hart id: %d\n", hart_id);
-        while (1)
-        {
-                // we are in mmu!
-        }
+
+        scheduler();
 }
