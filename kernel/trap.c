@@ -5,6 +5,8 @@
 #include <proc.h>
 #include <panic.h>
 #include <riscv.h>
+#include <sbi.h>
+#include <timer.h>
 
 extern char kernel_trap_vec[];
 extern char _trampoline_jump[];
@@ -23,13 +25,25 @@ void kernel_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
                 panic(PANIC_ERROR, "kernel_trap_hanlder: NOT FOMR KERNEL!\n");
         }
 
-        printk("Wrong with the cpu id: %d\n", get_cpu_id());
-        printk("   scause 保存异常发生时的 PC: %0#lx\n", scause);
-        printk("   sepc   保存异常发生时的 PC: %0#lx\n", sepc);
-        printk("   stval  异常的附加信息:%0#lx\n", stval);
-        while (1)
+        if (scause == CLINT_INTERRUPT_SCAUSE)
         {
-                /* code */
+                // 时钟中断
+                // 在内核态里的时钟中断
+                printk("发生时钟中断! hart id: %d\n", get_cpu_id());
+                do_timer_tick();
+
+                sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
+        }
+        else
+        {
+                printk("Wrong with the cpu id: %d\n", get_cpu_id());
+                printk("   scause 保存异常发生时的 PC: %0#lx\n", scause);
+                printk("   sepc   保存异常发生时的 PC: %0#lx\n", sepc);
+                printk("   stval  异常的附加信息:%0#lx\n", stval);
+                while (1)
+                {
+                        /* code */
+                }
         }
 
         intr_on();

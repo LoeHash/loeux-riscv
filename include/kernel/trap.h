@@ -2,6 +2,9 @@
 #define _INC_TRAP
 #include <stdint.h>
 
+// 时钟中断scause
+#define CLINT_INTERRUPT_SCAUSE 0x8000000000000005
+
 // 异常处理需要使用到CSR寄存器
 //      CSR	        作用
 //      stvec   	陷阱向量基址，指向异常处理入口函数

@@ -8,6 +8,7 @@
 #include <vm.h>
 #include <proc.h>
 #include <trap.h>
+#include <timer.h>
 
 extern char _sec_entry64[];
 
@@ -31,6 +32,8 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         init_memory();
         // 构建内核页表 同時啓動mmu
         init_kvmmap();
+        // 初始化计时器
+        init_timer();
         // 开启内核中断异常处理
         init_kernel_trap_vec();
         // 初始化task
@@ -50,6 +53,10 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
 
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
+        // 开启时钟中断
+        enable_timer_interrupt();
+        // 设置一次定时器
+        sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
         scheduler();
 }
 
@@ -65,6 +72,11 @@ void secondary_start(uint64_t hart_id, uint64_t data_addr)
         init_kernel_trap_vec();
 
         printk("secondary start! hart id: %d\n", hart_id);
+
+        // 开启时钟中断
+        enable_timer_interrupt();
+        // 设置一次定时器
+        sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
 
         scheduler();
 }

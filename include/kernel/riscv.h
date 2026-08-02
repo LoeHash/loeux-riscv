@@ -169,4 +169,26 @@ w_scause(uint64_t x)
         asm volatile("csrw scause, %0" : : "r"(x));
 }
 
+static inline void
+enable_timer_interrupt(void)
+{
+        uint64_t x = r_sie();
+        x |= (1UL << 5);
+        w_sie(x);
+}
+
+static inline void
+disable_timer_interrupt(void)
+{
+        uint64_t x = r_sie();
+        x &= ~(1UL << 5);
+        w_sie(x);
+}
+
+static inline uint64_t rdtime(void)
+{
+        uint64_t val;
+        asm volatile("rdtime %0" : "=r"(val));
+        return val;
+}
 #endif

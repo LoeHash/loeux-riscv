@@ -1,6 +1,7 @@
 // sbi.h
 #ifndef __SBI_H__
 #define __SBI_H__
+#include <type.h>
 
 // 成功
 #define SBI_SUCCESS 0
@@ -158,6 +159,14 @@ static inline unsigned long sbi_ecall(
             : "memory");
 
         return a0;
+}
+
+static inline unsigned long sbi_set_timer(uint64_t abs_time)
+{
+        return sbi_ecall(SBI_EXT_TIME,
+                         SBI_EXT_TIME_SET_TIMER,
+                         abs_time,
+                         0, 0, 0, 0, 0);
 }
 
 static inline unsigned long sbi_hart_start(unsigned long hartid,

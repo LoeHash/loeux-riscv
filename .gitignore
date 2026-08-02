@@ -2,6 +2,8 @@
 *.bin
 *.elf
 *.dbi
+*.dtb
+*.dts
 .vscode
 .vscode/*
 .gdb_history

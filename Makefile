@@ -30,6 +30,7 @@ OBJS := asm/kernel_trap_vec.o\
 	kernel/spinlock.o\
 	kernel/proc.o\
 	kernel/trap.o\
+	kernel/timer.o\
 	mm/memory.o\
 	mm/vm.o\
 	
@@ -80,6 +81,7 @@ kernel/panic.o: kernel/panic.c
 kernel/spinlock.o: kernel/spinlock.c
 kernel/proc.o: kernel/proc.c
 kernel/trap.o: kernel/trap.c
+kernel/trap.o: kernel/timer.c
 mm/memory.o: mm/memory.c 
 mm/vm.o: mm/vm.c 
 
