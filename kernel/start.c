@@ -53,6 +53,8 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
 
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
+        // 开启全局中断
+        intr_on();
         // 开启时钟中断
         enable_timer_interrupt();
         // 设置一次定时器
@@ -60,6 +62,7 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         scheduler();
 }
 
+// 从核入口
 void secondary_start(uint64_t hart_id, uint64_t data_addr)
 {
         while (!__atomic_load_n(&kernel_inited, __ATOMIC_ACQUIRE))
@@ -74,6 +77,7 @@ void secondary_start(uint64_t hart_id, uint64_t data_addr)
         printk("secondary start! hart id: %d\n", hart_id);
 
         // 开启时钟中断
+        intr_on();
         enable_timer_interrupt();
         // 设置一次定时器
         sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));

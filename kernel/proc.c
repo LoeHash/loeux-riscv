@@ -71,10 +71,14 @@ void scheduler()
 {
         struct task_struct *ts;
         struct cpu *cpu = &cpus[r_tp()];
-        printk("enter the scheduler with hart id: %d\n", get_cpu_id());
+        uint8_t found = 0;
+        // printk("enter the scheduler with hart id: %d\n", get_cpu_id());
+        printk("sstatus = %#lx\n", r_sstatus());
+        printk("sie     = %#lx\n", r_sie());
         while (1)
         {
                 // 调度
+                printk("finding the runnable task... hart id: %d\n", get_cpu_id());
                 for (ts = tasks; ts < &tasks[NTASKS]; ts++)
                 {
                         if (ts->state != RUNNABLE)
@@ -92,7 +96,7 @@ void scheduler()
                                 release(&ts->lk);
                                 continue;
                         }
-
+                        found = 1;
                         // 首先切换状态
                         ts->state = RUNNING;
 
@@ -105,15 +109,20 @@ void scheduler()
                         ts->utf->kernel_hartid = get_cpu_id();
                         swtch(&(cpu->ctx), &ts->ctx);
 
+                        // swtch后，说明用户程序的时间片已经
+                        // 用完了，此时需要调度其他的
                         cpu->ts = 0;
 
                         release(&ts->lk);
                 }
 
-                // 来到这里，如果切换一圈后发现没有
-                // 进程要运行，就等一等
-                printk("no process available!\n end with hart id: %d\n", get_cpu_id());
-                asm volatile("wfi");
+                if (!found)
+                {
+                        // 来到这里，如果切换一圈后发现没有
+                        // 进程要运行，就等一等
+                        // printk("no process available! end with hart id: %d\n", get_cpu_id());
+                        asm volatile("wfi");
+                }
         }
 }
 
