@@ -3,7 +3,7 @@
 CROSS_COMPILE ?= riscv64-linux-gnu-
 CC := $(CROSS_COMPILE)gcc
 # 根目录 Makefile
-INCLUDES := -I. -I../include -I../include/mm -I../include/kernel
+INCLUDES := -I. -I../include -I../include/mm -I../include/kernel -I../include/drivers
 CFLAGS := -march=rv64gc -mabi=lp64 -nostdlib -ffreestanding $(INCLUDES)  -g
 
 SRC_C := $(wildcard *.c)

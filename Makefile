@@ -33,7 +33,7 @@ OBJS := asm/kernel_trap_vec.o\
 	kernel/timer.o\
 	mm/memory.o\
 	mm/vm.o\
-	
+	drivers/virtio_disk.o\
 
 
 TARGET := kernel.elf
@@ -52,22 +52,24 @@ kernel:
 	
 mm:
 	$(MAKE) -C mm	
+drivers:
+	$(MAKE) -C drivers
 asm:
 	$(MAKE) -C asm	
 
-# 链接
+
 $(TARGET): $(OBJS)
 	$(LD) $(LDFLAGS) -o $@ $^
 
-# 生成二进制
+
 $(TARGET_BIN): $(TARGET)
 	$(OBJCOPY) -O binary $< $@
 
-# 规则：进入子目录编译目标文件
+
 $(OBJS):
 	$(MAKE) -C $(dir $@)
 
-# 手工保持依赖关系（暂时不自动生成 .d 文件）
+
 asm/kernel_trap_vec.o: asm/kernel_trap_vec.S
 asm/trampoline.o: asm/trampoline.S
 asm/switch.o: asm/switch.S
@@ -84,14 +86,22 @@ kernel/trap.o: kernel/trap.c
 kernel/trap.o: kernel/timer.c
 mm/memory.o: mm/memory.c 
 mm/vm.o: mm/vm.c 
+drivers/virtio_disk.o: drivers/virtio_disk.c 
 
 clean:
 	$(MAKE) -C boot clean
 	$(MAKE) -C kernel clean
+	$(MAKE) -C drivers clean
 	$(MAKE) -C mm clean
 	rm -f $(TARGET) $(TARGET_BIN)
 qemu:
-	make -j16 && qemu-system-riscv64 -machine virt -smp 4 -m 2048M -nographic -kernel /work/os/loeux-riscv/kernel.elf
-
+	make -j16 && qemu-system-riscv64 \
+			-machine virt \
+			-smp 4 \
+			-m 2048M \
+			-nographic \
+			-kernel ./kernel.elf \
+			-drive file=./loeux.img,format=raw,if=none,id=drive0 \
+			-device virtio-blk-device,drive=drive0
 gdb:
-	qemu-system-riscv64 -machine virt -smp 4 -m 2048M -nographic -kernel /work/os/loeux-riscv/kernel.elf -s -S
+	qemu-system-riscv64 -machine virt -smp 4 -m 2048M -nographic -kernel ./kernel.elf -s -S

@@ -4,6 +4,7 @@
 *.dbi
 *.dtb
 *.dts
+*.img
 .vscode
 .vscode/*
 .gdb_history

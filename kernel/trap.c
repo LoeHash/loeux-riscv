@@ -31,8 +31,17 @@ void kernel_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
                 // 在内核态里的时钟中断
                 printk("发生时钟中断! hart id: %d\n", get_cpu_id());
                 do_timer_tick();
-
                 sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
+
+                // 判断是否应该让出cpu
+                if (get_task() != 0)
+                {
+                        // 进入这里， 说明是用户态
+                        // 在执行syscall后，运行了一段时间的系统调用的
+                        // 代码后，进入的trap，这里直接让出即刻
+                        // 我们还会执行原来的代码
+                        yield();
+                }
         }
         else
         {
@@ -45,7 +54,8 @@ void kernel_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
                         /* code */
                 }
         }
-
+        w_sepc(sepc);
+        w_sstatus(r_sstatus());
         intr_on();
 }
 

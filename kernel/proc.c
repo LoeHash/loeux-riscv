@@ -160,7 +160,7 @@ void init_tasks()
                             TASK_KERNEL_STACK(ts - tasks),
                             (phys_addr_t)kstack,
                             1,
-                            PTE_V | PTE_R | PTE_W) == 0)
+                            PTE_V | PTE_R | PTE_W, 0) == 0)
                 {
                         panic(PANIC_ERROR, "init_tasks:kvminit() error!\n");
                 }

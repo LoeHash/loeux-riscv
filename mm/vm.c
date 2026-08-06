@@ -33,9 +33,21 @@ void init_kvmmap()
 
         kernel_pt = (page_table)alloc_page();
         memset(kernel_pt, 0, 4096);
-        kvm_do_mapping(kernel_pt);
-        // vmprint(kernel_pt);
 
+        printk("before mapping: %0#lx\n", (uint64_t)kernel_pt);
+        kvm_do_mapping(kernel_pt);
+        printk("after mapping: %0#lx\n", (uint64_t)kernel_pt);
+        // vmprint(kernel_pt);
+        pte *ptep = pte_walk(kernel_pt, MMIO_VIRTIO_OFFEST, 0);
+        if (ptep == NULL)
+        {
+                printk("PTE WALK FAILED\n");
+        }
+        else
+        {
+                printk("PTE = %lx\n", *ptep);
+                printk("PA = %lx\n", PTE2PA(*ptep));
+        }
         printk("Finished the kernel mapping. \n");
         printk("opening the MMU...\n");
         init_kvmhart();
@@ -50,56 +62,91 @@ void kvm_do_mapping(page_table pgtable)
                 KERNEL_START,
                 KERNEL_START,
                 ((gmd.kernel_tail->paddr - KERNEL_START) / PG_4K_SIZE) + 1,
-                PTE_V | PTE_R | PTE_W | PTE_X);
+                PTE_V | PTE_R | PTE_W | PTE_X, 0);
 
         // 2. 映射设备树 (FDT)
         kvminit(pgtable,
                 gmd.fdt_head->paddr,
                 gmd.fdt_head->paddr,
                 ((gmd.fdt_tail->paddr - gmd.fdt_head->paddr) / PG_4K_SIZE) + 1,
-                PTE_V | PTE_R);
+                PTE_V | PTE_R, 0);
 
         // 映射空闲内存
         kvminit(pgtable,
                 gmd.free_start_at,
                 gmd.free_start_at,
                 ((gmd.free_end_at - gmd.free_start_at) / PG_4K_SIZE) + 1,
-                PTE_V | PTE_R | PTE_W);
+                PTE_V | PTE_R | PTE_W, 0);
 
         // 映射 UART MMIO
         kvminit(pgtable,
                 MMIO_UART_OFFEST,
                 UART_BASE,
                 UART_PAGE_SIZE,
-                PTE_V | PTE_R | PTE_W);
+                PTE_V | PTE_R | PTE_W, 1);
 
         // 映射 VirtIO MMIO
         kvminit(pgtable,
                 MMIO_VIRTIO_OFFEST,
                 VIRTIO_MMIO_BASE,
                 VIRTIO_PAGE_SIZE,
-                PTE_V | PTE_R | PTE_W);
+                PTE_V | PTE_R | PTE_W, 1);
 
         // 映射 CLINT MMIO
         kvminit(pgtable,
                 MMIO_CLINT_OFFEST,
                 CLINT_BASE,
                 CLINT_PAGE_SIZE,
-                PTE_V | PTE_R | PTE_W);
+                PTE_V | PTE_R | PTE_W, 1);
 
         // 映射 PLIC MMIO
         kvminit(pgtable,
                 MMIO_PLIC_OFFEST,
                 PLIC_BASE,
                 PLIC_PAGE_SIZE,
-                PTE_V | PTE_R | PTE_W | PTE_X);
+                PTE_V | PTE_R | PTE_W | PTE_X, 1);
 
         // 映射 trampline
         kvminit(pgtable,
                 TRAMPOLINE,
                 (uint64_t)_trampoline_jump,
-                PLIC_PAGE_SIZE,
-                PTE_V | PTE_R | PTE_U | PTE_X);
+                1,
+                PTE_V | PTE_R | PTE_U | PTE_X, 1);
+
+        // // 映射 UART MMIO
+        // kvminit(pgtable,
+        //         MMIO_UART_OFFEST,
+        //         UART_BASE,
+        //         UART_PAGE_SIZE,
+        //         PTE_V | PTE_R | PTE_W, 0);
+
+        // // 映射 VirtIO MMIO
+        // kvminit(pgtable,
+        //         MMIO_VIRTIO_OFFEST,
+        //         VIRTIO_MMIO_BASE,
+        //         VIRTIO_PAGE_SIZE,
+        //         PTE_V | PTE_R | PTE_W, 0);
+
+        // // 映射 CLINT MMIO
+        // kvminit(pgtable,
+        //         MMIO_CLINT_OFFEST,
+        //         CLINT_BASE,
+        //         CLINT_PAGE_SIZE,
+        //         PTE_V | PTE_R | PTE_W, 0);
+
+        // // 映射 PLIC MMIO
+        // kvminit(pgtable,
+        //         MMIO_PLIC_OFFEST,
+        //         PLIC_BASE,
+        //         PLIC_PAGE_SIZE,
+        //         PTE_V | PTE_R | PTE_W | PTE_X, 0);
+
+        // // 映射 trampline
+        // kvminit(pgtable,
+        //         TRAMPOLINE,
+        //         (uint64_t)_trampoline_jump,
+        //         1,
+        //         PTE_V | PTE_R | PTE_U | PTE_X, 0);
 }
 
 /// @brief 将 va起始和pa起始构建对应的页表
@@ -108,7 +155,7 @@ void kvm_do_mapping(page_table pgtable)
 /// @param pa           物理地址起始
 /// @param pages        映射的页数
 /// @return count 映射的页数 0 错误
-int kvminit(page_table pt, vir_addr_t va, phys_addr_t pa, uint64_t pages, uint32_t flags)
+int kvminit(page_table pt, vir_addr_t va, phys_addr_t pa, uint64_t pages, uint32_t flags, int debug)
 {
         // 所有地址，全部向下4kb对其
         vir_addr_t vad = PGROUNDDOWN(va);
@@ -118,9 +165,12 @@ int kvminit(page_table pt, vir_addr_t va, phys_addr_t pa, uint64_t pages, uint32
 
         while (count < pages)
         {
-                // // 打印参数
-                // printk("[kvminit] va = %0#lx, pa = %#x, pages = %lu, flags = %#x\n",
-                //        vad, pad, pages, flags);
+                if (debug == 1)
+                {
+                        // // 打印参数
+                        // printk("[kvminit] va = %0#lx, pa = %#x, pages = %lu, flags = %#x\n",
+                        //        vad, pad, pages, flags);
+                }
                 // pte_walk
                 // 如果遇到没有分配的就会创建
                 p = pte_walk(pt, vad, 1);
@@ -133,6 +183,12 @@ int kvminit(page_table pt, vir_addr_t va, phys_addr_t pa, uint64_t pages, uint32
                 // 我们需要将这个物理地址写入
                 // 同时放置flags
                 *p = PA2PTE(pad) | flags;
+
+                if (debug == 1)
+                {
+                        printk("va: %0#lx, pte2pa: %0#lx\n", vad, PTE2PA(*p));
+                }
+
                 // 而后，vad和pad全部线性增长4kb
                 vad += PG_4K_SIZE;
                 pad += PG_4K_SIZE;
@@ -224,7 +280,7 @@ void vmprint(page_table pgtb)
                                 if ((pk & PTE_V))
                                 {
                                         printk(" .. ..");
-                                        printk(" ..%d: pte %p\tpa: %p\n", k, (uint64_t *)pk, (uint64_t *)PTE2PA(pk));
+                                        printk(" ..%d: va %p\tpa: %p\n", k, (uint64_t *)pk, (uint64_t *)PTE2PA(pk));
                                 }
                         }
                 }

@@ -29,7 +29,7 @@ extern uint8_t vm_init_status;
 extern spinlock_t vm_init_lock;
 
 pte *pte_walk(page_table pt, vir_addr_t va, int create);
-int kvminit(page_table pt, vir_addr_t va, phys_addr_t pa, uint64_t pages, uint32_t flags);
+int kvminit(page_table pt, vir_addr_t va, phys_addr_t pa, uint64_t pages, uint32_t flags, int debug);
 void init_kvmmap();
 void init_kvmhart();
 void kvm_do_mapping(page_table pgtable);

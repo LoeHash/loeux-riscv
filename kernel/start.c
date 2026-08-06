@@ -9,6 +9,7 @@
 #include <proc.h>
 #include <trap.h>
 #include <timer.h>
+#include <virtio.h>
 
 extern char _sec_entry64[];
 
@@ -38,6 +39,8 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         init_kernel_trap_vec();
         // 初始化task
         init_tasks();
+        // 初始化disk
+        init_virtio_disk();
 
         __atomic_store_n(&kernel_inited, 1, __ATOMIC_RELEASE);
 
