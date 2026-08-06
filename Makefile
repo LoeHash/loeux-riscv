@@ -99,9 +99,13 @@ qemu:
 			-machine virt \
 			-smp 4 \
 			-m 2048M \
-			-nographic \
 			-kernel ./kernel.elf \
-			-drive file=./loeux.img,format=raw,if=none,id=drive0 \
-			-device virtio-blk-device,drive=drive0
+			-nographic \
+			-global virtio-mmio.force-legacy=false\
+			-drive file=./loeux.img,format=raw,if=none,id=loeux \
+			-device virtio-blk-device,drive=loeux,bus=virtio-mmio-bus.0
+
 gdb:
 	qemu-system-riscv64 -machine virt -smp 4 -m 2048M -nographic -kernel ./kernel.elf -s -S
+
+
