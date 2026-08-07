@@ -4,6 +4,7 @@
 *.dbi
 *.dtb
 *.dts
+test/*
 *.img
 .vscode
 .vscode/*

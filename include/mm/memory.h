@@ -6,6 +6,7 @@
 #include <memlayout.h>
 #include <type.h>
 #define _INC_MEMORY_
+#define MEMORY_FENCE __atomic_thread_fence(__ATOMIC_SEQ_CST)
 #define NR_BANKS_SIZE 16
 #define PG_4K_SHIFT 12
 #define PG_4K_SIZE (1 << 12)

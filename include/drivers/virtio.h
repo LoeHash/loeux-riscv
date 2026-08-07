@@ -22,16 +22,40 @@
 #define VIRTIO_MMIO_QUEUE_USED_HIGH_OFFSET 0x0A4
 #define VIRTIO_MMIO_STATUS_OFFSET 0x070
 
+#define VIRTQ_DESC_F_NEXT 1 << 0
+
 // VirtIO 状态
 #define VIRTIO_STATUS_ACKNOWLEDGE 1
 #define VIRTIO_STATUS_DRIVER 2
 #define VIRTIO_STATUS_DRIVER_OK 4
 #define VIRTIO_STATUS_FEATURES_OK 8
-
 #define VIRTIO_MMIO_MAGIC 0x74726976
-
 #define GET_VIR_BASE(level) (uint64_t)((MMIO_VIRTIO_OFFEST + (4096 * level)))
 #define R_LEVEL(ofs, level) ((volatile uint32_t *)(GET_VIR_BASE(level) + ofs))
+
+#define QUEUE_SIZE 56
+#define END_OF_NEXT_FLAG 0xffff
+
+// 状态码定义
+#define VIRTIO_BLK_S_OK 0     // 成功
+#define VIRTIO_BLK_S_IOERR 1  // I/O错误
+#define VIRTIO_BLK_S_UNSUPP 2 // 不支持的操作
+
+// type 操作
+#define VIRTIO_BLK_T_IN 0            // 读操作 - 从设备读取数据到缓冲区
+#define VIRTIO_BLK_T_OUT 1           // 写操作 - 将缓冲区数据写入设备
+#define VIRTIO_BLK_T_FLUSH 4         // 刷新操作 - 将所有缓存数据写入持久存储
+#define VIRTIO_BLK_T_GET_ID 8        // 获取设备ID - 读取设备标识字符串 (通常20字节)
+#define VIRTIO_BLK_T_DISCARD 11      // 丢弃操作 - 通知设备指定范围的数据已无效 (类似TRIM)
+#define VIRTIO_BLK_T_WRITE_ZEROES 13 // 写零操作 - 向指定范围写入全零数据
+#define VIRTIO_BLK_T_SECURE_ERASE 14 // 安全擦除 - 密码擦除
+
+struct virtio_blk_req
+{
+        uint32_t type;
+        uint32_t ioprio; // 保留
+        uint64_t sector;
+};
 
 struct virtio_disk
 {
@@ -44,8 +68,66 @@ struct virtio_disk
         uint64_t base_addr;
 };
 
+// 与virtio-blk设备沟通需要三个数据结构来维护
+struct virtq_desc
+{
+        uint64_t addr; // 内存物理地址
+        uint32_t len;
+        uint16_t flags; // bit0: NEXT, bit1: WRITE
+        uint16_t next;
+};
+
+struct virtq_avail
+{
+        uint16_t flags;
+        uint16_t idx;              // 驱动已投递的请求数
+        uint16_t ring[QUEUE_SIZE]; // 描述符索引
+};
+
+struct virtq_used
+{
+        uint16_t flags;
+        uint16_t idx; // 设备已完成的请求数
+        struct
+        {
+                uint32_t id;
+                uint32_t len;
+        } ring[QUEUE_SIZE];
+};
+
+struct virtqueue
+{
+        // 驱动用
+        struct virtq_desc *desc_start;
+        struct virtq_avail *avail_start;
+        struct virtq_used *used_start;
+
+        // 设备用 phy
+        phys_addr_t desc_phy;
+        phys_addr_t avail_phy;
+        phys_addr_t used_phy;
+
+        // 空闲位图
+        // 0 free, 1 used
+        volatile uint64_t free_desc_bit_map;
+        spinlock_t fdbm_lk;
+
+        // 队列大小
+        int queue_size;
+};
+
 // we reco
 extern struct virtio_disk usable_disks[8];
-extern spinlock_t vd_lock;
+extern spinlock_t vd_alloc_lock;
+extern spinlock_t vd_free_lock;
+extern volatile uint64_t usable_device_count;
+extern struct virtqueue vq;
 void init_virtio_disk();
+int alloc_desc(int n);
+void free_desc(struct virtq_desc *chain_head);
+uint32_t virtio_disk_rw_sync(
+    struct virtio_blk_req *req,
+    void *buf,
+    uint32_t bytes,
+    uint8_t *status);
 #endif
