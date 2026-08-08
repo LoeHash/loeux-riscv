@@ -29,7 +29,7 @@ void kernel_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
         {
                 // 时钟中断
                 // 在内核态里的时钟中断
-                printk("发生时钟中断! hart id: %d\n", get_cpu_id());
+                // printk("发生时钟中断! hart id: %d\n", get_cpu_id());
                 do_timer_tick();
                 sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
 

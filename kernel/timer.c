@@ -28,7 +28,7 @@ void do_timer_tick()
         acquire(&timer_lock);
         sys_timer_tick++;
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
-        printk("the time tick: %lu\n", sys_timer_tick);
+        // printk("the time tick: %lu\n", sys_timer_tick);
         release(&timer_lock);
 }
 

@@ -20,6 +20,31 @@ static inline void *memset(void *ptr, int value, size_t num)
         return ptr;
 }
 
+static inline int memcmp(const void *s1, const void *s2, size_t n)
+{
+        int ret;
+        __asm__ volatile(
+            "beqz   %2, 2f\n"
+            "1:\n"
+            "lbu    t0, 0(%0)\n"
+            "lbu    t1, 0(%1)\n"
+            "bne    t0, t1, 3f\n"
+            "addi   %0, %0, 1\n"
+            "addi   %1, %1, 1\n"
+            "addi   %2, %2, -1\n"
+            "bnez   %2, 1b\n"
+            "2:\n"
+            "li     %0, 0\n"
+            "j      4f\n"
+            "3:\n"
+            "sub    %0, t0, t1\n"
+            "4:\n"
+            : "+r"(s1), "+r"(s2), "+r"(n)
+            :
+            : "t0", "t1", "memory");
+        return ret;
+}
+
 /**
  * memcpy - 拷贝内存区域（不允许重叠）(RISC-V)
  * @dest:  目标地址

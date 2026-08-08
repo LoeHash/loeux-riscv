@@ -14,6 +14,7 @@
 #define VIRTIO_MMIO_QUEUE_NUM_MAX_OFFSET 0x034
 #define VIRTIO_MMIO_QUEUE_NUM_OFFSET 0x038
 #define VIRTIO_MMIO_QUEUE_READY_OFFSET 0x044
+#define VIRTIO_MMIO_QUEUE_NOTIFY_OFFSET 0x050
 #define VIRTIO_MMIO_QUEUE_DESC_LOW_OFFSET 0x080
 #define VIRTIO_MMIO_QUEUE_DESC_HIGH_OFFSET 0x084
 #define VIRTIO_MMIO_QUEUE_AVAIL_LOW_OFFSET 0x090
@@ -22,7 +23,13 @@
 #define VIRTIO_MMIO_QUEUE_USED_HIGH_OFFSET 0x0A4
 #define VIRTIO_MMIO_STATUS_OFFSET 0x070
 
-#define VIRTQ_DESC_F_NEXT 1 << 0
+// disk
+#define DISK_SECTOR_SIZE 512
+
+// desc flags
+#define VRING_DESC_F_NEXT (1 << 0)     // 有后续描述符
+#define VRING_DESC_F_WRITE (1 << 1)    // 设备可写（否则设备只读）
+#define VRING_DESC_F_INDIRECT (1 << 2) // 间接描述符表
 
 // VirtIO 状态
 #define VIRTIO_STATUS_ACKNOWLEDGE 1
@@ -49,6 +56,9 @@
 #define VIRTIO_BLK_T_DISCARD 11      // 丢弃操作 - 通知设备指定范围的数据已无效 (类似TRIM)
 #define VIRTIO_BLK_T_WRITE_ZEROES 13 // 写零操作 - 向指定范围写入全零数据
 #define VIRTIO_BLK_T_SECURE_ERASE 14 // 安全擦除 - 密码擦除
+
+#define GET_LOW_32(x) ((uint32_t)((x) & 0xFFFFFFFFULL))
+#define GET_HIGH_32(x) ((uint32_t)((x) >> 32))
 
 struct virtio_blk_req
 {
@@ -126,8 +136,16 @@ void init_virtio_disk();
 int alloc_desc(int n);
 void free_desc(struct virtq_desc *chain_head);
 uint32_t virtio_disk_rw_sync(
+    struct virtio_disk *selected_desk,
     struct virtio_blk_req *req,
     void *buf,
     uint32_t bytes,
     uint8_t *status);
+
+void b8_write(uint64_t addr, uint8_t data);
+void b16_write(uint64_t addr, uint16_t data);
+void b64_write(uint64_t addr, uint64_t data);
+void b32_write(uint64_t addr, uint32_t data);
+void test_virtio_disk_rw_sync();
+void test_write_verify();
 #endif

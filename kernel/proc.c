@@ -72,13 +72,9 @@ void scheduler()
         struct task_struct *ts;
         struct cpu *cpu = &cpus[r_tp()];
         uint8_t found = 0;
-        // printk("enter the scheduler with hart id: %d\n", get_cpu_id());
-        printk("sstatus = %#lx\n", r_sstatus());
-        printk("sie     = %#lx\n", r_sie());
         while (1)
         {
                 // 调度
-                printk("finding the runnable task... hart id: %d\n", get_cpu_id());
                 for (ts = tasks; ts < &tasks[NTASKS]; ts++)
                 {
                         if (ts->state != RUNNABLE)
