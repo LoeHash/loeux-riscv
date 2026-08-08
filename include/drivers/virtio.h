@@ -1,7 +1,6 @@
 #ifndef _INC_VIRTIO_
 #define _INC_VIRTIO_
 #include "type.h"
-
 #define VIRTIO_MMIO_MAGIC_VALUE_OFFSET 0x000 // 0x74726976
 #define VIRTIO_MMIO_VERSION_OFFSET 0x004     // 应该为 2
 #define VIRTIO_MMIO_DEVICE_ID_OFFSET 0x008   // 2 = 块设备
@@ -22,9 +21,16 @@
 #define VIRTIO_MMIO_QUEUE_USED_LOW_OFFSET 0x0A0
 #define VIRTIO_MMIO_QUEUE_USED_HIGH_OFFSET 0x0A4
 #define VIRTIO_MMIO_STATUS_OFFSET 0x070
+#define VIRTIO_MMIO_CONFIG_CAPACITY_LOW_OFFSET 0x100
+#define VIRTIO_MMIO_CONFIG_CAPACITY_HIGH_OFFSET 0x104
+#define VIRTIO_MMIO_CONFIG_SIZE_MAX_OFFSET 0x108
+#define VIRTIO_MMIO_CONFIG_SEG_MAX_OFFSET 0x10C
 
-// disk
+// disk things
 #define DISK_SECTOR_SIZE 512
+#define SECTOR_SIZE_TO_KB(capacity) ((capacity) * DISK_SECTOR_SIZE / 1024)
+#define SECTOR_SIZE_TO_MB(capacity) ((capacity) * DISK_SECTOR_SIZE / 1024 / 1024)
+#define SECTOR_SIZE_TO_GB(capacity) ((capacity) * DISK_SECTOR_SIZE / 1024 / 1024 / 1024)
 
 // desc flags
 #define VRING_DESC_F_NEXT (1 << 0)     // 有后续描述符
@@ -67,6 +73,13 @@ struct virtio_blk_req
         uint64_t sector;
 };
 
+struct virtio_blk_config
+{
+        uint64_t capacity;
+        uint32_t size_max;
+        uint32_t seg_max;
+};
+
 struct virtio_disk
 {
         uint32_t magic;
@@ -76,6 +89,7 @@ struct virtio_disk
         uint64_t device_features;
         uint64_t driver_features;
         uint64_t base_addr;
+        struct virtio_blk_config blk_config;
 };
 
 // 与virtio-blk设备沟通需要三个数据结构来维护
@@ -148,4 +162,5 @@ void b64_write(uint64_t addr, uint64_t data);
 void b32_write(uint64_t addr, uint32_t data);
 void test_virtio_disk_rw_sync();
 void test_write_verify();
+void dump_sector_n(struct virtio_disk *disk, int n);
 #endif

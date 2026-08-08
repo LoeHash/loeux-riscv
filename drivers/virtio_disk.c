@@ -199,6 +199,13 @@ static void detect_disk()
 
                         usable_disks[i].driver_features = 0;
                 }
+
+                // 读取config
+                usable_disks[i].blk_config.capacity =
+                    (uint64_t)(*R_LEVEL(VIRTIO_MMIO_CONFIG_CAPACITY_HIGH_OFFSET, i)) << 32 |
+                    *R_LEVEL(VIRTIO_MMIO_CONFIG_CAPACITY_LOW_OFFSET, i);
+                usable_disks[i].blk_config.seg_max = *R_LEVEL(VIRTIO_MMIO_CONFIG_SEG_MAX_OFFSET, i);
+                usable_disks[i].blk_config.size_max = *R_LEVEL(VIRTIO_MMIO_CONFIG_SIZE_MAX_OFFSET, i);
         }
 }
 
@@ -373,7 +380,8 @@ void init_virtio_disk()
                           VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_FEATURES_OK | VIRTIO_STATUS_DRIVER_OK);
 
                 printk("Disk %d: magic=%#x, version=%d, device_id=%d, vendor=%#x, "
-                       "features=%#lx,driver_features=%#lx base=%#lx\n",
+                       "features=%#lx, driver_features=%#lx\n\t base=%#lx, "
+                       "capacity=%lu (%lu KB, %lu MB, %lu GB), size_max=%u, seg_max=%u\n",
                        i,
                        usable_disks[i].magic,
                        usable_disks[i].version,
@@ -381,7 +389,13 @@ void init_virtio_disk()
                        usable_disks[i].vendor,
                        usable_disks[i].device_features,
                        usable_disks[i].driver_features,
-                       usable_disks[i].base_addr);
+                       usable_disks[i].base_addr,
+                       usable_disks[i].blk_config.capacity,
+                       SECTOR_SIZE_TO_KB(usable_disks[i].blk_config.capacity),
+                       SECTOR_SIZE_TO_MB(usable_disks[i].blk_config.capacity),
+                       SECTOR_SIZE_TO_GB(usable_disks[i].blk_config.capacity),
+                       usable_disks[i].blk_config.size_max,
+                       usable_disks[i].blk_config.seg_max);
         }
 }
 
@@ -420,10 +434,11 @@ void test_write_verify()
         uint8_t status;
         uint8_t write_buf[512], read_buf[512] = {0};
 
-        // 构造数据
-        for (int i = 0; i < 512; i++)
-                write_buf[i] = i & 0xFF;
-        strcpy((char *)write_buf, "Hello VirtIO!");
+        // // 构造数据
+        // for (int i = 0; i < 512; i++)
+        //         write_buf[i] = i & 0xFF;
+        // strcpy((char *)write_buf, "Hello VirtIO!");
+        memset(write_buf, 0x14, 512);
 
         // 写入
         req.type = VIRTIO_BLK_T_OUT;
@@ -630,4 +645,35 @@ void test_virtio_disk_rw_sync()
         printk("  ✓ %d/10 reads succeeded\n", success_count);
 
         printk("\n========== VirtIO Disk Test Complete ==========\n");
+}
+
+void dump_sector_n(struct virtio_disk *disk, int n)
+{
+        struct virtio_blk_req req;
+        uint8_t status;
+        uint8_t buf[512] = {0};
+        int ret;
+
+        req.type = VIRTIO_BLK_T_IN;
+        req.sector = n;
+        req.ioprio = 0;
+
+        ret = virtio_disk_rw_sync(disk, &req, buf, 512, &status);
+
+        if (ret < 0)
+        {
+                printk("Read sector 0 failed: status=%d\n", status);
+                return;
+        }
+
+        printk("=== Sector %d Dump (512 bytes) ===\n", n);
+        for (int i = 0; i < 512; i++)
+        {
+                if (i % 16 == 0)
+                {
+                        printk("\n%04x: ", i);
+                }
+                printk("%02x ", buf[i]);
+        }
+        printk("\n=== End of Dump ===\n");
 }

@@ -8,10 +8,14 @@ INCLUDES := -I. \
             -I./include \
             -I./include/kernel \
             -I./include/mm \
+            -I./include/drivers \
+            -I./include/fs \
             -I./kernel \
             -I./mm \
             -I./boot \
-            -I./asm
+            -I./asm \
+	    -I./fs \
+	    -I./drivers\
 ARCH := rv64gc
 ABI := lp64
 CFLAGS := -g -march=$(ARCH) -mabi=$(ABI) -nostdlib -ffreestanding $(INCLUDES) -Wall -Werro
@@ -34,6 +38,7 @@ OBJS := asm/kernel_trap_vec.o\
 	mm/memory.o\
 	mm/vm.o\
 	drivers/virtio_disk.o\
+	fs/fat12.o\
 
 
 TARGET := kernel.elf
@@ -54,6 +59,8 @@ mm:
 	$(MAKE) -C mm	
 drivers:
 	$(MAKE) -C drivers
+fs:
+	$(MAKE) -C fs
 asm:
 	$(MAKE) -C asm	
 
@@ -87,11 +94,14 @@ kernel/trap.o: kernel/timer.c
 mm/memory.o: mm/memory.c 
 mm/vm.o: mm/vm.c 
 drivers/virtio_disk.o: drivers/virtio_disk.c 
+fs/fat12.o: fs/fat12.c 
+
 
 clean:
 	$(MAKE) -C boot clean
 	$(MAKE) -C kernel clean
 	$(MAKE) -C drivers clean
+	$(MAKE) -C fs clean
 	$(MAKE) -C mm clean
 	rm -f $(TARGET) $(TARGET_BIN)
 qemu:

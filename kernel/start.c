@@ -64,8 +64,9 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
 
         // 测试读写
-        test_virtio_disk_rw_sync();
-        test_write_verify();
+        // test_virtio_disk_rw_sync();
+        // test_write_verify();
+        dump_sector_n(&usable_disks[0], 0);
         scheduler();
 }
 
