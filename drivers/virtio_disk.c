@@ -72,7 +72,7 @@ int virtio_blk_write(void *dev, uint64_t sector, const void *buf)
         req.sector = sector;
         req.ioprio = 0;
 
-        ret = virtio_disk_rw_sync(vblk, &req, buf, 512, &status);
+        ret = virtio_disk_rw_sync(vblk, &req, (void *)buf, 512, &status);
 
         if (ret < 0)
         {

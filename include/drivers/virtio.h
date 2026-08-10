@@ -168,5 +168,5 @@ void dump_sector_n(struct virtio_blk_disk *disk, int n);
 
 int virtio_blk_read(void *dev, uint64_t sector, void *buf);
 int virtio_blk_write(void *dev, uint64_t sector, const void *buf);
-
+uint64_t virtio_blk_sector_count(void *dev);
 #endif

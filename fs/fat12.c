@@ -1,8 +1,9 @@
 #include <fat12.h>
 #include <memory.h>
 #include <block_device.h>
+#include <vfs.h>
 
-struct file_operation fat12_ops;
+struct file_operation fat12_ops = {0};
 
 void *fat12_mount(struct block_device *bdev)
 {

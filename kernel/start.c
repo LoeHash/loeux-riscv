@@ -3,6 +3,7 @@
 #include <printk.h>
 #include <spinlock.h>
 #include <riscv.h>
+#include <vfs.h>
 #include <memory.h>
 #include <memlayout.h>
 #include <vm.h>
@@ -41,6 +42,8 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         init_tasks();
         // 初始化disk
         init_virtio_disk();
+        // 初始化虚拟文件系统
+        init_vfs();
 
         __atomic_store_n(&kernel_inited, 1, __ATOMIC_RELEASE);
 

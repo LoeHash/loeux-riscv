@@ -39,6 +39,7 @@ OBJS := asm/kernel_trap_vec.o\
 	mm/vm.o\
 	drivers/virtio_disk.o\
 	fs/fat12.o\
+	fs/vfs.o\
 
 
 TARGET := kernel.elf
@@ -95,6 +96,7 @@ mm/memory.o: mm/memory.c
 mm/vm.o: mm/vm.c 
 drivers/virtio_disk.o: drivers/virtio_disk.c 
 fs/fat12.o: fs/fat12.c 
+fs/vfs.o: fs/vfs.c 
 
 
 clean:

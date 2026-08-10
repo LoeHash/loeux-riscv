@@ -19,21 +19,10 @@
 #define ROOT_FD 0
 
 #define MAX_MOUNT_NUM 16
+#define MAX_FD_NUM 256
 
 typedef int fd_t;
 typedef uint64_t fs_off_t;
-
-struct file_operation
-{
-
-        int (*fs_open)(fd_t *out_fd, const char *name, int flags);
-        int (*fs_read)(fd_t fd, fs_off_t offset, uint64_t len, void *buf, uint64_t *out_len);
-        int (*fs_write)(fd_t fd, fs_off_t offset, uint64_t len, const void *buf, uint64_t *out_len);
-        int (*fs_close)(fd_t fd);
-        int (*fs_mkdir)(fd_t parent_fd, const char *name, int mode);
-        int (*fs_lookup)(fd_t parent_fd, const char *name, fd_t *out_fd);
-        void *(*fs_mount)(struct block_device *bdev);
-};
 
 struct mount_entry
 {
@@ -49,6 +38,28 @@ struct file
         uint64_t pos;            // 文件位置信息（FAT12 就是簇号，EXT4 就是 inode 号）
         uint64_t offset;         // 当前读写位置
         int flags;               // 打开时的标志
+        void *private;
+};
+
+struct vfs_node
+{
+        struct mount_entry *mount;
+        void *private;
+        uint64_t size;
+        uint8_t is_dir;
+};
+
+struct file_operation
+{
+        void *(*fs_mount)(struct block_device *bdev);
+        int (*fs_lookup)(void *fs_priv, const char *rel_path, void **out_node);
+        void (*fs_free_node)(void *out_node);
+        int (*fs_open)(void *node, struct file *file, int flags);
+        int (*fs_read)(struct file *file, void *buf, uint64_t count, uint64_t *out_len);
+        int (*fs_write)(struct file *file, const void *buf, uint64_t count, uint64_t *out_len);
+        int (*fs_close)(struct file *file);
+        /// @brief mode = 0 文件 1 目录
+        int (*fs_create)(void *fs_priv, const char *rel_path, int mode);
 };
 
 typedef enum
@@ -60,4 +71,13 @@ typedef enum
 } FSTYPE;
 
 extern struct mount_entry mount_points[MAX_MOUNT_NUM];
+void init_vfs(void);
+int vfs_create(const char *path, int is_dir);
+int vfs_close(int fd);
+int64_t vfs_write(int fd, const void *buf, uint64_t count);
+int64_t vfs_read(int fd, void *buf, uint64_t count);
+int vfs_open(const char *path, int flags);
+struct vfs_node *vfs_lookup(const char *path);
+int vfs_mount(char *mount_path, struct block_device *bdev, FSTYPE type);
+
 #endif
