@@ -1,0 +1,63 @@
+#ifndef _INC_VFS_
+#define _INC_VFS_
+#include <type.h>
+#include <block_device.h>
+
+// 文件打开标志
+#define FS_O_READ 0x01   // bit 0
+#define FS_O_WRITE 0x02  // bit 1
+#define FS_O_RW 0x03     // READ | WRITE
+#define FS_O_EXEC 0x04   // bit 2
+#define FS_O_CREAT 0x08  // bit 3
+#define FS_O_TRUNC 0x10  // bit 4
+#define FS_O_APPEND 0x20 // bit 5
+
+// 目录权限
+#define FS_MODE_READ 0400
+#define FS_MODE_WRITE 0200
+#define FS_MODE_EXEC 0100
+#define ROOT_FD 0
+
+#define MAX_MOUNT_NUM 16
+
+typedef int fd_t;
+typedef uint64_t fs_off_t;
+
+struct file_operation
+{
+
+        int (*fs_open)(fd_t *out_fd, const char *name, int flags);
+        int (*fs_read)(fd_t fd, fs_off_t offset, uint64_t len, void *buf, uint64_t *out_len);
+        int (*fs_write)(fd_t fd, fs_off_t offset, uint64_t len, const void *buf, uint64_t *out_len);
+        int (*fs_close)(fd_t fd);
+        int (*fs_mkdir)(fd_t parent_fd, const char *name, int mode);
+        int (*fs_lookup)(fd_t parent_fd, const char *name, fd_t *out_fd);
+        void *(*fs_mount)(struct block_device *bdev);
+};
+
+struct mount_entry
+{
+        char mount_point[32];
+        struct block_device *device;
+        struct file_operation *fs_ops;
+        void *fs_priv;
+};
+
+struct file
+{
+        struct mount_entry *mnt; // 这个文件属于哪个挂载点
+        uint64_t pos;            // 文件位置信息（FAT12 就是簇号，EXT4 就是 inode 号）
+        uint64_t offset;         // 当前读写位置
+        int flags;               // 打开时的标志
+};
+
+typedef enum
+{
+
+        FAT12,
+        FAT32,
+        FS_RAMFS
+} FSTYPE;
+
+extern struct mount_entry mount_points[MAX_MOUNT_NUM];
+#endif

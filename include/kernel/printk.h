@@ -3,7 +3,6 @@
 
 #include <stdarg.h>
 #include <type.h>
-#define NULL ((void *)0)
 
 #define PRINT_BUFFER_SIZE 1024
 #define FOTMAT_LEFT 1 << 0

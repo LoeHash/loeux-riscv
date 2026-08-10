@@ -103,6 +103,7 @@ clean:
 	$(MAKE) -C drivers clean
 	$(MAKE) -C fs clean
 	$(MAKE) -C mm clean
+	$(MAKE) -C asm clean
 	rm -f $(TARGET) $(TARGET_BIN)
 qemu:
 	make -j16 && qemu-system-riscv64 \

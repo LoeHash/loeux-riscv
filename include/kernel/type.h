@@ -1,6 +1,8 @@
 #ifndef _INC_TYPE
 #define _INC_TYPE
 #include <stdint.h>
+#define NULL ((void *)0)
+
 struct spinlock
 {
         uint64_t val;

@@ -10,12 +10,123 @@
 // virtio queue 队列
 struct virtqueue vq = {0};
 
-struct virtio_disk usable_disks[8];
+// 全局驱动
+struct block_driver virtio_block_driver = {
+    .read = virtio_blk_read,
+    .write = virtio_blk_write,
+    .sector_count = virtio_blk_sector_count};
+
+struct virtio_blk_disk usable_disks[8];
 volatile uint64_t usable_device_count = 0;
 spinlock_t vd_alloc_lock = {0};
 spinlock_t vd_free_lock = {0};
 static void detect_disk();
 static void init_virtio_queue();
+
+/// @brief 接口定义在 include/drivers/block_device.h
+/// @param dev
+/// @return
+uint64_t virtio_blk_sector_count(void *dev)
+{
+        if (!dev)
+        {
+                return -1;
+        }
+
+        // 将dev强转
+        struct virtio_blk_disk *vblk = (struct virtio_blk_disk *)dev;
+        return vblk->blk_config.capacity;
+}
+
+/// @brief 提供给上层文件系统
+/// @param dev
+/// @param sector
+/// @param buf
+/// @return
+int virtio_blk_write(void *dev, uint64_t sector, const void *buf)
+{
+        if (!dev)
+        {
+                return -1;
+        }
+
+        if (!buf)
+        {
+                return -1;
+        }
+
+        if (sector < 0)
+        {
+                return -1;
+        }
+
+        // 将dev强转
+        struct virtio_blk_disk *vblk = (struct virtio_blk_disk *)dev;
+
+        // 构建参数req
+        struct virtio_blk_req req;
+        uint8_t status;
+        int ret;
+
+        req.type = VIRTIO_BLK_T_OUT;
+        req.sector = sector;
+        req.ioprio = 0;
+
+        ret = virtio_disk_rw_sync(vblk, &req, buf, 512, &status);
+
+        if (ret < 0)
+        {
+                printk("write sector 0 failed: status=%d\n", status);
+                return -1;
+        }
+
+        return ret;
+}
+
+/// @brief 提供给上层文件系统
+/// @param dev
+/// @param sector
+/// @param buf
+/// @return
+int virtio_blk_read(void *dev, uint64_t sector, void *buf)
+{
+        if (!dev)
+        {
+                return -1;
+        }
+
+        if (!buf)
+        {
+                return -1;
+        }
+
+        if (sector < 0)
+        {
+                return -1;
+        }
+
+        // 将dev强转
+        struct virtio_blk_disk *vblk = (struct virtio_blk_disk *)dev;
+
+        // 构建参数req
+        struct virtio_blk_req req;
+        uint8_t status;
+        int ret;
+
+        req.type = VIRTIO_BLK_T_IN;
+        req.sector = sector;
+        req.ioprio = 0;
+
+        ret = virtio_disk_rw_sync(vblk, &req, buf, 512, &status);
+
+        if (ret < 0)
+        {
+                printk("Read sector 0 failed: status=%d\n", status);
+                return -1;
+        }
+
+        return ret;
+}
 
 /// @brief 同步从设备中读取bytes个字节
 /// @param req          请求头
@@ -24,7 +135,7 @@ static void init_virtio_queue();
 /// @param status       状态会写
 /// @return     实际读取/写入的字节数 -1 on error
 uint32_t virtio_disk_rw_sync(
-    struct virtio_disk *selected_desk,
+    struct virtio_blk_disk *selected_desk,
     struct virtio_blk_req *req,
     void *buf,
     uint32_t bytes,
@@ -100,7 +211,7 @@ uint32_t virtio_disk_rw_sync(
         // 根据status判断状态
         if (*status != 0)
         {
-                // panic(PANIC_ERROR, "virtio_disk.c:virtio_disk_rw_sync:panic the status: %d\n", *status);
+                // panic(PANIC_ERROR, "virtio_blk_disk.c:virtio_disk_rw_sync:panic the status: %d\n", *status);
 
                 free_desc(&vq.desc_start[head_idx]);
                 return -1;
@@ -115,14 +226,6 @@ uint32_t virtio_disk_rw_sync(
         // 返回实际的
         // -1 为状态字节
         return vq.used_start->ring[used_idx].len - 1;
-}
-
-uint32_t do_read()
-{
-}
-
-uint32_t do_write()
-{
 }
 
 static void init_virtio_queue()
@@ -206,6 +309,10 @@ static void detect_disk()
                     *R_LEVEL(VIRTIO_MMIO_CONFIG_CAPACITY_LOW_OFFSET, i);
                 usable_disks[i].blk_config.seg_max = *R_LEVEL(VIRTIO_MMIO_CONFIG_SEG_MAX_OFFSET, i);
                 usable_disks[i].blk_config.size_max = *R_LEVEL(VIRTIO_MMIO_CONFIG_SIZE_MAX_OFFSET, i);
+
+                // 初始化锁
+                init_spinlock(&usable_disks[i].vbd_lock);
+                usable_disks[i].initialized = 1;
         }
 }
 
@@ -215,7 +322,7 @@ void free_desc(struct virtq_desc *chain_head)
 {
         if (chain_head == NULL)
         {
-                panic(PANIC_ERROR, "virtio_disk.c:free_desc(): chain_head is null!\n");
+                panic(PANIC_ERROR, "virtio_blk_disk.c:free_desc(): chain_head is null!\n");
         }
 
         struct virtq_desc *desc = chain_head;
@@ -427,227 +534,43 @@ void b32_write(uint64_t addr, uint32_t data)
         MEMORY_FENCE;
 }
 
-void test_write_verify()
-{
-        struct virtio_disk *disk = &usable_disks[0];
-        struct virtio_blk_req req;
-        uint8_t status;
-        uint8_t write_buf[512], read_buf[512] = {0};
+// void test_write_verify()
+// {
+//         struct virtio_blk_disk *disk = &usable_disks[0];
+//         struct virtio_blk_req req;
+//         uint8_t status;
+//         uint8_t write_buf[512], read_buf[512] = {0};
 
-        // // 构造数据
-        // for (int i = 0; i < 512; i++)
-        //         write_buf[i] = i & 0xFF;
-        // strcpy((char *)write_buf, "Hello VirtIO!");
-        memset(write_buf, 0x14, 512);
+//         // // 构造数据
+//         // for (int i = 0; i < 512; i++)
+//         //         write_buf[i] = i & 0xFF;
+//         // strcpy((char *)write_buf, "Hello VirtIO!");
+//         memset(write_buf, 0x14, 512);
 
-        // 写入
-        req.type = VIRTIO_BLK_T_OUT;
-        req.sector = 0;
-        req.ioprio = 0;
-        virtio_disk_rw_sync(disk, &req, write_buf, 512, &status);
+//         // 写入
+//         req.type = VIRTIO_BLK_T_OUT;
+//         req.sector = 0;
+//         req.ioprio = 0;
+//         virtio_disk_rw_sync(disk, &req, write_buf, 512, &status);
 
-        // 读回
-        req.type = VIRTIO_BLK_T_IN;
-        req.sector = 0;
-        req.ioprio = 0;
-        virtio_disk_rw_sync(disk, &req, read_buf, 512, &status);
+//         // 读回
+//         req.type = VIRTIO_BLK_T_IN;
+//         req.sector = 0;
+//         req.ioprio = 0;
+//         virtio_disk_rw_sync(disk, &req, read_buf, 512, &status);
 
-        // 验证
-        if (memcmp(write_buf, read_buf, 512) == 0)
-        {
-                printk("✓ Write verified!\n");
-        }
-        else
-        {
-                printk("✗ Write failed!\n");
-        }
-}
+//         // 验证
+//         if (memcmp(write_buf, read_buf, 512) == 0)
+//         {
+//                 printk("✓ Write verified!\n");
+//         }
+//         else
+//         {
+//                 printk("✗ Write failed!\n");
+//         }
+// }
 
-void test_virtio_disk_rw_sync()
-{
-        printk("in..\n");
-        struct virtio_disk *disk = &usable_disks[0]; // 使用第一个磁盘
-        struct virtio_blk_req req;
-        uint8_t status;
-        int ret;
-
-        printk("\n========== VirtIO Disk Test Start ==========\n");
-
-        printk("\n[Test 1] Read sector 0 (512 bytes)\n");
-
-        uint8_t read_buf1[512] = {0};
-        req.type = VIRTIO_BLK_T_IN;
-        req.sector = 0;
-        req.ioprio = 0;
-
-        ret = virtio_disk_rw_sync(disk, &req, read_buf1, 512, &status);
-
-        if (ret > 0)
-        {
-                printk("  ✓ Read success: %d bytes\n", ret);
-                printk("  First 16 bytes: ");
-                for (int i = 0; i < 16 && i < ret; i++)
-                {
-                        printk("%0#lx ", read_buf1[i]);
-                }
-                printk("\n");
-        }
-        else
-        {
-                printk("  ✗ Read failed: %d (status=%d)\n", ret, status);
-        }
-
-        printk("\n[Test 2] Write sector 0 then read back\n");
-
-        uint8_t write_buf[512];
-        uint8_t read_buf2[512] = {0};
-
-        // 准备测试数据
-        for (int i = 0; i < 512; i++)
-        {
-                write_buf[i] = i & 0xFF;
-        }
-        strcpy((char *)write_buf, "Hello VirtIO Block Device!");
-
-        // 写入
-        req.type = VIRTIO_BLK_T_OUT;
-        req.sector = 0;
-        req.ioprio = 0;
-
-        ret = virtio_disk_rw_sync(disk, &req, write_buf, 512, &status);
-        if (ret >= 0)
-        {
-                printk("  ✓ Write success: %d bytes\n", ret);
-        }
-        else
-        {
-                printk("  ✗ Write failed: %d (status=%d)\n", ret, status);
-                return;
-        }
-
-        // 读回验证
-        req.type = VIRTIO_BLK_T_IN;
-        req.sector = 0;
-
-        ret = virtio_disk_rw_sync(disk, &req, read_buf2, 512, &status);
-        if (ret > 0)
-        {
-                printk("  ✓ Read back success: %d bytes\n", ret);
-
-                // 验证数据
-                if (memcmp(write_buf, read_buf2, 512) == 0)
-                {
-                        printk("  ✓ Data verification: PASSED\n");
-                }
-                else
-                {
-                        printk("  ✗ Data verification: FAILED\n");
-                        printk("  Expected first 16 bytes: ");
-                        for (int i = 0; i < 16; i++)
-                                printk("%0#lx ", write_buf[i]);
-                        printk("\n  Actual first 16 bytes:   ");
-                        for (int i = 0; i < 16; i++)
-                                printk("%0#lx ", read_buf2[i]);
-                        printk("\n");
-                }
-        }
-        else
-        {
-                printk("  ✗ Read back failed: %d (status=%d)\n", ret, status);
-        }
-
-        printk("\n[Test 3] Read 8 sectors (4096 bytes) from sector 1\n");
-
-        uint8_t read_buf3[4096] = {0};
-        req.type = VIRTIO_BLK_T_IN;
-        req.sector = 1;
-        req.ioprio = 0;
-
-        ret = virtio_disk_rw_sync(disk, &req, read_buf3, 4096, &status);
-
-        if (ret > 0)
-        {
-                printk("  ✓ Read success: %d bytes\n", ret);
-                if (ret == 4096)
-                {
-                        printk("  ✓ Full 4KB read completed\n");
-                }
-                else
-                {
-                        printk("  ⚠ Partial read: expected 4096, got %d\n", ret);
-                }
-                printk("  First 16 bytes: ");
-                for (int i = 0; i < 16 && i < ret; i++)
-                {
-                        printk("%0#lx ", read_buf3[i]);
-                }
-                printk("\n");
-        }
-        else
-        {
-                printk("  ✗ Read failed: %d (status=%d)\n", ret, status);
-        }
-
-        printk("\n[Test 4] Read last sector\n");
-
-        // 假设磁盘有 1024 个扇区（需要根据实际设备调整）
-        uint64_t last_sector = 1023; // 从设备信息获取
-        uint8_t read_buf4[512] = {0};
-
-        req.type = VIRTIO_BLK_T_IN;
-        req.sector = last_sector;
-        req.ioprio = 0;
-
-        ret = virtio_disk_rw_sync(disk, &req, read_buf4, 512, &status);
-
-        if (ret > 0)
-        {
-                printk("  ✓ Read last sector (%lu) success: %d bytes\n", last_sector, ret);
-        }
-        else
-        {
-                printk("  ✗ Read last sector failed: %d (status=%d)\n", ret, status);
-        }
-
-        printk("\n[Test 5] Error test: non-512 aligned bytes\n");
-
-        req.type = VIRTIO_BLK_T_IN;
-        req.sector = 0;
-        req.ioprio = 0;
-
-        ret = virtio_disk_rw_sync(disk, &req, read_buf1, 100, &status); // 100不是512的倍数
-
-        if (ret == -1)
-        {
-                printk("  ✓ Correctly rejected non-aligned request (100 bytes)\n");
-        }
-        else
-        {
-                printk("  ✗ Should have rejected non-aligned request, got %d\n", ret);
-        }
-
-        printk("\n[Test 6] Stress test: 10 consecutive reads\n");
-
-        int success_count = 0;
-        for (int i = 0; i < 10; i++)
-        {
-                uint8_t buf[512] = {0};
-                req.type = VIRTIO_BLK_T_IN;
-                req.sector = i;
-                req.ioprio = 0;
-
-                ret = virtio_disk_rw_sync(disk, &req, buf, 512, &status);
-                if (ret > 0)
-                {
-                        success_count++;
-                }
-        }
-        printk("  ✓ %d/10 reads succeeded\n", success_count);
-
-        printk("\n========== VirtIO Disk Test Complete ==========\n");
-}
-
-void dump_sector_n(struct virtio_disk *disk, int n)
+void dump_sector_n(struct virtio_blk_disk *disk, int n)
 {
         struct virtio_blk_req req;
         uint8_t status;

@@ -1,6 +1,7 @@
 #ifndef _INC_VIRTIO_
 #define _INC_VIRTIO_
 #include "type.h"
+#include "block_device.h"
 #define VIRTIO_MMIO_MAGIC_VALUE_OFFSET 0x000 // 0x74726976
 #define VIRTIO_MMIO_VERSION_OFFSET 0x004     // 应该为 2
 #define VIRTIO_MMIO_DEVICE_ID_OFFSET 0x008   // 2 = 块设备
@@ -80,8 +81,9 @@ struct virtio_blk_config
         uint32_t seg_max;
 };
 
-struct virtio_disk
+struct virtio_blk_disk
 {
+        uint32_t initialized;
         uint32_t magic;
         uint32_t version;
         uint32_t device_id;
@@ -89,6 +91,7 @@ struct virtio_disk
         uint64_t device_features;
         uint64_t driver_features;
         uint64_t base_addr;
+        spinlock_t vbd_lock;
         struct virtio_blk_config blk_config;
 };
 
@@ -141,16 +144,17 @@ struct virtqueue
 };
 
 // we reco
-extern struct virtio_disk usable_disks[8];
+extern struct virtio_blk_disk usable_disks[8];
 extern spinlock_t vd_alloc_lock;
 extern spinlock_t vd_free_lock;
 extern volatile uint64_t usable_device_count;
 extern struct virtqueue vq;
+extern struct block_driver virtio_block_driver;
 void init_virtio_disk();
 int alloc_desc(int n);
 void free_desc(struct virtq_desc *chain_head);
 uint32_t virtio_disk_rw_sync(
-    struct virtio_disk *selected_desk,
+    struct virtio_blk_disk *selected_desk,
     struct virtio_blk_req *req,
     void *buf,
     uint32_t bytes,
@@ -160,7 +164,9 @@ void b8_write(uint64_t addr, uint8_t data);
 void b16_write(uint64_t addr, uint16_t data);
 void b64_write(uint64_t addr, uint64_t data);
 void b32_write(uint64_t addr, uint32_t data);
-void test_virtio_disk_rw_sync();
-void test_write_verify();
-void dump_sector_n(struct virtio_disk *disk, int n);
+void dump_sector_n(struct virtio_blk_disk *disk, int n);
+
+int virtio_blk_read(void *dev, uint64_t sector, void *buf);
+int virtio_blk_write(void *dev, uint64_t sector, const void *buf);
+
 #endif
