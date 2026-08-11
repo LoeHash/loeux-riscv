@@ -16,6 +16,9 @@ struct block_driver virtio_block_driver = {
     .write = virtio_blk_write,
     .sector_count = virtio_blk_sector_count};
 
+// 全局设备
+struct block_device virtio_block_device = {0};
+
 struct virtio_blk_disk usable_disks[8];
 volatile uint64_t usable_device_count = 0;
 spinlock_t vd_alloc_lock = {0};
@@ -503,6 +506,10 @@ void init_virtio_disk()
                        SECTOR_SIZE_TO_GB(usable_disks[i].blk_config.capacity),
                        usable_disks[i].blk_config.size_max,
                        usable_disks[i].blk_config.seg_max);
+                printk("Reg: the block device....\n");
+                virtio_block_device.driver = virtio_block_driver;
+                virtio_block_device.private_data = &usable_disks[i];
+                printk("Reg: the block device is done!\n");
         }
 }
 

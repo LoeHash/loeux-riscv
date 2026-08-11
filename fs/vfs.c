@@ -4,6 +4,7 @@
 #include <spinlock.h>
 #include <panic.h>
 #include <fat12.h>
+#include <printk.h>
 
 static struct mount_entry *vfs_find_mount(const char *path);
 static int fd_check(int fd);
@@ -341,4 +342,79 @@ static int fd_check(int fd)
         }
 
         return 0;
+}
+
+void print_mount_table(void)
+{
+        int i;
+        int found = 0;
+
+        printk("\n========== Mount Table ==========\n");
+        printk("%-4s %-30s %-12s %-12s\n", "Idx", "Mount Point", "Device", "FS Type");
+        printk("----------------------------------------\n");
+
+        for (i = 0; i < MAX_MOUNT_NUM; i++)
+        {
+                struct mount_entry *entry = &mount_points[i];
+
+                // 检查挂载点是否有效（假设空字符串表示未使用）
+                if (entry->mount_point[0] == '\0')
+                {
+                        continue;
+                }
+
+                found = 1;
+
+                // 打印索引和挂载点
+                printk("%-4d %-30s ", i, entry->mount_point);
+
+                // 打印设备地址
+                if (entry->device != NULL)
+                {
+                        printk("%0#lx ", (unsigned long)entry->device);
+                }
+                else
+                {
+                        printk("%-12s ", "NULL");
+                }
+
+                // 打印文件系统类型（根据 fs_ops 地址判断，或者你可以添加 fs_type 字段）
+                if (entry->fs_ops != NULL)
+                {
+                        printk("%0#lx", (unsigned long)entry->fs_ops);
+                }
+                else
+                {
+                        printk("%-12s", "NULL");
+                }
+                printk("\n");
+
+                // 可选：打印更多详细信息
+                printk("    fs_priv: ");
+                if (entry->fs_priv != NULL)
+                {
+                        printk("%0#lx", (unsigned long)entry->fs_priv);
+                }
+                else
+                {
+                        printk("NULL");
+                }
+                printk("\n");
+
+                // 如果有 block_device，打印其信息
+                if (entry->device != NULL)
+                {
+                        printk("    sector_count: ");
+                        uint64_t sectors = entry->device->driver.sector_count(entry->device->private_data);
+                        printk("%ld\n", sectors);
+                }
+                printk("\n");
+        }
+
+        if (!found)
+        {
+                printk("No mount points found.\n");
+        }
+
+        printk("==================================\n");
 }

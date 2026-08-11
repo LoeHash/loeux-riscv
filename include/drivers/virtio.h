@@ -150,6 +150,7 @@ extern spinlock_t vd_free_lock;
 extern volatile uint64_t usable_device_count;
 extern struct virtqueue vq;
 extern struct block_driver virtio_block_driver;
+extern struct block_device virtio_block_device;
 void init_virtio_disk();
 int alloc_desc(int n);
 void free_desc(struct virtq_desc *chain_head);

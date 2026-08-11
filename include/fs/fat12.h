@@ -2,6 +2,20 @@
 #ifndef _INC_FAT12_
 #define _INC_FAT12_
 #include <type.h>
+#include <vfs.h>
+
+#define FAT12_SECTOR_SIZE 512
+#define FAT12_DIRENT_SIZE 32
+#define FAT12_EOF 0xFF8
+#define FAT12_EOF_MASK 0x0FFF
+
+// 文件属性
+#define FAT12_ATTR_READ_ONLY 0x01
+#define FAT12_ATTR_HIDDEN 0x02
+#define FAT12_ATTR_SYSTEM 0x04
+#define FAT12_ATTR_VOLUME_ID 0x08
+#define FAT12_ATTR_DIRECTORY 0x10
+#define FAT12_ATTR_ARCHIVE 0x20
 
 // 1. BPB (BIOS Parameter Block) - 引导扇区
 struct fat12_bpb
@@ -80,13 +94,27 @@ struct fat12_priv
         struct block_device *bdev;
 };
 
-// ============================================================
-// 4. FAT12 提供的函数原型
-// ============================================================
+// 查找结果
+struct fat12_node
+{
+        uint16_t start_cluster;
+        uint32_t file_size;
+        uint8_t attr;
+        uint8_t name[11];
+        int is_root;
+        struct fat12_priv *fs_priv;
+};
 
 // 挂载函数: 读 BPB，校验，构造 fat12_priv
 void *fat12_mount(struct block_device *bdev);
-
+int fat12_lookup(void *fs_priv, const char *rel_path, void **out_node);
+void fat12_free_node(void *out_node);
+int fat12_open(void *node, struct file *file, int flags);
+int fat12_read(struct file *file, void *buf, uint64_t count, uint64_t *out_len);
+int fat12_write(struct file *file, const void *buf, uint64_t count, uint64_t *out_len);
+int fat12_close(struct file *file);
+/// @brief mode = 0 文件 1 目录
+int fat12_create(void *fs_priv, const char *rel_path, int mode);
 extern struct file_operation fat12_ops;
 
 #endif

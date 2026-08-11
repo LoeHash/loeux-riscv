@@ -8,6 +8,7 @@
 #include <memlayout.h>
 #include <vm.h>
 #include <proc.h>
+#include <panic.h>
 #include <trap.h>
 #include <timer.h>
 #include <virtio.h>
@@ -70,6 +71,16 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         // test_virtio_disk_rw_sync();
         // test_write_verify();
         dump_sector_n(&usable_disks[0], 0);
+
+        // 挂载硬盘
+        int ret = vfs_mount("/", &virtio_block_device, FAT12);
+        if (ret == -1)
+        {
+                printk("oops....\n");
+                panic(PANIC_ERROR, "kstart vfs_mount: error!\n");
+        }
+        printk("no oops....\n");
+        print_mount_table();
         scheduler();
 }
 
