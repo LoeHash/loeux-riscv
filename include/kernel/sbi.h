@@ -111,6 +111,8 @@
 #define SBI_SRST_RESET_REASON_NONE 0x0
 #define SBI_SRST_RESET_REASON_SYSFAIL 0x1
 
+#define SBI_EXT_DBCN_CONSOLE_READ 0x1
+
 /* SBI function IDs for PMU extension */
 #define SBI_EXT_PMU_NUM_COUNTERS 0x0
 #define SBI_EXT_PMU_COUNTER_GET_INFO 0x1
@@ -184,6 +186,40 @@ static inline unsigned long sbi_hart_start(unsigned long hartid,
 static inline unsigned long sbi_putchar(char c)
 {
         return sbi_ecall(SBI_EXT_0_1_CONSOLE_PUTCHAR, SBI_FID_ZERO, (unsigned long)c, 0, 0, 0, 0, 0);
+}
+
+// 非阻塞读
+static inline int sbi_getchar(void)
+{
+        unsigned char ch;
+        unsigned long num_read;
+
+        unsigned long ret = sbi_ecall(SBI_EXT_DBCN,
+                                      SBI_EXT_DBCN_CONSOLE_READ,
+                                      1,                        // arg0: 读1字节
+                                      (unsigned long)&ch,       // arg1: 缓冲区地址
+                                      0,                        // arg2: 高32位地址
+                                      (unsigned long)&num_read, // arg3: 实际读取数
+                                      0, 0);
+
+        if (ret > 0)
+        {
+                return (int)ch;
+        }
+        return -1;
+}
+
+// 阻塞式读
+static inline int sbi_getchar_blocking(void)
+{
+        int ch;
+        printk("sdsds\n");
+        do
+        {
+                ch = sbi_getchar();
+                printk("ch: %d\n", ch);
+        } while (ch < 0);
+        return ch;
 }
 
 #endif

@@ -20,6 +20,8 @@
 
 #define MAX_MOUNT_NUM 16
 #define MAX_FD_NUM 256
+#define DEV_PATH_PREFIX "/dev/"
+#define DEV_PATH_PREFIX_LEN 5
 
 typedef int fd_t;
 typedef uint64_t fs_off_t;
@@ -39,6 +41,7 @@ struct file
         uint64_t offset;         // 当前读写位置
         int flags;               // 打开时的标志
         void *private;
+        int type; // 0 块设备 1 字符设备
 };
 
 struct vfs_node
@@ -72,6 +75,7 @@ typedef enum
 
 extern struct mount_entry mount_points[MAX_MOUNT_NUM];
 void init_vfs(void);
+void init_vfs_std();
 int vfs_create(const char *path, int is_dir);
 int vfs_close(int fd);
 int64_t vfs_write(int fd, const void *buf, uint64_t count);

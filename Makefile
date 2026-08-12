@@ -38,8 +38,10 @@ OBJS := asm/kernel_trap_vec.o\
 	mm/memory.o\
 	mm/vm.o\
 	drivers/virtio_disk.o\
+	drivers/uart.o\
 	fs/fat12.o\
 	fs/vfs.o\
+	fs/char_dev.o\
 
 
 TARGET := kernel.elf
@@ -95,8 +97,10 @@ kernel/trap.o: kernel/timer.c
 mm/memory.o: mm/memory.c 
 mm/vm.o: mm/vm.c 
 drivers/virtio_disk.o: drivers/virtio_disk.c 
+drivers/uart.o: drivers/uart.c 
 fs/fat12.o: fs/fat12.c 
 fs/vfs.o: fs/vfs.c 
+fs/char_dev.o: fs/char_dev.c 
 
 
 clean:
@@ -116,7 +120,8 @@ qemu:
 			-nographic \
 			-global virtio-mmio.force-legacy=false\
 			-drive file=./loeux.img,format=raw,if=none,id=loeux \
-			-device virtio-blk-device,drive=loeux,bus=virtio-mmio-bus.0
+			-device virtio-blk-device,drive=loeux,bus=virtio-mmio-bus.0\
+			-serial mon:stdio\
 
 gdb:
 	qemu-system-riscv64 -machine virt -smp 4 -m 2048M -nographic -kernel ./kernel.elf -s -S

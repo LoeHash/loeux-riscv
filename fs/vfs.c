@@ -4,6 +4,7 @@
 #include <spinlock.h>
 #include <panic.h>
 #include <fat12.h>
+#include <char_dev.h>
 #include <printk.h>
 
 static struct mount_entry *vfs_find_mount(const char *path);
@@ -21,6 +22,17 @@ void init_vfs()
 {
         init_spinlock(&mount_lock);
         init_spinlock(&fd_lock);
+}
+
+// 初始化标准输入输出
+void init_vfs_std()
+{
+        // alloc_fd 从 0 开始分配
+        vfs_open("/dev/ttyS0", FS_O_READ);  // fd = 0
+        vfs_open("/dev/ttyS0", FS_O_WRITE); // fd = 1
+        vfs_open("/dev/ttyS0", FS_O_WRITE); // fd = 2
+
+        printk("stdin=0, stdout=1, stderr=2 -> /dev/ttyS0\n");
 }
 
 int vfs_create(const char *path, int is_dir)
@@ -51,19 +63,31 @@ int vfs_close(int fd)
                 return -1;
         }
 
-        int ret = file->mnt->fs_ops->fs_close(file);
-        if (ret < 0)
+        int ret;
+        if (file->type == 1)
         {
-                return -1;
+                struct char_device *cdev = (struct char_device *)file->private;
+                if (cdev->ops->close)
+                {
+                        ret = cdev->ops->close(cdev->priv);
+                }
+                else
+                {
+                        ret = 0;
+                }
+        }
+        else if (file->type == 0)
+        {
+                ret = file->mnt->fs_ops->fs_close(file);
+                if (ret < 0)
+                {
+                        return -1;
+                }
+
+                file->mnt->fs_ops->fs_free_node(file->private);
         }
 
-        // 2. 释放文件系统节点
-        file->mnt->fs_ops->fs_free_node(file->private);
-
-        // 3. 释放 file 结构
         free_page(file);
-
-        // 4. 清空 fd_table
         free_fd(fd);
         return 0;
 }
@@ -89,15 +113,30 @@ int64_t vfs_write(int fd, const void *buf, uint64_t count)
 
         // 调用文件系统的写
         uint64_t out_len = 0;
-        int ret = file->mnt->fs_ops->fs_write(file, buf, count, &out_len);
-        if (ret < 0)
+        int ret;
+        if (file->type == 1)
         {
-                return -1;
+                struct char_device *cdev = (struct char_device *)file->private;
+                ret = cdev->ops->write(cdev->priv, buf, count, &out_len);
+                if (ret < 0)
+                {
+                        return -1;
+                }
+                return out_len;
         }
 
-        file->pos += out_len;
+        if (file->type == 0)
+        {
+                ret = file->mnt->fs_ops->fs_write(file, buf, count, &out_len);
+                if (ret < 0)
+                {
+                        return -1;
+                }
 
-        return out_len;
+                file->pos += out_len;
+
+                return out_len;
+        }
 }
 
 int64_t vfs_read(int fd, void *buf, uint64_t count)
@@ -118,20 +157,74 @@ int64_t vfs_read(int fd, void *buf, uint64_t count)
                 return -1;
         }
 
-        // 4. 调用文件系统的读
+        // 根据不同type进行分流
         uint64_t out_len = 0;
-        int ret = file->mnt->fs_ops->fs_read(file, buf, count, &out_len);
-        if (ret < 0)
+        int ret;
+        printk("file type: %d\n", file->type);
+        if (file->type == 1)
         {
-                return -1;
+                struct char_device *cdev = (struct char_device *)file->private;
+                ret = cdev->ops->read(cdev->priv, buf, count, &out_len);
+                if (ret < 0)
+                {
+                        return -1;
+                }
+                return out_len;
         }
 
-        file->pos += out_len;
-        return out_len;
+        if (file->type == 0)
+        {
+                // 调用文件系统的读
+                ret = file->mnt->fs_ops->fs_read(file, buf, count, &out_len);
+                if (ret < 0)
+                {
+                        return -1;
+                }
+
+                file->pos += out_len;
+                return out_len;
+        }
 }
 
 int vfs_open(const char *path, int flags)
 {
+
+        if (strncmp(path, DEV_PATH_PREFIX, DEV_PATH_PREFIX_LEN) == 0)
+        {
+                const char *dev_name = path + DEV_PATH_PREFIX_LEN;
+                struct char_device *cdev = vfs_find_chardev(dev_name);
+                if (!cdev)
+                {
+                        return -1;
+                }
+
+                struct file *file = alloc_page();
+                if (!file)
+                {
+                        return -1;
+                }
+
+                file->mnt = NULL;
+                file->private = cdev;
+                file->flags = flags;
+                file->pos = 0;
+                file->type = 1; // 字符设备
+
+                if (cdev->ops->open && cdev->ops->open(cdev->priv, flags) < 0)
+                {
+                        free_page(file);
+                        return -1;
+                }
+
+                int fd = alloc_fd(file);
+                if (fd < 0)
+                {
+                        free_page(file);
+                        return -1;
+                }
+                return fd;
+        }
+
         struct vfs_node *vnode = vfs_lookup(path);
 
         if (!vnode)
@@ -151,6 +244,7 @@ int vfs_open(const char *path, int flags)
         file->private = vnode->private;
         file->flags = flags;
         file->pos = 0;
+        file->type = 0;
 
         // 调用文件系统的open
         // 检查文件存在，权限等信息
@@ -320,7 +414,7 @@ static int alloc_fd(struct file *file)
 {
         int fd = -1;
         acquire(&fd_lock);
-        for (int i = 3; i < MAX_FD_NUM; i++)
+        for (int i = 0; i < MAX_FD_NUM; i++)
         {
                 if (fd_table[i] == NULL)
                 {
@@ -336,7 +430,7 @@ static int alloc_fd(struct file *file)
 static int fd_check(int fd)
 {
 
-        if (fd < 3 || fd >= MAX_FD_NUM)
+        if (fd < 0 || fd >= MAX_FD_NUM)
         {
                 return -1;
         }
@@ -430,7 +524,7 @@ void test_fat12_operations(void)
         printk("\n========== FAT12 File Operation Test ==========\n");
 
         printk("[Test 1] Listing root directory\n");
-        struct fat12_priv *fs = (struct fat12_priv *)0x81aae000;
+        struct fat12_priv *fs = (struct fat12_priv *)0x81ab2000;
         uint8_t *buf = alloc_page();
         if (buf)
         {

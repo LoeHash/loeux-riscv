@@ -11,6 +11,7 @@
 #include <panic.h>
 #include <trap.h>
 #include <timer.h>
+#include <uart.h>
 #include <virtio.h>
 
 extern char _sec_entry64[];
@@ -20,6 +21,7 @@ __attribute__((aligned(16))) char _stack_[4096 * 4 * NCPUS];
 uint64_t main_core = 0;
 uint8_t kernel_inited = 0;
 void secondary_start(uint64_t hart_id, uint64_t data_addr);
+void test_keyboard_read(void);
 
 void kstart(unsigned long hart_id, unsigned long ft_addr)
 {
@@ -45,6 +47,8 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         init_virtio_disk();
         // 初始化虚拟文件系统
         init_vfs();
+        init_uart();
+        init_vfs_std();
 
         __atomic_store_n(&kernel_inited, 1, __ATOMIC_RELEASE);
 
@@ -71,22 +75,14 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         // test_virtio_disk_rw_sync();
         // test_write_verify();
         dump_sector_n(&usable_disks[0], 0);
-
         // 挂载硬盘
         if (vfs_mount("/", &virtio_block_device, FAT12) == -1)
         {
                 panic(PANIC_ERROR, "kstart vfs_mount: error!\n");
         }
         print_mount_table();
-
-        // 尝试读取一个文件
-        char *buf = alloc_page();
-        int fd = vfs_open("/hello.txt", FS_MODE_READ);
-        if (fd == -1)
-        {
-                panic(PANIC_ERROR, "kstart vfs_open: error!\n");
-        }
-        test_fat12_operations();
+        // test_fat12_operations();
+        test_keyboard_read();
         scheduler();
 }
 
@@ -111,4 +107,28 @@ void secondary_start(uint64_t hart_id, uint64_t data_addr)
         sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
 
         scheduler();
+}
+
+void test_keyboard_read(void)
+{
+        char buf[128];
+        int len;
+
+        printk("\n========== Keyboard Input Test ==========\n");
+        printk("Type something and press Enter:\n");
+
+        // 从 stdin (fd=0) 读取
+        len = vfs_read(0, buf, sizeof(buf) - 1);
+        if (len > 0)
+        {
+                buf[len] = '\0';
+                printk("You typed: %s\n", buf);
+                printk("Length: %d bytes\n", len);
+        }
+        else
+        {
+                printk("Read failed or no input\n");
+        }
+
+        printk("========== Test Complete ==========\n");
 }
