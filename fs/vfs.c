@@ -418,3 +418,135 @@ void print_mount_table(void)
 
         printk("==================================\n");
 }
+
+void test_fat12_operations(void)
+{
+        char read_buf[512] = {0};
+        const char *write_data = "Hello FAT12! This is a test write from kernel via VFS.";
+        int fd, ret;
+        int64_t bytes;
+        struct file *file;
+
+        printk("\n========== FAT12 File Operation Test ==========\n");
+
+        printk("[Test 1] Listing root directory\n");
+        struct fat12_priv *fs = (struct fat12_priv *)0x81aae000;
+        uint8_t *buf = alloc_page();
+        if (buf)
+        {
+                for (uint32_t s = fs->root_dir_start; s < fs->root_dir_start + fs->root_dir_sectors; s++)
+                {
+                        fs->bdev->driver.read(fs->bdev->private_data, s, buf);
+                        for (int i = 0; i < 16; i++)
+                        {
+                                struct fat12_dirent *e = (struct fat12_dirent *)(buf + i * 32);
+                                if (e->dir_name[0] == 0x00)
+                                {
+                                        free_page(buf);
+                                        goto test2;
+                                }
+                                if (e->dir_name[0] == 0xE5)
+                                        continue;
+                                if (e->dir_attr == 0x0F)
+                                        continue;
+                                if (e->dir_attr == 0x08)
+                                        continue;
+                                printk("  %.8s.%.3s size=%u cluster=%u\n",
+                                       e->dir_name, e->dir_ext, e->dir_file_size, e->dir_first_cluster_low);
+                        }
+                }
+                free_page(buf);
+        }
+
+test2:
+        printk("\n[Test 2] Opening /hello.txt for read/write\n");
+        fd = vfs_open("/hello.txt", FS_O_RW);
+        if (fd < 0)
+        {
+                printk("  ✗ Failed to open /hello.txt (fd=%d)\n", fd);
+                return;
+        }
+        printk("  ✓ File opened successfully, fd=%d\n", fd);
+
+        printk("\n[Test 3] Reading from /hello.txt (first 16 bytes)\n");
+        memset(read_buf, 0, sizeof(read_buf));
+        bytes = vfs_read(fd, read_buf, 16);
+        if (bytes < 0)
+        {
+                printk("  ✗ Read failed: %ld\n", bytes);
+        }
+        else
+        {
+                printk("  ✓ Read %ld bytes\n", bytes);
+                printk("  Data: ");
+                for (int i = 0; i < bytes && i < 16; i++)
+                {
+                        if (read_buf[i] >= 0x20 && read_buf[i] < 0x7F)
+                                printk("%c", read_buf[i]);
+                        else
+                                printk(".");
+                }
+                printk("\n  Hex: ");
+                for (int i = 0; i < bytes && i < 16; i++)
+                {
+                        printk("%0#lx ", (unsigned char)read_buf[i]);
+                }
+                printk("\n");
+        }
+
+        printk("\n[Test 4] Writing to /hello.txt (append)\n");
+        file = fd_table[fd];
+        if (file)
+        {
+                struct fat12_node *fnode = (struct fat12_node *)file->private;
+                printk("  Current file size: %u bytes\n", fnode->file_size);
+                file->pos = fnode->file_size;
+        }
+        bytes = vfs_write(fd, write_data, strlen(write_data));
+        if (bytes < 0)
+        {
+                printk("  ✗ Write failed: %ld\n", bytes);
+        }
+        else
+        {
+                printk("  ✓ Write %ld bytes: \"%s\"\n", bytes, write_data);
+        }
+
+        printk("\n[Test 5] Reading back to verify write\n");
+        if (file)
+                file->pos = 0;
+        memset(read_buf, 0, sizeof(read_buf));
+        bytes = vfs_read(fd, read_buf, 512);
+        if (bytes < 0)
+        {
+                printk("  ✗ Read back failed: %ld\n", bytes);
+        }
+        else
+        {
+                printk("  ✓ Read back %ld bytes\n", bytes);
+                printk("  Full content:\n  ");
+                for (int i = 0; i < bytes && i < 64; i++)
+                {
+                        if (read_buf[i] >= 0x20 && read_buf[i] < 0x7F)
+                                printk("%c", read_buf[i]);
+                        else
+                                printk(".");
+                }
+                if (bytes > 64)
+                        printk("...");
+                printk("\n");
+        }
+
+        printk("\n[Test 6] Closing file\n");
+        ret = vfs_close(fd);
+        if (ret < 0)
+        {
+                printk("  ✗ Close failed: %d\n", ret);
+        }
+        else
+        {
+                printk("  ✓ File closed successfully\n");
+        }
+
+        printk("\n========== FAT12 File Operation Test Complete ==========\n");
+}

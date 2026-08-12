@@ -73,14 +73,20 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         dump_sector_n(&usable_disks[0], 0);
 
         // 挂载硬盘
-        int ret = vfs_mount("/", &virtio_block_device, FAT12);
-        if (ret == -1)
+        if (vfs_mount("/", &virtio_block_device, FAT12) == -1)
         {
-                printk("oops....\n");
                 panic(PANIC_ERROR, "kstart vfs_mount: error!\n");
         }
-        printk("no oops....\n");
         print_mount_table();
+
+        // 尝试读取一个文件
+        char *buf = alloc_page();
+        int fd = vfs_open("/hello.txt", FS_MODE_READ);
+        if (fd == -1)
+        {
+                panic(PANIC_ERROR, "kstart vfs_open: error!\n");
+        }
+        test_fat12_operations();
         scheduler();
 }
 

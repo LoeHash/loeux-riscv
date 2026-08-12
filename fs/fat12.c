@@ -681,9 +681,7 @@ void *fat12_mount(struct block_device *bdev)
         }
 
         // 读引导扇区
-        printk("reading....\n");
         bdev->driver.read(bdev->private_data, 0, buffer);
-        printk("reading done\n");
 
         // 校验签名
         if (buffer[510] != 0x55 || buffer[511] != 0xAA)

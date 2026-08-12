@@ -80,4 +80,5 @@ int vfs_open(const char *path, int flags);
 struct vfs_node *vfs_lookup(const char *path);
 int vfs_mount(char *mount_path, struct block_device *bdev, FSTYPE type);
 void print_mount_table(void);
+void test_fat12_operations(void);
 #endif
