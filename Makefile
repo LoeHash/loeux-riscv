@@ -42,6 +42,13 @@ OBJS := asm/kernel_trap_vec.o\
 	fs/fat12.o\
 	fs/vfs.o\
 	fs/char_dev.o\
+	test/fdt_test.o\
+	test/mem_test.o\
+	test/uart_test.o\
+	test/vfs_test.o\
+	test/virtio_disk_test.o\
+	test/vm_test.o\
+
 
 
 TARGET := kernel.elf
@@ -66,7 +73,8 @@ fs:
 	$(MAKE) -C fs
 asm:
 	$(MAKE) -C asm	
-
+test:
+	$(MAKE) -C test
 
 $(TARGET): $(OBJS)
 	$(LD) $(LDFLAGS) -o $@ $^
@@ -101,6 +109,12 @@ drivers/uart.o: drivers/uart.c
 fs/fat12.o: fs/fat12.c 
 fs/vfs.o: fs/vfs.c 
 fs/char_dev.o: fs/char_dev.c 
+test/fdt_test.o: test/fdt_test.c 
+test/mem_test.o: test/mem_test.c 
+test/uart_test.o: test/uart_test.c 
+test/vfs_test.o: test/vfs_test.c 
+test/virtio_disk_test.o: test/virtio_disk_test.c 
+test/vm_test.o: test/vm_test.c 
 
 
 clean:
@@ -108,6 +122,7 @@ clean:
 	$(MAKE) -C kernel clean
 	$(MAKE) -C drivers clean
 	$(MAKE) -C fs clean
+	$(MAKE) -C test clean
 	$(MAKE) -C mm clean
 	$(MAKE) -C asm clean
 	rm -f $(TARGET) $(TARGET_BIN)

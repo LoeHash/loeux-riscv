@@ -1,5 +1,3 @@
-# kernel/Makefile - 编译所有内核C文件
-
 CROSS_COMPILE ?= riscv64-linux-gnu-
 CC := $(CROSS_COMPILE)gcc
 INCLUDES := -I. -I../include -I../include/kernel -I../include/mm -I../mm  -I../include/drivers  -I../include/fs -I../include/test

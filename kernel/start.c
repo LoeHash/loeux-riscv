@@ -13,6 +13,7 @@
 #include <timer.h>
 #include <uart.h>
 #include <virtio.h>
+#include <test.h>
 
 extern char _sec_entry64[];
 
@@ -67,8 +68,7 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
                 panic(PANIC_ERROR, "kstart vfs_mount: error!\n");
         }
         print_mount_table();
-        // test_fat12_operations();
-        test_keyboard_read();
+        test_keyboard_echo();
 
         __atomic_store_n(&kernel_inited, 1, __ATOMIC_RELEASE);
 
@@ -108,28 +108,4 @@ void secondary_start(uint64_t hart_id, uint64_t data_addr)
         sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
 
         scheduler();
-}
-
-void test_keyboard_read(void)
-{
-        char buf[128];
-        int len;
-
-        printk("\n========== Keyboard Input Test ==========\n");
-        printk("Type something and press Enter:\n");
-
-        // 从 stdin 读取
-        len = vfs_read(0, buf, sizeof(buf) - 1);
-        if (len > 0)
-        {
-                buf[len] = '\0';
-                printk("You typed: %s\n", buf);
-                printk("Length: %d bytes\n", len);
-        }
-        else
-        {
-                printk("Read failed or no input\n");
-        }
-
-        printk("========== Test Complete ==========\n");
 }
