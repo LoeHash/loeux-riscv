@@ -50,6 +50,26 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         init_uart();
         init_vfs_std();
 
+        // 开启全局中断
+        intr_on();
+        // 开启时钟中断
+        enable_timer_interrupt();
+        // 设置一次定时器
+        sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
+
+        // 测试读写
+        // test_virtio_disk_rw_sync();
+        // test_write_verify();
+        // dump_sector_n(&usable_disks[0], 0);
+        // 挂载硬盘
+        if (vfs_mount("/", &virtio_block_device, FAT12) == -1)
+        {
+                panic(PANIC_ERROR, "kstart vfs_mount: error!\n");
+        }
+        print_mount_table();
+        // test_fat12_operations();
+        test_keyboard_read();
+
         __atomic_store_n(&kernel_inited, 1, __ATOMIC_RELEASE);
 
         // 唤醒多核
@@ -64,25 +84,6 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
 
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
-        // 开启全局中断
-        intr_on();
-        // 开启时钟中断
-        enable_timer_interrupt();
-        // 设置一次定时器
-        sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
-
-        // 测试读写
-        // test_virtio_disk_rw_sync();
-        // test_write_verify();
-        dump_sector_n(&usable_disks[0], 0);
-        // 挂载硬盘
-        if (vfs_mount("/", &virtio_block_device, FAT12) == -1)
-        {
-                panic(PANIC_ERROR, "kstart vfs_mount: error!\n");
-        }
-        print_mount_table();
-        // test_fat12_operations();
-        test_keyboard_read();
         scheduler();
 }
 
@@ -117,7 +118,7 @@ void test_keyboard_read(void)
         printk("\n========== Keyboard Input Test ==========\n");
         printk("Type something and press Enter:\n");
 
-        // 从 stdin (fd=0) 读取
+        // 从 stdin 读取
         len = vfs_read(0, buf, sizeof(buf) - 1);
         if (len > 0)
         {

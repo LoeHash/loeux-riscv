@@ -2,7 +2,12 @@
 #ifndef __SBI_H__
 #define __SBI_H__
 #include <type.h>
-
+#include <timer.h>
+struct sbiret
+{
+        uint64_t error;
+        uint64_t value;
+};
 // 成功
 #define SBI_SUCCESS 0
 // 失败
@@ -139,12 +144,13 @@
 #define SBI_EXT_FWFT_GET 0x1
 
 // 调用sbi服务叶子函数
-static inline unsigned long sbi_ecall(
+static inline struct sbiret sbi_ecall(
     unsigned long eid, unsigned long fid,
     unsigned long arg0, unsigned long arg1,
     unsigned long arg2, unsigned long arg3,
     unsigned long arg4, unsigned long arg5)
 {
+        struct sbiret ret;
         register unsigned long a0 asm("a0") = arg0;
         register unsigned long a1 asm("a1") = arg1;
         register unsigned long a2 asm("a2") = arg2;
@@ -160,7 +166,10 @@ static inline unsigned long sbi_ecall(
             : "0"(a0), "1"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5), "r"(fun_id), "r"(ext_id) // 表示哪些寄存器会作为输入寄存器, 这样编译器不会改变它们的值
             : "memory");
 
-        return a0;
+        ret.error = a0;
+        ret.value = a1;
+
+        return ret;
 }
 
 static inline unsigned long sbi_set_timer(uint64_t abs_time)
@@ -168,7 +177,8 @@ static inline unsigned long sbi_set_timer(uint64_t abs_time)
         return sbi_ecall(SBI_EXT_TIME,
                          SBI_EXT_TIME_SET_TIMER,
                          abs_time,
-                         0, 0, 0, 0, 0);
+                         0, 0, 0, 0, 0)
+            .error;
 }
 
 static inline unsigned long sbi_hart_start(unsigned long hartid,
@@ -179,46 +189,57 @@ static inline unsigned long sbi_hart_start(unsigned long hartid,
                          SBI_EXT_HSM_HART_START,
                          hartid,
                          start_addr,
-                         opaque, 0, 0, 0);
+                         opaque, 0, 0, 0)
+            .error;
 }
 
 // putchar
 static inline unsigned long sbi_putchar(char c)
 {
-        return sbi_ecall(SBI_EXT_0_1_CONSOLE_PUTCHAR, SBI_FID_ZERO, (unsigned long)c, 0, 0, 0, 0, 0);
+        return sbi_ecall(SBI_EXT_0_1_CONSOLE_PUTCHAR, SBI_FID_ZERO, (unsigned long)c, 0, 0, 0, 0, 0).error;
 }
 
-// 非阻塞读
-static inline int sbi_getchar(void)
+// 非阻塞读取：立即返回，如果没有字符则返回-1
+static inline int sbi_getchar_nonblocking(void)
 {
         unsigned char ch;
-        unsigned long num_read;
+        struct sbiret ret;
 
-        unsigned long ret = sbi_ecall(SBI_EXT_DBCN,
-                                      SBI_EXT_DBCN_CONSOLE_READ,
-                                      1,                        // arg0: 读1字节
-                                      (unsigned long)&ch,       // arg1: 缓冲区地址
-                                      0,                        // arg2: 高32位地址
-                                      (unsigned long)&num_read, // arg3: 实际读取数
-                                      0, 0);
+        ret = sbi_ecall(SBI_EXT_DBCN, SBI_EXT_DBCN_CONSOLE_READ,
+                        1, (long)&ch, 0, 0, 0, 0);
 
-        if (ret > 0)
+        if (ret.error == 0 && ret.value == 1)
         {
-                return (int)ch;
+                return ch;
         }
         return -1;
 }
 
-// 阻塞式读
-static inline int sbi_getchar_blocking(void)
+// 阻塞读取：一直等待直到有字符输入
+static inline int sbi_getchar(void)
 {
         int ch;
-        printk("sdsds\n");
-        do
+        while ((ch = sbi_getchar_nonblocking()) == -1)
         {
-                ch = sbi_getchar();
-                printk("ch: %d\n", ch);
-        } while (ch < 0);
+                __asm__ volatile("wfi");
+        }
+        return ch;
+}
+
+// 带超时的读取
+static inline int sbi_getchar_timeout(unsigned long timeout)
+{
+        int ch;
+        unsigned long start = get_sys_timer_tick();
+
+        while ((ch = sbi_getchar_nonblocking()) == -1)
+        {
+                if (get_sys_timer_tick() - start > timeout)
+                {
+                        return -1; // 超时
+                }
+                __asm__ volatile("wfi");
+        }
         return ch;
 }
 

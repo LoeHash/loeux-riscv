@@ -10,5 +10,5 @@ extern uint8_t timer_inited;
 
 void do_timer_tick();
 void init_timer();
-
+uint64_t get_sys_timer_tick();
 #endif

@@ -69,7 +69,7 @@ char uart_getchar(void)
 {
         char tmp;
         acquire(&uart_lock);
-        tmp = sbi_getchar_blocking();
+        tmp = sbi_getchar();
         printk("tmp: %c\n", tmp);
         release(&uart_lock);
         return tmp;

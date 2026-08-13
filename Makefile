@@ -121,9 +121,19 @@ qemu:
 			-global virtio-mmio.force-legacy=false\
 			-drive file=./loeux.img,format=raw,if=none,id=loeux \
 			-device virtio-blk-device,drive=loeux,bus=virtio-mmio-bus.0\
-			-serial mon:stdio\
+
 
 gdb:
-	qemu-system-riscv64 -machine virt -smp 4 -m 2048M -nographic -kernel ./kernel.elf -s -S
+	qemu-system-riscv64 \
+			-machine virt \
+			-smp 4 \
+			-m 2048M \
+			-kernel ./kernel.elf \
+			-nographic \
+			-global virtio-mmio.force-legacy=false\
+			-drive file=./loeux.img,format=raw,if=none,id=loeux \
+			-device virtio-blk-device,drive=loeux,bus=virtio-mmio-bus.0\
+			-serial mon:stdio\
+			-s -S\
 
 

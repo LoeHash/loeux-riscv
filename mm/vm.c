@@ -78,75 +78,75 @@ void kvm_do_mapping(page_table pgtable)
                 ((gmd.free_end_at - gmd.free_start_at) / PG_4K_SIZE) + 1,
                 PTE_V | PTE_R | PTE_W, 0);
 
-        // // 映射 UART MMIO
-        // kvminit(pgtable,
-        //         MMIO_UART_OFFEST,
-        //         UART_BASE,
-        //         UART_PAGE_SIZE,
-        //         PTE_V | PTE_R | PTE_W, 1);
-
-        // // 映射 VirtIO MMIO
-        // kvminit(pgtable,
-        //         MMIO_VIRTIO_OFFEST,
-        //         VIRTIO_MMIO_BASE,
-        //         VIRTIO_PAGE_SIZE,
-        //         PTE_V | PTE_R | PTE_W, 1);
-
-        // // 映射 CLINT MMIO
-        // kvminit(pgtable,
-        //         MMIO_CLINT_OFFEST,
-        //         CLINT_BASE,
-        //         CLINT_PAGE_SIZE,
-        //         PTE_V | PTE_R | PTE_W, 1);
-
-        // // 映射 PLIC MMIO
-        // kvminit(pgtable,
-        //         MMIO_PLIC_OFFEST,
-        //         PLIC_BASE,
-        //         PLIC_PAGE_SIZE,
-        //         PTE_V | PTE_R | PTE_W | PTE_X, 1);
-
-        // // 映射 trampline
-        // kvminit(pgtable,
-        //         TRAMPOLINE,
-        //         (uint64_t)_trampoline_jump,
-        //         1,
-        //         PTE_V | PTE_R | PTE_U | PTE_X, 1);
-
         // 映射 UART MMIO
         kvminit(pgtable,
                 MMIO_UART_OFFEST,
                 UART_BASE,
                 UART_PAGE_SIZE,
-                PTE_V | PTE_R | PTE_W, 0);
+                PTE_V | PTE_R | PTE_W, 1);
 
         // 映射 VirtIO MMIO
         kvminit(pgtable,
                 MMIO_VIRTIO_OFFEST,
                 VIRTIO_MMIO_BASE,
                 VIRTIO_PAGE_SIZE,
-                PTE_V | PTE_R | PTE_W, 0);
+                PTE_V | PTE_R | PTE_W, 1);
 
         // 映射 CLINT MMIO
         kvminit(pgtable,
                 MMIO_CLINT_OFFEST,
                 CLINT_BASE,
                 CLINT_PAGE_SIZE,
-                PTE_V | PTE_R | PTE_W, 0);
+                PTE_V | PTE_R | PTE_W, 1);
 
         // 映射 PLIC MMIO
         kvminit(pgtable,
                 MMIO_PLIC_OFFEST,
                 PLIC_BASE,
                 PLIC_PAGE_SIZE,
-                PTE_V | PTE_R | PTE_W | PTE_X, 0);
+                PTE_V | PTE_R | PTE_W | PTE_X, 1);
 
         // 映射 trampline
         kvminit(pgtable,
                 TRAMPOLINE,
                 (uint64_t)_trampoline_jump,
                 1,
-                PTE_V | PTE_R | PTE_U | PTE_X, 0);
+                PTE_V | PTE_R | PTE_U | PTE_X, 1);
+
+        // // 映射 UART MMIO
+        // kvminit(pgtable,
+        //         MMIO_UART_OFFEST,
+        //         UART_BASE,
+        //         UART_PAGE_SIZE,
+        //         PTE_V | PTE_R | PTE_W | PTE_U, 0);
+
+        // // 映射 VirtIO MMIO
+        // kvminit(pgtable,
+        //         MMIO_VIRTIO_OFFEST,
+        //         VIRTIO_MMIO_BASE,
+        //         VIRTIO_PAGE_SIZE,
+        //         PTE_V | PTE_R | PTE_W, 0);
+
+        // // 映射 CLINT MMIO
+        // kvminit(pgtable,
+        //         MMIO_CLINT_OFFEST,
+        //         CLINT_BASE,
+        //         CLINT_PAGE_SIZE,
+        //         PTE_V | PTE_R | PTE_W, 0);
+
+        // // 映射 PLIC MMIO
+        // kvminit(pgtable,
+        //         MMIO_PLIC_OFFEST,
+        //         PLIC_BASE,
+        //         PLIC_PAGE_SIZE,
+        //         PTE_V | PTE_R | PTE_W | PTE_X, 0);
+
+        // // 映射 trampline
+        // kvminit(pgtable,
+        //         TRAMPOLINE,
+        //         (uint64_t)_trampoline_jump,
+        //         1,
+        //         PTE_V | PTE_R | PTE_U | PTE_X, 0);
 }
 
 /// @brief 将 va起始和pa起始构建对应的页表

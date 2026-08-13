@@ -8,6 +8,8 @@
 #include <spinlock.h>
 
 spinlock_t printing_lock = {0};
+volatile int panicking = 0; // printing a panic message
+volatile int panicked = 0;  // spinning forever at end of a panic
 
 #define is_digit(c) ((c) >= '0' && (c) <= '9')
 
