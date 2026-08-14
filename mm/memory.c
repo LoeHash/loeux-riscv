@@ -202,6 +202,18 @@ void init_memory()
         release(&memory_init_lock);
 }
 
+// kalloc 与 kfree
+// 是为未来的 slab分配器做准备
+void *kalloc()
+{
+        return alloc_page();
+}
+
+int kfree(void *pa)
+{
+        return free_page(pa);
+}
+
 void *alloc_page()
 {
 

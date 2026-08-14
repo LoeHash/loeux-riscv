@@ -46,4 +46,7 @@ int detect_memory_info(const char *name, int depth,
 void init_memory();
 void *alloc_page();
 int free_page(void *pa);
+
+void *kalloc();
+int kfree(void *pa);
 #endif

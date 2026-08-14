@@ -1,6 +1,7 @@
 #ifndef _INC_TYPE
 #define _INC_TYPE
 #include <stdint.h>
+#include <stdbool.h>
 #define NULL ((void *)0)
 
 struct spinlock
@@ -111,8 +112,8 @@ struct trapframe
 
 enum TASK_STATE
 {
-        UNINITLIZED,
         INITLIZED,
+        USED,
         RUNNABLE,
         RUNNING,
         BLOCKED,
@@ -122,6 +123,9 @@ enum TASK_STATE
 typedef uint64_t pte;
 typedef uint64_t *page_table;
 
+/// 现在的 task_struct 十分不安全
+/// 尤其是关于 cwd 相关
+/// 未来cwd必须改为inode并引入refcnt等多种特性
 struct task_struct
 {
         struct trapframe *utf; // 用户现场
@@ -130,11 +134,17 @@ struct task_struct
 
         page_table pg; // 进程页表
 
+        uint64_t size; // 进程内存大小
+
         struct context ctx;         // 各个进程的内核态现场
         int pid;                    // 进程id
         struct task_struct *parent; // 父亲进程
         char name[32];              // 进程name
         int return_val;             // 进程运行完毕后的返回值
+        bool dead;                  // 是否死亡
+        uint64_t kstack;            // 内核栈
+
+        char cwd[256]; // 工作目录, 后期会改为inode
 };
 
 struct cpu

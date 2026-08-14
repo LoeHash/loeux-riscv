@@ -50,6 +50,8 @@ struct vfs_node
         void *private;
         uint64_t size;
         uint8_t is_dir;
+        int refcount;
+        struct vfs_node *next; // 链表指针
 };
 
 struct file_operation

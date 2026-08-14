@@ -90,6 +90,8 @@ _trampoline_ret:
         csrw satp, a0
         sfence.vma zero, zero
 
+        # 这是固定的，每一个进程都有一个
+        #
         li a0, 0x3F7FFFC000
         ld ra, 40(a0) 
         ld sp, 48(a0) 

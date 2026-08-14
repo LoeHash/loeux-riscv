@@ -20,4 +20,8 @@ struct task_struct *get_task();
 void yield();
 void sched();
 void swtch();
+void free_task(struct task_struct *);
+struct task_struct *alloc_task();
+void free_task_pgtable(page_table pagetable, uint64_t sz);
+page_table create_task_pgtable(struct task_struct *ts);
 #endif

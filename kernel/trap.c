@@ -7,6 +7,7 @@
 #include <riscv.h>
 #include <sbi.h>
 #include <timer.h>
+#include <syscall.h>
 
 extern char kernel_trap_vec[];
 extern char _trampoline_jump[];
@@ -89,9 +90,19 @@ uint64_t user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
 
         if (scause == 8) // syscall
         {
+                // 取出a7
+                if (ts->dead)
+                {
+                        // we need the exit
+                        while (1)
+                                ;
+                }
+
                 ts->utf->sepc += 4; // ecall 指令为 4字节
+                intr_on();
+                syscall();
         }
-        else
+        else // else.
         {
                 // wrong
                 printk("Wrong with the cpu id: %d\n", get_cpu_id());

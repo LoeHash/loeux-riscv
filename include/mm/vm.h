@@ -34,4 +34,10 @@ void init_kvmmap();
 void init_kvmhart();
 void kvm_do_mapping(page_table pgtable);
 void vmprint(page_table pgtb);
+page_table pg_create();
+void pg_unmap(page_table pagetable, uint64_t va, uint64_t npages, int do_free);
+void pg_user_vmfree(page_table pagetable, uint64_t sz);
+void freewalk(page_table pagetable);
+int mappages(page_table pagetable, uint64_t va, uint64_t size, uint64_t pa, int perm);
+
 #endif

@@ -55,6 +55,37 @@ void init_kvmmap()
         printk("Done the MMU!\n");
 }
 
+int mappages(page_table pagetable, uint64_t va, uint64_t size, uint64_t pa, int perm)
+{
+        uint64_t a, last;
+        pte *pte;
+
+        if ((va % PG_4K_SIZE) != 0)
+                panic(PANIC_ERROR, "mappages: va not aligned\n");
+
+        if ((size % PG_4K_SIZE) != 0)
+                panic(PANIC_ERROR, "mappages: size not aligned\n");
+
+        if (size == 0)
+                panic(PANIC_ERROR, "mappages: size\n");
+
+        a = va;
+        last = va + size - PG_4K_SIZE;
+        for (;;)
+        {
+                if ((pte = pte_walk(pagetable, a, 1)) == 0)
+                        return -1;
+                if (*pte & PTE_V)
+                        panic(PANIC_ERROR, "mappages: remap\n");
+                *pte = PA2PTE(pa) | perm | PTE_V;
+                if (a == last)
+                        break;
+                a += PG_4K_SIZE;
+                pa += PG_4K_SIZE;
+        }
+        return 0;
+}
+
 void kvm_do_mapping(page_table pgtable)
 {
 
@@ -238,4 +269,76 @@ pte *pte_walk(page_table pt, vir_addr_t va, int create)
                 }
         }
         return &(pt[PX(0, va)]);
+}
+
+/// @brief 创建一个新的页表
+/// @return
+page_table pg_create()
+{
+        page_table pg;
+
+        if ((pg = (page_table)kalloc()) == 0)
+        {
+                return 0;
+        }
+
+        memset(pg, 0, PG_4K_SIZE);
+
+        return pg;
+}
+
+void pg_unmap(page_table pagetable, uint64_t va, uint64_t npages, int do_free)
+{
+        uint64_t a;
+        pte *pte;
+
+        if ((va % PG_4K_SIZE) != 0)
+                panic(PANIC_ERROR, "pg_unmap: not aligned");
+
+        for (a = va; a < va + npages * PG_4K_SIZE; a += PG_4K_SIZE)
+        {
+                if ((pte = pte_walk(pagetable, a, 0)) == 0) // leaf page table entry allocated?
+                        continue;
+                if ((*pte & PTE_V) == 0) // has physical page been allocated?
+                        continue;
+                if (do_free)
+                {
+                        uint64_t pa = PTE2PA(*pte);
+                        kfree((void *)pa);
+                }
+                *pte = 0;
+        }
+}
+
+// 取消所有的映射
+// 同时释放页表的所有内存
+// 隐性的限制条件是: 用户代码在 0x0 处加载
+void pg_user_vmfree(page_table pagetable, uint64_t sz)
+{
+        if (sz > 0)
+                pg_unmap(pagetable, 0, PGROUNDUP(sz) / PG_4K_SHIFT, 1);
+        freewalk(pagetable);
+}
+
+/// @brief 回收pg中所有分配的物理页
+/// @param pagetable
+void freewalk(page_table pagetable)
+{
+        // there are 2^9 = 512 PTEs in a page table.
+        for (int i = 0; i < 512; i++)
+        {
+                pte pte = pagetable[i];
+                if ((pte & PTE_V) && (pte & (PTE_R | PTE_W | PTE_X)) == 0)
+                {
+                        // this PTE points to a lower-level page table.
+                        uint64_t child = PTE2PA(pte);
+                        freewalk((page_table)child);
+                        pagetable[i] = 0;
+                }
+                else if (pte & PTE_V)
+                {
+                        panic(PANIC_ERROR, "freewalk: leaf\n");
+                }
+        }
+        kfree((void *)pagetable);
 }
