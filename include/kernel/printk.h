@@ -26,5 +26,4 @@ int skip_atoi(const char **s);
 
 static char *number(char *str, long num, int base, int size, int precision, int type);
 
-extern spinlock_t printing_lock;
 #endif

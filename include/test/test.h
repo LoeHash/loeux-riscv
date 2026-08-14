@@ -18,4 +18,5 @@ void print_mount_table(void);
 void test_fat12_operations(void);
 void test_write_verify();
 void dump_sector_n(struct virtio_blk_disk *disk, int n);
+void test_write_stdout(void);
 #endif

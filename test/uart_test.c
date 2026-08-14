@@ -74,3 +74,16 @@ void test_keyboard_echo(void)
         printk("You entered: %s\n", buf);
         printk("========== Test Complete ==========\n");
 }
+
+void test_write_stdout(void)
+{
+        char *message = "Hello, this is a test message written to fd=1!\n";
+
+        // 直接写入fd=1
+        vfs_write(1, message, strlen(message));
+
+        // 也可以分多次写入
+        vfs_write(1, "Part 1: ", 8);
+        vfs_write(1, "Hello ", 6);
+        vfs_write(1, "World!\n", 7);
+}

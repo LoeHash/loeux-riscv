@@ -69,6 +69,7 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         }
         print_mount_table();
         test_keyboard_echo();
+        test_write_stdout();
 
         __atomic_store_n(&kernel_inited, 1, __ATOMIC_RELEASE);
 

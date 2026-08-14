@@ -1,3 +1,7 @@
+/*
+ * 这是给内核使用的printk
+ * 任何系统调用都不应使用 printk
+ */
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -7,9 +11,7 @@
 #include <type.h>
 #include <spinlock.h>
 
-spinlock_t printing_lock = {0};
-volatile int panicking = 0; // printing a panic message
-volatile int panicked = 0;  // spinning forever at end of a panic
+static spinlock_t printing_lock = {0};
 
 #define is_digit(c) ((c) >= '0' && (c) <= '9')
 
@@ -244,7 +246,7 @@ void printk(char *fmt, ...)
         char buf[PRINT_BUFFER_SIZE];
         char *p = buf;
         va_start(args, fmt);
-        vsprintf(buf, fmt, args); // 将 va_list 传递给 vsprintf
+        vsprintf(buf, fmt, args);
         va_end(args);
 
         acquire(&printing_lock);

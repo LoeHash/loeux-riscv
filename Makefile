@@ -7,6 +7,7 @@ OBJCOPY := $(CROSS_COMPILE)objcopy
 INCLUDES := -I. \
             -I./include \
             -I./include/kernel \
+            -I./include/test \
             -I./include/mm \
             -I./include/drivers \
             -I./include/fs \
@@ -16,6 +17,7 @@ INCLUDES := -I. \
             -I./asm \
 	    -I./fs \
 	    -I./drivers\
+	    -I./test\
 ARCH := rv64gc
 ABI := lp64
 CFLAGS := -g -march=$(ARCH) -mabi=$(ABI) -nostdlib -ffreestanding $(INCLUDES) -Wall -Werro
@@ -119,7 +121,7 @@ test/vm_test.o: test/vm_test.c
 
 clean:
 	$(MAKE) -C boot clean
-	$(MAKE) -C kernel clean
+	$(MAKE) -C kernel clean 
 	$(MAKE) -C drivers clean
 	$(MAKE) -C fs clean
 	$(MAKE) -C test clean
