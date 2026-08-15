@@ -13,6 +13,7 @@ uint8_t vm_init_status = 0;
 spinlock_t vm_init_lock = {0};
 
 extern char *_trampoline_jump[];
+
 // turn on the paging
 void init_kvmhart()
 {
@@ -55,6 +56,7 @@ void init_kvmmap()
         printk("Done the MMU!\n");
 }
 
+// dangerous....
 int mappages(page_table pagetable, uint64_t va, uint64_t size, uint64_t pa, int perm)
 {
         uint64_t a, last;
@@ -312,11 +314,17 @@ void pg_unmap(page_table pagetable, uint64_t va, uint64_t npages, int do_free)
 
 // 取消所有的映射
 // 同时释放页表的所有内存
-// 隐性的限制条件是: 用户代码在 0x0 处加载
+// 隐性的限制条件是: 用户代码在 0x1000 处加载
 void pg_user_vmfree(page_table pagetable, uint64_t sz)
 {
         if (sz > 0)
-                pg_unmap(pagetable, 0, PGROUNDUP(sz) / PG_4K_SHIFT, 1);
+        {
+                pg_unmap(pagetable, 0x1000, PGROUNDUP(sz) / PG_4K_SHIFT, 1);
+        }
+        // 释放栈
+        // 从顶部开始，因此需要减去页
+        pg_unmap(pagetable, USER_STACK_BASE, USER_STACK_PAGES, 1);
+
         freewalk(pagetable);
 }
 
@@ -341,4 +349,94 @@ void freewalk(page_table pagetable)
                 }
         }
         kfree((void *)pagetable);
+}
+
+uint64_t walkaddr(page_table pagetable, uint64_t va)
+{
+        pte *pte;
+        uint64_t pa;
+
+        if (va >= MAX_VA)
+                return 0;
+
+        pte = pte_walk(pagetable, va, 0);
+        if (pte == 0)
+                return 0;
+        if ((*pte & PTE_V) == 0)
+                return 0;
+        if ((*pte & PTE_U) == 0)
+                return 0;
+        pa = PTE2PA(*pte);
+        return pa;
+}
+
+// 未来可增加懒分配机制
+int copyout(page_table pagetable, uint64_t dstva, char *src, uint64_t len)
+{
+        uint64_t n, va0, pa0;
+        pte *pte;
+
+        // 可能会遇到数据横跨多页
+        while (len > 0)
+        {
+                va0 = PGROUNDDOWN(dstva);
+                if (va0 > MAX_VA)
+                {
+                        return -1;
+                }
+
+                // 未来这里做懒分配
+                pa0 = walkaddr(pagetable, va0);
+                if (pa0 == 0)
+                {
+                        return -1;
+                }
+
+                // 权限检查
+                pte = pte_walk(pagetable, va0, 0);
+                if ((*pte & PTE_W) == 0)
+                {
+                        return -1;
+                }
+
+                n = PG_4K_SIZE - (dstva - va0);
+                if (n > len)
+                        n = len;
+                memmove((void *)(pa0 + (dstva - va0)), src, n);
+
+                len -= n;
+                src += n;
+                dstva = va0 + PG_4K_SIZE;
+        }
+        return 0;
+}
+
+int copyin(page_table pagetable, char *dst, uint64_t srcva, uint64_t len)
+{
+        uint64_t n, va0, pa0;
+        while (len > 0)
+        {
+                va0 = PGROUNDDOWN(srcva);
+                if (va0 > MAX_VA)
+                {
+                        return -1;
+                }
+
+                // 未来这里做懒分配
+                pa0 = walkaddr(pagetable, va0);
+                if (pa0 == 0)
+                {
+                        return -1;
+                }
+
+                n = PG_4K_SIZE - (srcva - va0);
+                if (n > len)
+                        n = len;
+                memmove(dst, (void *)(pa0 + (srcva - va0)), n);
+
+                len -= n;
+                dst += n;
+                srcva = va0 + PG_4K_SIZE;
+        }
+        return 0;
 }

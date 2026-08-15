@@ -3,6 +3,46 @@
 
 #include <stddef.h>
 
+#define MAX(a, b) a > b ? a : b
+#define MIN(a, b) a < b ? a : b
+
+static inline char *strcpy_with_terminate(char *s, const char *t, int n)
+{
+        char *os;
+
+        os = s;
+        if (n <= 0)
+                return os;
+        while (--n > 0 && (*s++ = *t++) != 0)
+                ;
+        *s = 0;
+        return os;
+}
+
+static inline void *memmove(void *dst, const void *src, uint32_t n)
+{
+        const char *s;
+        char *d;
+
+        if (n == 0)
+                return dst;
+
+        s = src;
+        d = dst;
+        if (s < d && s + n > d)
+        {
+                s += n;
+                d += n;
+                while (n-- > 0)
+                        *--d = *--s;
+        }
+        else
+                while (n-- > 0)
+                        *d++ = *s++;
+
+        return dst;
+}
+
 /**
  * memset - 将内存区域填满指定字符 (RISC-V)
  * @ptr:  起始地址

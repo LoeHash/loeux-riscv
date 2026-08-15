@@ -8,3 +8,9 @@ static syscall_func_t syscalls[] = {
     [0] 0 // syscall id = 0
           // []
 };
+
+void syscall()
+{
+        while (1)
+                ;
+}

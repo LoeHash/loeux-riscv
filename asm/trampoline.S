@@ -80,7 +80,9 @@ _trampoline_jump:
         csrr a2, stval
         
         jalr ra, t0
-        
+
+.section .text._trampoline_ret
+.globl _trampoline_ret     
 _trampoline_ret:
         # 回到这里 a0寄存器保留了
         # 我们的用户satp

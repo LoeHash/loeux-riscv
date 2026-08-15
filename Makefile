@@ -37,6 +37,7 @@ OBJS := asm/kernel_trap_vec.o\
 	kernel/proc.o\
 	kernel/trap.o\
 	kernel/timer.o\
+	kernel/syscall.o\
 	mm/memory.o\
 	mm/vm.o\
 	drivers/virtio_disk.o\
@@ -103,7 +104,8 @@ kernel/panic.o: kernel/panic.c
 kernel/spinlock.o: kernel/spinlock.c
 kernel/proc.o: kernel/proc.c
 kernel/trap.o: kernel/trap.c
-kernel/trap.o: kernel/timer.c
+kernel/timer.o: kernel/timer.c
+kernel/syscall.o: kernel/syscall.c
 mm/memory.o: mm/memory.c 
 mm/vm.o: mm/vm.c 
 drivers/virtio_disk.o: drivers/virtio_disk.c 

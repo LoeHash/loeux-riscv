@@ -35,6 +35,22 @@ void init_vfs_std()
         printk("stdin=0, stdout=1, stderr=2 -> /dev/ttyS0\n");
 }
 
+// 设置文件偏移
+int vfs_seek(int fd, uint64_t offset)
+{
+        if (fd_check(fd) == -1)
+        {
+                return -1;
+        }
+
+        struct file *f = fd_table[fd];
+
+        if (!f || offset > f->size)
+                return -1;
+        f->offset = offset;
+        return 0;
+}
+
 int vfs_create(const char *path, int is_dir)
 {
         struct mount_entry *mp = vfs_find_mount(path);
@@ -244,6 +260,7 @@ int vfs_open(const char *path, int flags)
         file->flags = flags;
         file->pos = 0;
         file->type = 0;
+        file->size = vnode->size;
 
         // 调用文件系统的open
         // 检查文件存在，权限等信息

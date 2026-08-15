@@ -134,7 +134,7 @@ struct task_struct
 
         page_table pg; // 进程页表
 
-        uint64_t size; // 进程内存大小
+        uint64_t size; // 进程内存大小从 0x1000 开始算的 用户映射长度
 
         struct context ctx;         // 各个进程的内核态现场
         int pid;                    // 进程id

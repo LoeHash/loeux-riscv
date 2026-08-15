@@ -39,6 +39,7 @@ struct file
         struct mount_entry *mnt; // 这个文件属于哪个挂载点
         uint64_t pos;            // 文件位置信息（FAT12 就是簇号，EXT4 就是 inode 号）
         uint64_t offset;         // 当前读写位置
+        uint64_t size;           // 当前读写位置
         int flags;               // 打开时的标志
         void *private;
         int type; // 0 块设备 1 字符设备
@@ -83,6 +84,7 @@ int vfs_close(int fd);
 int64_t vfs_write(int fd, const void *buf, uint64_t count);
 int64_t vfs_read(int fd, void *buf, uint64_t count);
 int vfs_open(const char *path, int flags);
+int vfs_seek(int fd, uint64_t offset);
 struct vfs_node *vfs_lookup(const char *path);
 int vfs_mount(char *mount_path, struct block_device *bdev, FSTYPE type);
 void print_mount_table(void);

@@ -76,9 +76,37 @@
 // 每一个进程对应的trapframe 一页
 #define TRAPFRAME_MAPPING TRAMPOLINE - 2 * PG_4K_SIZE
 
-// 进程栈顶, 与 TRAMPLINE 保持4KB距离
+// 进程内核栈顶, 与 TRAMPLINE 保持4KB距离
 #define TASK_KERNEL_STACK_TOP (TRAPFRAME_MAPPING - 2 * PG_4K_SIZE)
 
 #define TASK_KERNEL_STACK(t) (TASK_KERNEL_STACK_TOP - (t + 1) * PG_4K_SIZE)
+/*
+高地址
+0x3F7FFFA000  ← TASK_KERNEL_STACK_TOP (进程0栈顶)
+0x3F7FFF9000  ← 进程0栈底
+0x3F7FFF8000  ← 进程1栈底
+0x3F7FFF7000  ← 进程2栈底
+   ...
+0x3F7FFF3000  ← 进程126栈底
+0x3F7FFF2000  ← 进程127栈底 (最低地址)
+低地址
+*/
+
+#define END_OF_KERNEL_STACK 0x3F7FFF2000
+
+// 用户栈顶
+// 在当前阶段我仅作内核在0x80000000处的恒等映射
+// 后期会迁移到高地址，至于现在, 给用户预留2gb
+#define USER_SPACE_TOP 0x80000000 - PG_4K_SIZE
+#define USER_STACK_TOP USER_SPACE_TOP
+#define USER_STACK_PAGES 4
+#define USER_STACK_SIZE USER_STACK_PAGES *PG_4K_SIZE // 4页
+// 用户栈底
+#define USER_STACK_BASE USER_STACK_TOP - USER_STACK_SIZE
+
+// 用户参数映射
+#define USER_ARG_START USER_STACK_BASE - PG_4K_SIZE
+#define USER_ARG_ARGC_OFFSET 0
+#define USER_ARG_ARGV_OFFSET 8
 
 #endif

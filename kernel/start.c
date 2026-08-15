@@ -68,8 +68,11 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
                 panic(PANIC_ERROR, "kstart vfs_mount: error!\n");
         }
         print_mount_table();
-        test_keyboard_echo();
-        test_write_stdout();
+        // test_keyboard_echo();
+        // test_write_stdout();
+
+        // 初始化第一个进程
+        init_user();
 
         __atomic_store_n(&kernel_inited, 1, __ATOMIC_RELEASE);
 

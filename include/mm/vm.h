@@ -23,7 +23,6 @@
 #define PA2PTE(pa) ((((uint64_t)pa) >> 12) << 10)
 #define PGROUNDDOWN(a) (((a)) & ~(0xFFF))
 #define PGROUNDUP(sz) (((sz) + PG_4K_SIZE - 1) & ~(PG_4K_SIZE - 1))
-
 extern page_table kernel_pt;
 extern uint8_t vm_init_status;
 extern spinlock_t vm_init_lock;
@@ -39,5 +38,7 @@ void pg_unmap(page_table pagetable, uint64_t va, uint64_t npages, int do_free);
 void pg_user_vmfree(page_table pagetable, uint64_t sz);
 void freewalk(page_table pagetable);
 int mappages(page_table pagetable, uint64_t va, uint64_t size, uint64_t pa, int perm);
-
+uint64_t walkaddr(page_table pagetable, uint64_t va);
+int copyout(page_table pagetable, uint64_t dstva, char *src, uint64_t len);
+int copyin(page_table pagetable, char *dst, uint64_t srcva, uint64_t len);
 #endif
