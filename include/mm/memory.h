@@ -38,6 +38,7 @@ extern struct memory_info mem_info;
 extern struct gloal_memory_descriptor gmd;
 extern uint64_t MEMORY_SIZE;
 extern uint8_t memory_init_status;
+
 extern spinlock_t memory_init_lock;
 
 int detect_memory_info(const char *name, int depth,

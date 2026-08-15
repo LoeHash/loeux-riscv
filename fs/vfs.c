@@ -47,6 +47,7 @@ int vfs_seek(int fd, uint64_t offset)
 
         if (!f || offset > f->size)
                 return -1;
+
         f->offset = offset;
         return 0;
 }
