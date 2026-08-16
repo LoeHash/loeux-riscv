@@ -361,7 +361,7 @@ int fat12_write(struct file *file, const void *buf, uint64_t count, uint64_t *ou
                 current_offset++;
         }
 
-        file->pos += bytes_written;
+        // file->pos += bytes_written;
         *out_len = bytes_written;
         return 0;
 }
@@ -515,7 +515,11 @@ int fat12_read(struct file *file, void *buf, uint64_t count, uint64_t *out_len)
         }
 
         // 更新文件位置
-        file->pos += bytes_read;
+        // 所有的文件系统都不应直接修改file的任何属性，原因如下:
+        // 1. 语义不明
+        // 2. 与vfs层逻辑混乱
+        // 3. seeking...
+        // file->pos += bytes_read;
         *out_len = bytes_read;
         return 0;
 }
@@ -661,7 +665,7 @@ int fat12_lookup(void *fs_priv, const char *rel_path, void **out_node)
                 node->file_size = entry.dir_file_size;
                 node->attr = entry.dir_attr;
                 *out_node = node;
-                return 0;
+                return node->file_size;
         }
 
         return -1;

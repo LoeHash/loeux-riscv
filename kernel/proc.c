@@ -23,8 +23,8 @@
 
 struct task_struct tasks[NTASKS];
 struct cpu cpus[NCPUS];
-struct task_struct *init_task = NULL;
-int init_task_startup = 0;
+struct task_struct *initask = NULL;
+static int init_task_startup = 0;
 extern char *_trampoline_jump[];
 extern char *_trampoline_ret[];
 static uint64_t pid_counter = 1;
@@ -41,17 +41,12 @@ void init_user()
 
         struct task_struct *ts;
 
+        // alloc_task 静默获取ts锁
+        // 同时不会释放
         ts = alloc_task();
 
-        // exec
-        ts->utf->a0 = kexec("/init", (char *[]){"hello!", 0});
-        if (ts->utf->a0 == -1)
-        {
-                panic(PANIC_ERROR, "inituser: a0 is -1!\n");
-        }
+        initask = ts;
 
-        init_task_startup = 1;
-        __atomic_thread_fence(__ATOMIC_SEQ_CST);
         set_cwd(ts, "/");
 
         ts->state = RUNNABLE;
@@ -76,6 +71,21 @@ void first_ret()
         // 来到这里，我们仍然持有
         // 此进程的锁, 此时状态必然为 running
         release(&ts->lk);
+
+        if (!init_task_startup)
+        {
+
+                // 必须要推迟初始化
+                init_task_startup = 1;
+                __atomic_thread_fence(__ATOMIC_SEQ_CST);
+
+                // exec
+                ts->utf->a0 = kexec("/init", (char *[]){"hello!", 0});
+                if (ts->utf->a0 == -1)
+                {
+                        panic(PANIC_ERROR, "inituser: a0 is -1!\n");
+                }
+        }
 
         setup_return_trapframe(ts);
         uint64_t satp = MAKE_SATP(ts->pg);
@@ -357,22 +367,15 @@ int kexec(char *path, char **argv)
 {
         struct elf64_ehdr ehdr;
         struct elf64_phdr phdr;
+
         // 获取当前task
         struct task_struct *t = get_task();
+
         page_table new_page = 0, old_page = t->pg;
         uint64_t user_argv_ptr[MAX_ARG_NUM];
-        uint64_t file_size,
-            outlen;
-        int fd;
-        struct vfs_node *vnode = vfs_lookup(path);
-        char *buf;
-        if (vnode == NULL)
-        {
-                return -1;
-        }
 
-        file_size = vnode->size;
-        free_page(vnode);
+        int fd;
+        char *buf;
 
         fd = vfs_open(path, FS_MODE_READ);
         if (fd == -1)

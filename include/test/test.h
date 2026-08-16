@@ -19,4 +19,7 @@ void test_fat12_operations(void);
 void test_write_verify();
 void dump_sector_n(struct virtio_blk_disk *disk, int n);
 void test_write_stdout(void);
+void vfs_test_read_file(const char *path);
+void vfs_test_seek_file(const char *path, int offset, uint64_t n);
+
 #endif

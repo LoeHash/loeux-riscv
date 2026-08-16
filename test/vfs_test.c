@@ -3,8 +3,59 @@
 #include <test.h>
 #include <fat12.h>
 #include <printk.h>
+#include <panic.h>
 extern struct file *fd_table[MAX_FD_NUM];
 extern struct mount_entry mount_points[MAX_MOUNT_NUM];
+
+// offset处读取文件n个字节
+void vfs_test_seek_file(const char *path, int offset, uint64_t n)
+{
+        int fd = vfs_open(path, FS_O_RW);
+
+        if (fd == -1)
+        {
+                panic(PANIC_ERROR, "vfs_open\n");
+        }
+
+        printk("==========================================\n");
+        printk("从 %d 开始, 读取文件 %s 的 %lu 个字节\n", offset, path, n);
+        char *buf = alloc_page();
+        vfs_seek(fd, offset);
+        // 直接读取 n个字节
+        vfs_read(fd, buf, n);
+
+        printk("在 %d 处, 读取文件 %s 的 %lu 个字节 的内容是:\n", offset, path, n);
+        for (int i = 0; i < n; i++)
+        {
+                printk("%0#lx ", buf[i]);
+        }
+        printk("\n");
+}
+
+void vfs_test_read_file(const char *path)
+{
+        int fd = vfs_open(path, FS_O_RW);
+
+        if (fd == -1)
+        {
+                panic(PANIC_ERROR, "vfs_open\n");
+        }
+
+        printk("==========================================\n");
+        printk("读取整个文件\n");
+        char *buf = alloc_page();
+        uint64_t read = 0;
+        uint64_t read_times = 0;
+        uint64_t byte_count = 0;
+        // 一次读取 2048 字节
+        while ((read = vfs_read(fd, buf, 4096)) > 0)
+        {
+                byte_count += read;
+                printk("第 %lu 次读取, 读取字节数: %lu\n", ++read_times, read);
+        }
+
+        printk("共读取 %lu 次, 共计读取字节数: %lu\n", read_times, byte_count);
+}
 
 void print_mount_table(void)
 {

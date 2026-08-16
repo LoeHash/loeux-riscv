@@ -76,17 +76,24 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
 
         __atomic_store_n(&kernel_inited, 1, __ATOMIC_RELEASE);
 
-        // 唤醒多核
-        for (int i = 0; i < NCPUS; i++)
+        vfs_test_seek_file("/init", 25, 24);
+
+        while (1)
         {
-                if (i == main_core)
-                {
-                        continue;
-                }
-                sbi_hart_start(i, (uint64_t)_sec_entry64, (uint64_t)NULL);
+                /* code */
         }
 
-        __atomic_thread_fence(__ATOMIC_SEQ_CST);
+        // // 唤醒多核
+        // for (int i = 0; i < NCPUS; i++)
+        // {
+        //         if (i == main_core)
+        //         {
+        //                 continue;
+        //         }
+        //         sbi_hart_start(i, (uint64_t)_sec_entry64, (uint64_t)NULL);
+        // }
+
+        // __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
         scheduler();
 }

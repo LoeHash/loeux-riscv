@@ -11,6 +11,7 @@
 #define MAX_ARG_NUM 64
 extern struct task_struct tasks[NTASKS];
 extern struct cpu cpus[NCPUS];
+extern struct task_struct *initask;
 
 struct cpu *get_cpu();
 uint64_t get_cpu_id();

@@ -48,7 +48,7 @@ int vfs_seek(int fd, uint64_t offset)
         if (!f || offset > f->size)
                 return -1;
 
-        f->offset = offset;
+        f->pos = offset;
         return 0;
 }
 
@@ -198,6 +198,8 @@ int64_t vfs_read(int fd, void *buf, uint64_t count)
                 }
 
                 file->pos += out_len;
+                printk("after file ops: %lu\n", file->pos);
+
                 return out_len;
         }
 }
@@ -329,6 +331,7 @@ struct vfs_node *vfs_lookup(const char *path)
 
         vnode->mount = mp;
         vnode->private = priv_node;
+        vnode->size = ret;
 
         return vnode;
 }
