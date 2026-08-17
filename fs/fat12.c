@@ -285,17 +285,20 @@ int fat12_write(struct file *file, const void *buf, uint64_t count, uint64_t *ou
         struct fat12_priv *fs = fnode->fs_priv;
         uint64_t bytes_written = 0;
         uint32_t offset = file->pos;
-        uint8_t sector_buf[512];
+        // uint8_t sector_buf[512];
+        uint8_t *sector_buf = alloc_page();
 
         // 只读文件不能写
         if (fnode->attr & FAT12_ATTR_READ_ONLY)
         {
+                free_page(sector_buf);
                 return -1;
         }
 
         // 目录不能写
         if (fnode->attr & FAT12_ATTR_DIRECTORY)
         {
+                free_page(sector_buf);
                 return -1;
         }
 
@@ -307,6 +310,7 @@ int fat12_write(struct file *file, const void *buf, uint64_t count, uint64_t *ou
                 if (ret < 0)
                 {
                         *out_len = 0;
+                        free_page(sector_buf);
                         return -1; // 磁盘已满或其他错误
                 }
         }
@@ -329,6 +333,7 @@ int fat12_write(struct file *file, const void *buf, uint64_t count, uint64_t *ou
                         {
                                 *out_len = i;
                                 file->pos += i;
+                                free_page(sector_buf);
                                 return 0;
                         }
                 }
@@ -343,6 +348,7 @@ int fat12_write(struct file *file, const void *buf, uint64_t count, uint64_t *ou
                 {
                         *out_len = i;
                         file->pos += i;
+                        free_page(sector_buf);
                         return -1;
                 }
 
@@ -354,6 +360,7 @@ int fat12_write(struct file *file, const void *buf, uint64_t count, uint64_t *ou
                 {
                         *out_len = i;
                         file->pos += i;
+                        free_page(sector_buf);
                         return -1;
                 }
 
@@ -363,6 +370,7 @@ int fat12_write(struct file *file, const void *buf, uint64_t count, uint64_t *ou
 
         // file->pos += bytes_written;
         *out_len = bytes_written;
+        free_page(sector_buf);
         return 0;
 }
 
@@ -438,7 +446,8 @@ int fat12_read(struct file *file, void *buf, uint64_t count, uint64_t *out_len)
 
         struct fat12_node *fnode = (struct fat12_node *)file->private;
         struct fat12_priv *fs = fnode->fs_priv;
-        uint8_t sector_buf[512];
+        // uint8_t sector_buf[512];
+        uint8_t *sector_buf = alloc_page();
         uint64_t bytes_read = 0;
         uint32_t offset = file->pos;
 
@@ -446,6 +455,7 @@ int fat12_read(struct file *file, void *buf, uint64_t count, uint64_t *out_len)
         if (offset >= fnode->file_size)
         {
                 *out_len = 0;
+                free_page(sector_buf);
                 return 0;
         }
 
@@ -466,6 +476,7 @@ int fat12_read(struct file *file, void *buf, uint64_t count, uint64_t *out_len)
                 if (cluster >= 0xFF8)
                 {
                         *out_len = bytes_read;
+                        free_page(sector_buf);
                         return 0;
                 }
         }
@@ -483,6 +494,7 @@ int fat12_read(struct file *file, void *buf, uint64_t count, uint64_t *out_len)
                 if (fs->bdev->driver.read(fs->bdev->private_data, sector, sector_buf) < 0)
                 {
                         *out_len = bytes_read;
+                        free_page(sector_buf);
                         return -1;
                 }
 
@@ -521,6 +533,7 @@ int fat12_read(struct file *file, void *buf, uint64_t count, uint64_t *out_len)
         // 3. seeking...
         // file->pos += bytes_read;
         *out_len = bytes_read;
+        free_page(sector_buf);
         return 0;
 }
 

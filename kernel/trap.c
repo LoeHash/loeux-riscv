@@ -37,7 +37,7 @@ void kernel_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
                 // 判断是否应该让出cpu
                 if (get_task() != 0)
                 {
-                        // 进入这里， 说明是用户态
+                        // 进入这里，当前 CPU 有一个 task 正在运行
                         // 在执行syscall后，运行了一段时间的系统调用的
                         // 代码后，进入的trap，这里直接让出即刻
                         // 我们还会执行原来的代码
@@ -67,6 +67,12 @@ void kernel_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
 uint64_t user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
 {
         intr_off();
+        printk("USER TRAP: hart=%d scause=%lx sepc=%lx stval=%lx satp=%lx\n",
+               get_cpu_id(),
+               scause,
+               sepc,
+               stval,
+               r_satp());
 
         // 获取当前的TAKS
         struct task_struct *ts = get_task();
@@ -102,6 +108,11 @@ uint64_t user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
                 intr_on();
                 syscall();
         }
+        else if (scause == CLINT_INTERRUPT_SCAUSE)
+        {
+                printk("we got a timer!\n");
+                yield();
+        }
         else // else.
         {
                 // wrong
@@ -109,6 +120,12 @@ uint64_t user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
                 printk("   scause 保存异常发生时的 PC: %0#lx\n", scause);
                 printk("   sepc   保存异常发生时的 PC: %0#lx\n", sepc);
                 printk("   stval  异常的附加信息:%0#lx\n", stval);
+
+                ts->dead = 1;
+
+                // 暂时直接停住，方便调试
+                while (1)
+                        ;
         }
 
         intr_on();
@@ -124,13 +141,13 @@ void setup_return_trapframe(struct task_struct *ts)
         // 1. 提前设置栈指针
         ts->utf->kernel_sp = (uint64_t)TASK_KERNEL_STACK(ts - tasks);
         // 2. 准备内核页表
-        ts->utf->kernel_satp = (uint64_t)kernel_pt;
+        ts->utf->kernel_satp = MAKE_SATP(kernel_pt);
         // 3. 设置下次进入的函数
         ts->utf->kernel_trap = (uint64_t)user_trap_hanlder;
         // 4. 设置cpu id
         ts->utf->kernel_hartid = r_tp();
         // 5. 设置蹦床, 为下次进入做准备
-        w_stvec((uint64_t)(TRAMPOLINE + (_trampoline_jump - TRAMPOLINE)));
+        w_stvec((uint64_t)(TRAMPOLINE));
         // 6. 清空状态
         w_sstatus((r_sstatus() & ~SSTATUS_SPP) | SSTATUS_SPIE);
         // 7. 设置返回pc

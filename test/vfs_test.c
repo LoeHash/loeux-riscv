@@ -30,6 +30,8 @@ void vfs_test_seek_file(const char *path, int offset, uint64_t n)
                 printk("%0#lx ", buf[i]);
         }
         printk("\n");
+
+        vfs_close(fd);
 }
 
 void vfs_test_read_file(const char *path)

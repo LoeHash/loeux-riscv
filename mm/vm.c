@@ -12,7 +12,7 @@ page_table kernel_pt = 0;
 uint8_t vm_init_status = 0;
 spinlock_t vm_init_lock = {0};
 
-extern char *_trampoline_jump[];
+extern char _trampoline_jump[];
 
 // turn on the paging
 void init_kvmhart()
@@ -38,7 +38,6 @@ void init_kvmmap()
         printk("before mapping: %0#lx\n", (uint64_t)kernel_pt);
         kvm_do_mapping(kernel_pt);
         printk("after mapping: %0#lx\n", (uint64_t)kernel_pt);
-        // vmprint(kernel_pt);
         pte *ptep = pte_walk(kernel_pt, MMIO_VIRTIO_OFFEST, 0);
         if (ptep == NULL)
         {
@@ -54,6 +53,8 @@ void init_kvmmap()
         init_kvmhart();
         release(&vm_init_lock);
         printk("Done the MMU!\n");
+        vm_init_status = 1;
+        MEMORY_FENCE;
 }
 
 // dangerous....
@@ -72,13 +73,20 @@ int mappages(page_table pagetable, uint64_t va, uint64_t size, uint64_t pa, int 
                 panic(PANIC_ERROR, "mappages: size\n");
 
         a = va;
+        printk("va: %0#lx, pa: %0#lx size: %lu\n", a, pa, size);
+
         last = va + size - PG_4K_SIZE;
         for (;;)
         {
+                // printk("va: %0#lx\n", a);
+
                 if ((pte = pte_walk(pagetable, a, 1)) == 0)
                         return -1;
                 if (*pte & PTE_V)
+                {
+                        printk("va: %0#lx, pa: %0#lx\n", a, pa);
                         panic(PANIC_ERROR, "mappages: remap\n");
+                }
                 *pte = PA2PTE(pa) | perm | PTE_V;
                 if (a == last)
                         break;
@@ -146,40 +154,80 @@ void kvm_do_mapping(page_table pgtable)
         //         1,
         //         PTE_V | PTE_R | PTE_U | PTE_X, 1);
 
+        // // 映射 UART MMIO
+        // kvminit(pgtable,
+        //         MMIO_UART_OFFEST,
+        //         UART_BASE,
+        //         UART_PAGE_SIZE,
+        //         PTE_V | PTE_R | PTE_W | PTE_U, 0);
+
+        // // 映射 VirtIO MMIO
+        // kvminit(pgtable,
+        //         MMIO_VIRTIO_OFFEST,
+        //         VIRTIO_MMIO_BASE,
+        //         VIRTIO_PAGE_SIZE,
+        //         PTE_V | PTE_R | PTE_W, 0);
+
+        // // 映射 CLINT MMIO
+        // kvminit(pgtable,
+        //         MMIO_CLINT_OFFEST,
+        //         CLINT_BASE,
+        //         CLINT_PAGE_SIZE,
+        //         PTE_V | PTE_R | PTE_W, 0);
+
+        // // 映射 PLIC MMIO
+        // kvminit(pgtable,
+        //         MMIO_PLIC_OFFEST,
+        //         PLIC_BASE,
+        //         PLIC_PAGE_SIZE,
+        //         PTE_V | PTE_R | PTE_W | PTE_X, 0);
+
+        // // 映射 trampline
+        // kvminit(pgtable,
+        //         TRAMPOLINE,
+        //         (uint64_t)_trampoline_jump,
+        //         1,
+        //         PTE_V | PTE_R | PTE_U | PTE_X, 1);
+
         // 映射 UART MMIO
-        kvminit(pgtable,
-                MMIO_UART_OFFEST,
-                UART_BASE,
-                UART_PAGE_SIZE,
-                PTE_V | PTE_R | PTE_W | PTE_U, 0);
+        printk("UART\n");
+        mappages(pgtable,
+                 MMIO_UART_OFFEST,
+                 UART_PAGE_SIZE * 4096,
+                 UART_BASE,
+                 PTE_V | PTE_R | PTE_W);
 
         // 映射 VirtIO MMIO
-        kvminit(pgtable,
-                MMIO_VIRTIO_OFFEST,
-                VIRTIO_MMIO_BASE,
-                VIRTIO_PAGE_SIZE,
-                PTE_V | PTE_R | PTE_W, 0);
+        printk("VirtIO\n");
+        mappages(pgtable,
+                 MMIO_VIRTIO_OFFEST,
+                 VIRTIO_PAGE_SIZE * PG_4K_SIZE,
+                 VIRTIO_MMIO_BASE,
+                 PTE_V | PTE_R | PTE_W);
 
         // 映射 CLINT MMIO
-        kvminit(pgtable,
-                MMIO_CLINT_OFFEST,
-                CLINT_BASE,
-                CLINT_PAGE_SIZE,
-                PTE_V | PTE_R | PTE_W, 0);
+        printk("CLINT\n");
+        mappages(pgtable,
+                 MMIO_CLINT_OFFEST,
+                 CLINT_PAGE_SIZE * PG_4K_SIZE,
+                 CLINT_BASE,
+                 PTE_V | PTE_R | PTE_W);
 
         // 映射 PLIC MMIO
-        kvminit(pgtable,
-                MMIO_PLIC_OFFEST,
-                PLIC_BASE,
-                PLIC_PAGE_SIZE,
-                PTE_V | PTE_R | PTE_W | PTE_X, 0);
+        printk("PLIC\n");
+        mappages(pgtable,
+                 MMIO_PLIC_OFFEST,
+                 PLIC_PAGE_SIZE * PG_4K_SIZE,
+                 PLIC_BASE,
+                 PTE_V | PTE_R | PTE_W | PTE_X);
 
         // 映射 trampline
-        kvminit(pgtable,
-                TRAMPOLINE,
-                (uint64_t)_trampoline_jump,
-                1,
-                PTE_V | PTE_R | PTE_U | PTE_X, 0);
+        printk("trampline\n");
+        mappages(pgtable,
+                 TRAMPOLINE,
+                 PG_4K_SIZE,
+                 (uint64_t)_trampoline_jump,
+                 PTE_V | PTE_R | PTE_X);
 }
 
 /// @brief 将 va起始和pa起始构建对应的页表
@@ -201,8 +249,8 @@ int kvminit(page_table pt, vir_addr_t va, phys_addr_t pa, uint64_t pages, uint32
                 if (debug == 1)
                 {
                         // // 打印参数
-                        // printk("[kvminit] va = %0#lx, pa = %#x, pages = %lu, flags = %#x\n",
-                        //        vad, pad, pages, flags);
+                        printk("[kvminit] va = %0#lx, pa = %#x, pages = %lu, flags = %#x\n",
+                               vad, pad, pages, flags);
                 }
                 // pte_walk
                 // 如果遇到没有分配的就会创建
@@ -261,7 +309,7 @@ pte *pte_walk(page_table pt, vir_addr_t va, int create)
                 {
                         if (!create || (pt = alloc_page()) == NULL)
                         {
-                                printk("really out!\n");
+                                // printk("really out!\n");
                                 return 0;
                         }
 

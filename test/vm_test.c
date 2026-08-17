@@ -2,6 +2,9 @@
 #include <test.h>
 #include <printk.h>
 static int is_valid(pte p);
+
+static uint64_t sv39_idx_to_va(uint64_t l2, uint64_t l1, uint64_t l0);
+
 static int is_valid(pte p)
 {
         return (p & PTE_V) && (p & (PTE_R | PTE_W | PTE_X)) == 0;
@@ -42,9 +45,18 @@ void vmprint(page_table pgtb)
                                 if ((pk & PTE_V))
                                 {
                                         printk(" .. ..");
-                                        printk(" ..%d: va %p\tpa: %p\n", k, (uint64_t *)pk, (uint64_t *)PTE2PA(pk));
+                                        printk(" ..%d: va %p\tpa: %p\n", k, (uint64_t *)sv39_idx_to_va(i, j, k), (uint64_t *)PTE2PA(pk));
                                 }
                         }
                 }
         }
+}
+
+static uint64_t sv39_idx_to_va(uint64_t l2, uint64_t l1, uint64_t l0)
+{
+
+        uint64_t vpn = (l2 << 18) | (l1 << 9) | l0;
+        uint64_t va = vpn << 12;
+
+        return va;
 }

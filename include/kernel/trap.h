@@ -2,6 +2,45 @@
 #define _INC_TRAP
 #include <stdint.h>
 
+/*
+        loeux 内核执行流
+
+                scheduler
+                    │
+               swtch(cpu,A)
+                    │
+                    ▼
+               A 的内核流
+                    │
+              ┌─────┴─────┐
+              │           │
+          用户态        内核态
+              │           │
+            trap         trap
+              │           │
+        user_trap      kernel_trap
+              │           │
+              └─────┬─────┘
+                    │
+                  yield
+                    │
+                  sched
+                    │
+            swtch(A,cpu)
+                    │
+                    ▼
+                scheduler
+                    │
+             ...选择 B...
+                    │
+             swtch(cpu,B)
+                    │
+                    ▼
+                  B ...
+
+
+*/
+
 // 时钟中断scause
 #define CLINT_INTERRUPT_SCAUSE 0x8000000000000005
 

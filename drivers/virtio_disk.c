@@ -1,4 +1,5 @@
 #include <type.h>
+#include <riscv.h>
 #include <virtio.h>
 #include <lib.h>
 #include <memory.h>
@@ -112,21 +113,31 @@ int virtio_blk_read(void *dev, uint64_t sector, void *buf)
         struct virtio_blk_disk *vblk = (struct virtio_blk_disk *)dev;
 
         // 构建参数req
-        struct virtio_blk_req req;
-        uint8_t status;
+        // struct virtio_blk_req req;
+        // uint8_t status;
+        // 注意
+        // 不要传递高地址的数据!
+        // 因为进入此函数的sp有两种情况
+        // 1. 初始化阶段, 此时的cpu sp指针在物理地址，低地址
+        // 2. 调度阶段, 此时的cpu sp指针在虚拟地址, 高地址
+        // 总结:
+        //  因为创建进程后, 所有的函数调用全部在该进程的内核栈
         int ret;
+        struct virtio_blk_req *req = alloc_page();
+        uint8_t *status = (uint8_t *)req + 1; // very not safe!
 
-        req.type = VIRTIO_BLK_T_IN;
-        req.sector = sector;
-        req.ioprio = 0;
+        req->type = VIRTIO_BLK_T_IN;
+        req->sector = sector;
+        req->ioprio = 0;
 
-        ret = virtio_disk_rw_sync(vblk, &req, buf, 512, &status);
+        ret = virtio_disk_rw_sync(vblk, req, buf, 512, status);
 
         if (ret < 0)
         {
                 printk("Read sector 0 failed: status=%d\n", status);
                 return -1;
         }
+        free_page(req);
 
         return ret;
 }
@@ -144,6 +155,7 @@ uint32_t virtio_disk_rw_sync(
     uint32_t bytes,
     uint8_t *status)
 {
+        intr_off();
         if (bytes % DISK_SECTOR_SIZE != 0)
         {
                 return -1;
@@ -197,17 +209,23 @@ uint32_t virtio_disk_rw_sync(
         // 提交到avail
         vq.avail_start->ring[vq.avail_start->idx % vq.queue_size] = head_idx;
         vq.avail_start->idx++;
-        MEMORY_FENCE;
 
         // 同步等待
         uint16_t last = vq.used_start->idx;
+        MEMORY_FENCE;
+        intr_on();
 
         // 通知设备
         b32_write(selected_desk->base_addr + VIRTIO_MMIO_QUEUE_NOTIFY_OFFSET, 0); // 0 队列有任务
 
         while (vq.used_start->idx == last)
         {
-                asm volatile("wfi");
+                // 轮询
+                for (int i = 0; i < 1000; i++)
+                {
+                        asm volatile("nop");
+                }
+                // asm volatile("wfi");
         }
 
         // 走到这里，读取或写入完成

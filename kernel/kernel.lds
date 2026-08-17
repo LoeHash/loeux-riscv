@@ -9,8 +9,15 @@ SECTIONS
                 *(.text._entry64) /* 定死 0x80200000 处必为入口汇编 */
         }
 
-        .kernel_trap : ALIGN(4) {
+        . = ALIGN(4);
+        .kernel_trap : {
                 *(.text.kernel_trap_vec)
+        }
+
+        . = ALIGN(4096);
+        .trampoline : {
+                *(.text._trampoline_jump)
+                *(.text._trampoline_ret)
         }
 
         .text :{

@@ -20,6 +20,7 @@
 #define PXSHIFT(level) (PGSHIFT + (9 * (level)))
 #define PX(level, va) ((((uint64_t)(va)) >> PXSHIFT(level)) & PXMASK)
 #define PTE2PA(pte) (((pte) >> 10) << 12)
+#define PTE2PPN(pte) (((pte) >> 10) & 0xFFFFFFFFFULL)
 #define PA2PTE(pa) ((((uint64_t)pa) >> 12) << 10)
 #define PGROUNDDOWN(a) (((a)) & ~(0xFFF))
 #define PGROUNDUP(sz) (((sz) + PG_4K_SIZE - 1) & ~(PG_4K_SIZE - 1))

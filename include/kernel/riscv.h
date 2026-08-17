@@ -4,6 +4,19 @@
 #define SATP_SV39 (8L << 60) // mode 8
 #define MAKE_SATP(pagetable) (SATP_SV39 | (((uint64_t)pagetable) >> 12))
 
+static inline void
+w_mstatus(uint64_t x)
+{
+        asm volatile("csrw mstatus, %0" : : "r"(x));
+}
+
+static inline uint64_t r_mstatus()
+{
+        uint64_t x;
+        asm volatile("csrr %0, mstatus" : "=r"(x));
+        return x;
+}
+
 static inline uint64_t
 r_sstatus()
 {
@@ -72,7 +85,18 @@ w_sie(uint64_t x)
 {
         asm volatile("csrw sie, %0" : : "r"(x));
 }
+// Physical Memory Protection
+static inline void
+w_pmpcfg0(uint64_t x)
+{
+        asm volatile("csrw pmpcfg0, %0" : : "r"(x));
+}
 
+static inline void
+w_pmpaddr0(uint64_t x)
+{
+        asm volatile("csrw pmpaddr0, %0" : : "r"(x));
+}
 // we use the tp reg to save the cpu hart id
 static inline uint64_t
 r_tp()

@@ -15,7 +15,7 @@
 #define EI_MAG1_VAL 0x45
 #define EI_MAG2_VAL 0x4c
 #define EI_MAG3_VAL 0x46
-#define EI_CLASS_VAL 1
+#define EI_CLASS_VAL 2
 #define EI_DATA_VAL 1
 #define EI_VERSION_VAL 1
 #define E_TYPE 2

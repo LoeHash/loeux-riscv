@@ -131,7 +131,7 @@ clean:
 	$(MAKE) -C asm clean
 	rm -f $(TARGET) $(TARGET_BIN)
 qemu:
-	make -j16 && qemu-system-riscv64 \
+	qemu-system-riscv64 \
 			-machine virt \
 			-smp 4 \
 			-m 2048M \

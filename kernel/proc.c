@@ -25,8 +25,8 @@ struct task_struct tasks[NTASKS];
 struct cpu cpus[NCPUS];
 struct task_struct *initask = NULL;
 static int init_task_startup = 0;
-extern char *_trampoline_jump[];
-extern char *_trampoline_ret[];
+extern char _trampoline_jump[];
+extern char _trampoline_ret[];
 static uint64_t pid_counter = 1;
 static spinlock_t pid_lock = {0};
 static uint64_t alloc_pid();
@@ -86,10 +86,12 @@ void first_ret()
                         panic(PANIC_ERROR, "inituser: a0 is -1!\n");
                 }
         }
+        // vmprint(kernel_pt);
 
         setup_return_trapframe(ts);
         uint64_t satp = MAKE_SATP(ts->pg);
         uint64_t trampoline_userret = TRAMPOLINE + (_trampoline_ret - _trampoline_jump);
+        // vmprint(ts->pg);
         ((void (*)(uint64_t))trampoline_userret)(satp);
 }
 
@@ -346,12 +348,12 @@ page_table create_task_pgtable(struct task_struct *ts)
         }
 
         if (mappages(pg, TRAMPOLINE, PG_4K_SIZE,
-                     (uint64_t)_trampoline_jump, PTE_R | PTE_X) < 0)
+                     (uint64_t)_trampoline_jump, PTE_V | PTE_R | PTE_X) < 0)
         {
                 pg_user_vmfree(pg, 0);
                 return 0;
         }
-
+        printk("trapframe: %0#lx\n", TRAPFRAME_MAPPING);
         if (mappages(pg, TRAPFRAME_MAPPING, PG_4K_SIZE,
                      (uint64_t)(ts->utf), PTE_R | PTE_W) < 0)
         {
@@ -377,7 +379,7 @@ int kexec(char *path, char **argv)
         int fd;
         char *buf;
 
-        fd = vfs_open(path, FS_MODE_READ);
+        fd = vfs_open(path, FS_O_READ);
         if (fd == -1)
         {
                 return -1;
@@ -396,11 +398,24 @@ int kexec(char *path, char **argv)
                 free_page(buf);
                 return -1;
         }
+
+        // // 打印
+        // for (int i = 0; i < 64; i++)
+        // {
+        //         printk(" %0#lx ", buf[i]);
+        //         if (i + 1 % 16 == 0)
+        //         {
+        //                 printk("\n");
+        //         }
+        // }
+        // printk("\n");
+
         int errcod;
         memcpy(&ehdr, buf, 64);
         if ((errcod = check_elf_header(&ehdr)) != 0)
         {
-                panic(PANIC_WRONG, "kexec: not a efl! error code: %d\n", errcod);
+                panic(PANIC_ERROR, "kexec: not a efl! ");
+                printk("error code: %d\n", errcod);
                 return -1;
         }
 
@@ -514,6 +529,8 @@ int kexec(char *path, char **argv)
         t->utf->sp = new_sp;
         t->utf->sepc = ehdr.e_entry;
 
+        printk("elf entry: %0#lx\n", ehdr.e_entry);
+
         free_task_pgtable(old_page, old_size);
         free_page(buf);
 
@@ -606,16 +623,16 @@ static int check_elf_header(struct elf64_ehdr *ehdr)
                 return -9;
         }
 
-        // 检查class
-        if (ehdr->e_ident[EI_CLASS_OFFSET] != EI_CLASS_VAL)
-        {
-                return -2;
-        }
-
         // 检查端序
         if (ehdr->e_ident[EI_DATA_OFFSET] != EI_DATA_VAL)
         {
                 return -3;
+        }
+
+        // 检查class
+        if (ehdr->e_ident[EI_CLASS_OFFSET] != EI_CLASS_VAL)
+        {
+                return -2;
         }
 
         // 检查版本
@@ -652,7 +669,7 @@ static int check_elf_header(struct elf64_ehdr *ehdr)
 
 static int flags_to_pte(uint32_t p_flags)
 {
-        int perm = PTE_U; // 用户态可访问（用户程序必须设置）
+        int perm = PTE_U; // 用户态可访问
 
         if (p_flags & 1) // PF_X：可执行
                 perm |= PTE_X;

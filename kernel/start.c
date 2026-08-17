@@ -29,6 +29,8 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         // write tp to save ours hart id to
         // get cput struct in anywhere
         w_tp(hart_id);
+        w_sie(r_sie() | SIE_SEIE | SIE_STIE);
+
         init_cpu();
         main_core = hart_id;
 
@@ -38,6 +40,7 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         init_memory();
         // 构建内核页表 同時啓動mmu
         init_kvmmap();
+
         // 初始化计时器
         init_timer();
         // 开启内核中断异常处理
@@ -50,6 +53,17 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         init_vfs();
         init_uart();
         init_vfs_std();
+        pte *p = pte_walk(kernel_pt, MMIO_UART_OFFEST, 0);
+        if (p && (*p & PTE_V))
+        {
+                printk("MMIO mapped before MMU on: PTE=%lx, PA=%lx\n", p, PTE2PA(*p));
+        }
+        else
+        {
+                panic(PANIC_ERROR, "MMIO NOT mapped before MMU on!");
+        }
+
+        printk("ret: %0#lx\n", *(uint8_t *)TRAMPOLINE);
 
         // 开启全局中断
         intr_on();
@@ -58,30 +72,22 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         // 设置一次定时器
         sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
 
-        // 测试读写
-        // test_virtio_disk_rw_sync();
-        // test_write_verify();
-        // dump_sector_n(&usable_disks[0], 0);
         // 挂载硬盘
         if (vfs_mount("/", &virtio_block_device, FAT12) == -1)
         {
                 panic(PANIC_ERROR, "kstart vfs_mount: error!\n");
         }
         print_mount_table();
-        // test_keyboard_echo();
-        // test_write_stdout();
 
         // 初始化第一个进程
         init_user();
 
         __atomic_store_n(&kernel_inited, 1, __ATOMIC_RELEASE);
 
-        vfs_test_seek_file("/init", 25, 24);
-
-        while (1)
-        {
-                /* code */
-        }
+        // while (1)
+        // {
+        //         vfs_test_seek_file("/init", 25, 24);
+        // }
 
         // // 唤醒多核
         // for (int i = 0; i < NCPUS; i++)

@@ -6,7 +6,7 @@ _trampoline_jump:
         # 且用户有 RX, 同时当前页表是用户页表，且我们是 S-mode
         # 因此，我们只需要:
         csrw sscratch, a0 # 把 a0 的值保存
-        li a0, 0x3F7FFFC000 
+        li a0, 0x3ff7ffc000 
         sd ra, 40(a0) 
         sd sp, 48(a0) 
         sd gp, 56(a0) 
@@ -48,7 +48,7 @@ _trampoline_jump:
         sd t0, 32(a0)
 
         # 保存hartid
-        sd tp, 24(a0)
+        ld tp, 24(a0)
         
         # 设置栈指针
         # 注意这个栈指针必须要在satp设置为内核页表
@@ -84,6 +84,7 @@ _trampoline_jump:
 .section .text._trampoline_ret
 .globl _trampoline_ret     
 _trampoline_ret:
+
         # 回到这里 a0寄存器保留了
         # 我们的用户satp
         # 但现在我们还是在使用内核页表
@@ -92,9 +93,14 @@ _trampoline_ret:
         csrw satp, a0
         sfence.vma zero, zero
 
-        # 这是固定的，每一个进程都有一个
-        #
-        li a0, 0x3F7FFFC000
+        # 这是固定的，每一个进程都有一个 trapframe
+        li a0, 0x3ff7ffc000
+
+        # 重置sepc
+        ld t0, 32(a0)
+        csrw sepc, t0
+
+        # 通用寄存器恢复
         ld ra, 40(a0) 
         ld sp, 48(a0) 
         ld gp, 56(a0) 
@@ -131,6 +137,5 @@ _trampoline_ret:
         mv t0, a0
         ld a0, 112(t0)
         csrr t0, sscratch
-
         #ok 准备返回
         sret
