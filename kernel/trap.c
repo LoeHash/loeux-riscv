@@ -21,6 +21,8 @@ void kernel_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
 {
         intr_off();
 
+        // printk("KERNEL TIMER: sepc=%lx \n", sepc);
+        // printk("KERNEL TIMER: sepc=%lx \n", sepc);
         if (r_sstatus_spp() != 1)
         {
                 panic(PANIC_ERROR, "kernel_trap_hanlder: NOT FOMR KERNEL!\n");
@@ -67,12 +69,12 @@ void kernel_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
 uint64_t user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
 {
         intr_off();
-        printk("USER TRAP: hart=%d scause=%lx sepc=%lx stval=%lx satp=%lx\n",
-               get_cpu_id(),
-               scause,
-               sepc,
-               stval,
-               r_satp());
+        // printk("USER TRAP: hart=%d scause=%lx sepc=%lx stval=%lx satp=%lx\n",
+        //        get_cpu_id(),
+        //        scause,
+        //        sepc,
+        //        stval,
+        //        r_satp());
 
         // 获取当前的TAKS
         struct task_struct *ts = get_task();
@@ -110,7 +112,6 @@ uint64_t user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
         }
         else if (scause == CLINT_INTERRUPT_SCAUSE)
         {
-                printk("we got a timer!\n");
                 yield();
         }
         else // else.

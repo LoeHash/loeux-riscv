@@ -38,6 +38,7 @@ OBJS := asm/kernel_trap_vec.o\
 	kernel/trap.o\
 	kernel/timer.o\
 	kernel/syscall.o\
+	kernel/syscall_file.o\
 	mm/memory.o\
 	mm/vm.o\
 	drivers/virtio_disk.o\
@@ -60,6 +61,7 @@ TARGET_BIN := kernel.bin
 .PHONY: all clean boot kernel
 
 all: $(TARGET_BIN)
+	$(MAKE) -C user
 
 # 递归构建子目录
 boot:
@@ -67,6 +69,9 @@ boot:
 
 kernel:
 	$(MAKE) -C kernel
+
+user:
+	$(MAKE) -C user
 	
 mm:
 	$(MAKE) -C mm	
@@ -105,6 +110,7 @@ kernel/spinlock.o: kernel/spinlock.c
 kernel/proc.o: kernel/proc.c
 kernel/trap.o: kernel/trap.c
 kernel/timer.o: kernel/timer.c
+kernel/syscall_file.o: kernel/syscall_file.c
 kernel/syscall.o: kernel/syscall.c
 mm/memory.o: mm/memory.c 
 mm/vm.o: mm/vm.c 
@@ -128,6 +134,7 @@ clean:
 	$(MAKE) -C fs clean
 	$(MAKE) -C test clean
 	$(MAKE) -C mm clean
+	$(MAKE) -C user clean
 	$(MAKE) -C asm clean
 	rm -f $(TARGET) $(TARGET_BIN)
 qemu:

@@ -80,18 +80,15 @@ void first_ret()
                 __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
                 // exec
-                ts->utf->a0 = kexec("/init", (char *[]){"hello!", 0});
+                ts->utf->a0 = kexec("/_init", (char *[]){"hello!", 0});
                 if (ts->utf->a0 == -1)
                 {
                         panic(PANIC_ERROR, "inituser: a0 is -1!\n");
                 }
         }
-        // vmprint(kernel_pt);
-
         setup_return_trapframe(ts);
         uint64_t satp = MAKE_SATP(ts->pg);
         uint64_t trampoline_userret = TRAMPOLINE + (_trampoline_ret - _trampoline_jump);
-        // vmprint(ts->pg);
         ((void (*)(uint64_t))trampoline_userret)(satp);
 }
 
@@ -179,16 +176,17 @@ void yield()
 
 void sched()
 {
+        struct task_struct *ts = get_task();
         // 是否持有当前进程的锁
-        if (!is_holding(&get_task()->lk))
+        if (!is_holding(&ts->lk))
         {
                 panic(PANIC_ERROR, "sched: not a owner!\n");
         }
-
         // 执行切换
         // 把当前进程的ctx保存
         // 同时读取cpu先前的ctx
-        swtch(&get_cpu()->ctx, &get_task()->ctx);
+        // we got a big mistake!
+        swtch(&ts->ctx, &get_cpu()->ctx);
 }
 
 /// 而对于cpu来说，cpu的内核态上下文实际上就是调度器的代码

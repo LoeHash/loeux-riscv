@@ -5,6 +5,8 @@
 *.dtb
 *.dts
 *.img
+user/_*
 .vscode
 .vscode/*
 .gdb_history
+commit_history.txt

@@ -488,3 +488,49 @@ int copyin(page_table pagetable, char *dst, uint64_t srcva, uint64_t len)
         }
         return 0;
 }
+
+int copyinstr(page_table pagetable, char *dst, uint64_t srcva, uint64_t max)
+{
+        uint64_t n, va0, pa0;
+        int got_null = 0;
+
+        while (got_null == 0 && max > 0)
+        {
+                va0 = PGROUNDDOWN(srcva);
+                pa0 = walkaddr(pagetable, va0);
+                if (pa0 == 0)
+                        return -1;
+                n = PG_4K_SIZE - (srcva - va0);
+                if (n > max)
+                        n = max;
+
+                char *p = (char *)(pa0 + (srcva - va0));
+                while (n > 0)
+                {
+                        if (*p == '\0')
+                        {
+                                *dst = '\0';
+                                got_null = 1;
+                                break;
+                        }
+                        else
+                        {
+                                *dst = *p;
+                        }
+                        --n;
+                        --max;
+                        p++;
+                        dst++;
+                }
+
+                srcva = va0 + PG_4K_SIZE;
+        }
+        if (got_null)
+        {
+                return 0;
+        }
+        else
+        {
+                return -1;
+        }
+}
