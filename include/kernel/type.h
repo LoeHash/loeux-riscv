@@ -143,7 +143,7 @@ struct task_struct
         int return_val;             // 进程运行完毕后的返回值
         bool dead;                  // 是否死亡
         uint64_t kstack;            // 内核栈
-
+        bool in_syscall;
         char cwd[256]; // 工作目录, 后期会改为inode
 };
 

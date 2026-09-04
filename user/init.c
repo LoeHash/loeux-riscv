@@ -2,12 +2,16 @@
 
 int main(int argc, char **argv)
 {
-        write(4541, "hello", 5);
-        write(4541, "hello", 5);
-        write(4541, "hello", 5);
+        uint64_t counter = 0;
+
         while (1)
         {
-                /* code */
+                write(1, "hello\n", 6);
+                // while (counter < 100000000)
+                // {
+                //         counter++;
+                // }
+                counter = 0;
         }
 
         return 889;

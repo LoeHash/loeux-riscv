@@ -169,8 +169,8 @@ void yield()
 
         ts->state = RUNNABLE;
 
-        // 切换
         sched();
+
         release(&ts->lk);
 }
 
@@ -182,11 +182,24 @@ void sched()
         {
                 panic(PANIC_ERROR, "sched: not a owner!\n");
         }
+        if (ts->state == RUNNING)
+        {
+                panic(PANIC_ERROR, "sched RUNNING");
+        }
+        if (intr_get())
+                panic(PANIC_ERROR, "sched: interruptible!");
+
+        if (get_cpu()->noff != 1)
+        {
+                panic(PANIC_ERROR, "sched: noff != 1");
+        }
         // 执行切换
         // 把当前进程的ctx保存
         // 同时读取cpu先前的ctx
-        // we got a big mistake!
+        // we got a big mistake! but fixed
+        int intena = get_cpu()->intena;
         swtch(&ts->ctx, &get_cpu()->ctx);
+        get_cpu()->intena = intena;
 }
 
 /// 而对于cpu来说，cpu的内核态上下文实际上就是调度器的代码
@@ -202,6 +215,8 @@ void scheduler()
         uint8_t found = 0;
         while (1)
         {
+                found = 0;
+
                 // 调度
                 for (ts = tasks; ts < &tasks[NTASKS]; ts++)
                 {
@@ -214,7 +229,6 @@ void scheduler()
                         // 进程必须在退出内核态前
                         // 释放掉自身的锁
                         acquire(&ts->lk);
-
                         if (ts->state != RUNNABLE)
                         {
                                 release(&ts->lk);
@@ -229,10 +243,32 @@ void scheduler()
                         // 同时传入要切换的进程的ctx内核上下文
                         // 同时我们要释放锁
                         cpu->ts = ts;
+
                         // 当前的cpu
                         ts->utf->kernel_hartid = get_cpu_id();
-                        swtch(&(cpu->ctx), &ts->ctx);
 
+                        // printk("SCHED -> TASK: hart=%d pid=%d "
+                        //        "task.ctx.ra=%lx task.ctx.sp=%lx "
+                        //        "utf.sepc=%lx stvec=%lx sstatus=%lx\n",
+                        //        get_cpu_id(),
+                        //        ts->pid,
+                        //        ts->ctx.ra,
+                        //        ts->ctx.sp,
+                        //        ts->utf->sepc,
+                        //        r_stvec(),
+                        //        r_sstatus());
+                        swtch(&(cpu->ctx), &ts->ctx);
+                        // printk("SCHED <- TASK: hart=%d pid=%d "
+                        //        "state=%d ctx.ra=%lx ctx.sp=%lx "
+                        //        "utf.sepc=%lx stvec=%lx sstatus=%lx\n",
+                        //        get_cpu_id(),
+                        //        ts->pid,
+                        //        ts->state,
+                        //        ts->ctx.ra,
+                        //        ts->ctx.sp,
+                        //        ts->utf->sepc,
+                        //        r_stvec(),
+                        //        r_sstatus());
                         // swtch后，说明用户程序的时间片已经
                         // 用完了，此时需要调度其他的
                         cpu->ts = 0;
@@ -245,7 +281,9 @@ void scheduler()
                         // 来到这里，如果切换一圈后发现没有
                         // 进程要运行，就等一等
                         // printk("no process available! end with hart id: %d\n", get_cpu_id());
+                        intr_on();
                         asm volatile("wfi");
+                        intr_off();
                 }
         }
 }

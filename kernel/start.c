@@ -63,8 +63,6 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
                 panic(PANIC_ERROR, "MMIO NOT mapped before MMU on!");
         }
 
-        printk("ret: %0#lx\n", *(uint8_t *)TRAMPOLINE);
-
         // 开启全局中断
         intr_on();
         // 开启时钟中断
@@ -84,12 +82,7 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
 
         __atomic_store_n(&kernel_inited, 1, __ATOMIC_RELEASE);
 
-        // while (1)
-        // {
-        //         vfs_test_seek_file("/init", 25, 24);
-        // }
-
-        // // 唤醒多核
+        // 唤醒多核
         // for (int i = 0; i < NCPUS; i++)
         // {
         //         if (i == main_core)

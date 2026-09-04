@@ -9,6 +9,9 @@
 #define NCPUS 4
 #define USER_PROG_LOAD_AT 0x1000 // 用户程序加载的位置
 #define MAX_ARG_NUM 64
+
+#define GET_CPU_ID get_cpu_id()
+
 extern struct task_struct tasks[NTASKS];
 extern struct cpu cpus[NCPUS];
 extern struct task_struct *initask;

@@ -15,12 +15,9 @@ uint64_t sys_write()
         get_arg_addr(1, &buf);
         get_arg_addr(2, &count);
         int max = 128 > count ? count : 128;
-        // copy_data_str(buf, kbuf, max);
-        printk("pid: %lu\n", get_task()->pid);
+        copy_data_str(buf, kbuf, max);
 
-        printk("max: %d\n", max);
+        // printk("the fd: %d\n", fd);
 
-        while (1)
-        {
-        }
+        return vfs_write(fd, kbuf, max);
 }

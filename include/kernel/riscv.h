@@ -173,6 +173,14 @@ r_sepc()
         return x;
 }
 
+static inline uint64_t
+r_stval()
+{
+        uint64_t x;
+        asm volatile("csrr %0, stval" : "=r"(x));
+        return x;
+}
+
 static inline void
 w_sepc(uint64_t x)
 {

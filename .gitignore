@@ -5,8 +5,9 @@
 *.dtb
 *.dts
 *.img
-user/_*
+user/_init
 .vscode
 .vscode/*
 .gdb_history
 commit_history.txt
+kernel.dump
