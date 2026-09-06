@@ -17,7 +17,5 @@ uint64_t sys_write()
         int max = 128 > count ? count : 128;
         copy_data_str(buf, kbuf, max);
 
-        // printk("the fd: %d\n", fd);
-
         return vfs_write(fd, kbuf, max);
 }

@@ -5,7 +5,7 @@
 *.dtb
 *.dts
 *.img
-user/_init
+user/_*
 .vscode
 .vscode/*
 .gdb_history

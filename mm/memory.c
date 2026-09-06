@@ -208,11 +208,48 @@ void *kalloc()
 {
         return alloc_page();
 }
-
+// mm/memory.c — 修改 free_page/kfree
 int kfree(void *pa)
 {
+        printk("kfree: pa=%p\n", pa);
         return free_page(pa);
 }
+
+int free_page(void *pa)
+{
+        struct page *pg = PHY_TO_PAGE(pa);
+
+        // 临时保护：检查是否要释放的页正被某个 task 的 trapframe 使用
+        for (int i = 0; i < NTASKS; i++)
+        {
+                if (tasks[i].utf && (void *)tasks[i].utf == pa)
+                {
+                        printk("PANIC-WARNING: attempt to free trapframe page pa=%p for task[%d] pid=%d - skip free and log\n",
+                               pa, i, tasks[i].pid);
+                        // 跳过实际释放，返回但保留页（便于取证）
+                        return 0;
+                }
+        }
+
+        printk("free_page: pa=%p page=%p flags=%#x ref=%d\n", pa, pg, pg->flags, pg->refcount);
+        memset((char *)pg->paddr, 0, PG_4K_SIZE);
+        pg->flags &= 0;
+        pg->flags |= PG_FLAG_FREE;
+        if (gmd.free_tail)
+        {
+                gmd.free_tail->next = pg;
+        }
+        else
+        {
+                gmd.free_tail = pg;
+        }
+
+        return 0;
+}
+// int kfree(void *pa)
+// {
+//         return free_page(pa);
+// }
 
 void *alloc_page()
 {
@@ -233,20 +270,20 @@ void *alloc_page()
         return (void *)pg->paddr;
 }
 
-int free_page(void *pa)
-{
-        struct page *pg = PHY_TO_PAGE(pa);
-        memset((char *)pg->paddr, 0, PG_4K_SIZE);
-        pg->flags &= 0;
-        pg->flags |= PG_FLAG_FREE;
-        if (gmd.free_tail)
-        {
-                gmd.free_tail->next = pg;
-        }
-        else
-        {
-                gmd.free_tail = pg;
-        }
+// int free_page(void *pa)
+// {
+//         struct page *pg = PHY_TO_PAGE(pa);
+//         memset((char *)pg->paddr, 0, PG_4K_SIZE);
+//         pg->flags &= 0;
+//         pg->flags |= PG_FLAG_FREE;
+//         if (gmd.free_tail)
+//         {
+//                 gmd.free_tail->next = pg;
+//         }
+//         else
+//         {
+//                 gmd.free_tail = pg;
+//         }
 
-        return 0;
-}
+//         return 0;
+// }

@@ -27,6 +27,7 @@ struct task_struct *initask = NULL;
 static int init_task_startup = 0;
 extern char _trampoline_jump[];
 extern char _trampoline_ret[];
+extern char kernel_trap_vec[];
 static uint64_t pid_counter = 1;
 static spinlock_t pid_lock = {0};
 static uint64_t alloc_pid();
@@ -86,6 +87,12 @@ void first_ret()
                         panic(PANIC_ERROR, "inituser: a0 is -1!\n");
                 }
         }
+
+        if (ts->pid == 2)
+        {
+                ts->utf->a0 = kexec("/_init2", (char *[]){"hello!", 0});
+        }
+
         setup_return_trapframe(ts);
         uint64_t satp = MAKE_SATP(ts->pg);
         uint64_t trampoline_userret = TRAMPOLINE + (_trampoline_ret - _trampoline_jump);
@@ -199,6 +206,17 @@ void sched()
         // we got a big mistake! but fixed
         int intena = get_cpu()->intena;
         swtch(&ts->ctx, &get_cpu()->ctx);
+        //
+        // !!! DO NOT REMOVE !!!
+        //
+        // swtch 之后，当前 task 可能已经从其他 hart 迁移到了本 hart。
+        // 调度器在 swtch 之前已经把 ts->utf->kernel_hartid 设置为
+        // 本 hart 的 hart id，因此用它来修正 tp 寄存器。
+        //
+        // 否则 tp 仍然是旧 hart 的值，导致 get_cpu()/get_task() 访问
+        // 错误的 per-cpu 数据，出现 cpu->ts == NULL、锁状态错乱、
+        // 甚至内核态缺页等问题。
+        w_tp(ts->utf->kernel_hartid);
         get_cpu()->intena = intena;
 }
 
@@ -229,14 +247,16 @@ void scheduler()
                         // 进程必须在退出内核态前
                         // 释放掉自身的锁
                         acquire(&ts->lk);
+
                         if (ts->state != RUNNABLE)
                         {
                                 release(&ts->lk);
                                 continue;
                         }
-                        found = 1;
                         // 首先切换状态
                         ts->state = RUNNING;
+                        MEMORY_FENCE;
+                        found = 1;
 
                         // 接下来，尽快切换
                         // 传入当前cpu上下文的存储位置
@@ -246,6 +266,8 @@ void scheduler()
 
                         // 当前的cpu
                         ts->utf->kernel_hartid = get_cpu_id();
+
+                        task_restore_stvec(ts);
 
                         // printk("SCHED -> TASK: hart=%d pid=%d "
                         //        "task.ctx.ra=%lx task.ctx.sp=%lx "
@@ -272,7 +294,7 @@ void scheduler()
                         // swtch后，说明用户程序的时间片已经
                         // 用完了，此时需要调度其他的
                         cpu->ts = 0;
-
+                        w_stvec((uint64_t)kernel_trap_vec);
                         release(&ts->lk);
                 }
 
@@ -281,6 +303,7 @@ void scheduler()
                         // 来到这里，如果切换一圈后发现没有
                         // 进程要运行，就等一等
                         // printk("no process available! end with hart id: %d\n", get_cpu_id());
+                        w_stvec((uint64_t)kernel_trap_vec);
                         intr_on();
                         asm volatile("wfi");
                         intr_off();
@@ -331,6 +354,10 @@ void init_tasks()
 
                 ts->state = INITLIZED;
                 ts->kstack = TASK_KERNEL_STACK(ts - tasks);
+                ts->stvec = (uint64_t)kernel_trap_vec; // task 第一次运行时处于 kernel
+                ts->trap_sepc = 0;                     // 初始没有 kernel trap
+                ts->trap_sstatus = 0;                  // 初始没有 kernel trap
+                ts->trap_ctx_valid = 0;                // 初始没有 kernel trap
         }
 }
 

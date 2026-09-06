@@ -11,9 +11,10 @@ kernel_trap_vec:
 
         # 8(sp) unused
 
-        # gp / tp
+        # gp
         sd gp, 16(sp)
-        sd tp, 24(sp)
+        # tp 不保存/恢复：tp 始终表示当前 hart id，由 sched()/trampoline 维护。
+        # 若在此处恢复，任务跨核迁移后 tp 会变回旧 hart id，导致 get_cpu() 错乱。
 
         # t0-t2
         sd t0, 32(sp)
@@ -63,7 +64,7 @@ kernel_trap_vec:
 
         # gp / tp
         ld gp, 16(sp)
-        ld tp, 24(sp)
+        # tp 不从栈恢复（见上方说明）
 
         # t0-t2
         ld t0, 32(sp)

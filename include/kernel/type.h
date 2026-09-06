@@ -121,7 +121,17 @@ enum TASK_STATE
         DEAD
 };
 typedef uint64_t pte;
+typedef int pid_t;
 typedef uint64_t *page_table;
+
+struct wait_node
+{
+        struct wait_node *prev;
+        struct wait_node *next;
+        struct task_struct *task;
+};
+
+typedef struct wait_node wait_node_t;
 
 /// 现在的 task_struct 十分不安全
 /// 尤其是关于 cwd 相关
@@ -137,7 +147,7 @@ struct task_struct
         uint64_t size; // 进程内存大小从 0x1000 开始算的 用户映射长度
 
         struct context ctx;         // 各个进程的内核态现场
-        int pid;                    // 进程id
+        pid_t pid;                  // 进程id
         struct task_struct *parent; // 父亲进程
         char name[32];              // 进程name
         int return_val;             // 进程运行完毕后的返回值
@@ -145,6 +155,13 @@ struct task_struct
         uint64_t kstack;            // 内核栈
         bool in_syscall;
         char cwd[256]; // 工作目录, 后期会改为inode
+
+        uint64_t stvec;         // 当前 task 逻辑上的 stvec
+        uint64_t trap_sepc;     // kernel trap 被打断时的 sepc
+        uint64_t trap_sstatus;  // kernel trap 被打断时的 sstatus
+        uint8_t trap_ctx_valid; // 当前 task 是否存在未完成的 kernel trap
+
+        wait_node_t sleep_node; // 睡眠等待队列
 };
 
 struct cpu

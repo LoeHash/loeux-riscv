@@ -26,7 +26,7 @@ void kernel_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
         // sfence_vma();
 
         uint64_t sstatus = r_sstatus();
-
+        struct task_struct *ts = get_task();
         if (r_sstatus_spp() != 1)
         {
                 printk("KERNEL TRAP RAW: tp=%lx hart=%d scause=%lx sepc=%lx satp=%lx stvec=%lx sstatus=%lx\n",
@@ -48,52 +48,66 @@ void kernel_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
                 // 在内核态里的时钟中断
                 do_timer_tick();
                 sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
-
-                if (get_task() != 0)
+                if (ts == 0)
                 {
-                        // 进入这里，当前 CPU 有一个 task 正在运行
-                        // 在执行syscall后，运行了一段时间的系统调用的
-                        // 代码后，进入的trap，这里直接让出即刻
-                        // 我们还会执行原来的代码
-                        yield();
+                        w_sepc(sepc);
+                        w_sstatus(sstatus);
+                        return;
                 }
+
+                ts->stvec = (uint64_t)kernel_trap_vec; // 当前 task 处于 kernel trap
+
+                ts->trap_sepc = sepc;       // 保存这次 kernel trap 的返回 PC
+                ts->trap_sstatus = sstatus; // 保存这次 kernel trap 的 sstatus
+                ts->trap_ctx_valid = 1;     // 标记 task 当前存在 kernel trap continuation
+
+                w_stvec(ts->stvec); // 当前 hart 使用 kernel trap vector
+
+                yield(); // task 可能迁移到其他 hart
+
+                task_restore_stvec(ts); // yield 返回后恢复 task 自己的 stvec
+
+                if (ts->trap_ctx_valid)
+                {
+                        w_sepc(ts->trap_sepc);       // 恢复 task 原来的 kernel trap PC
+                        w_sstatus(ts->trap_sstatus); // 恢复 task 原来的 kernel trap sstatus
+                }
+
+                ts->trap_ctx_valid = 0; // kernel trap continuation 已经完成
+
+                return;
         }
-        else
+        printk("the kernel_pt %0#lx\n", kernel_pt);
+
+        printk(
+            "KERNEL TRAP ENTRY: "
+            "hart=%d "
+            "scause=%lx "
+            "sepc=%lx "
+            "stval=%lx "
+            "sstatus=%lx "
+            "SPP=%d "
+            "SIE=%d "
+            "satp=%lx "
+            "stvec=%lx\n",
+            get_cpu_id(),
+            scause,
+            sepc,
+            stval,
+            sstatus,
+            (int)((sstatus & SSTATUS_SPP) != 0),
+            (int)((sstatus & SSTATUS_SIE) != 0),
+            r_satp(),
+            r_stvec());
+
+        printk("Wrong with the cpu id: %d\n", get_cpu_id());
+        printk("   scause 保存异常发生时的 PC: %0#lx\n", scause);
+        printk("   sepc   保存异常发生时的 PC: %0#lx\n", sepc);
+        printk("   stval  异常的附加信息:%0#lx\n", stval);
+        while (1)
         {
-                printk("the kernel_pt %0#lx\n", kernel_pt);
-
-                printk(
-                    "KERNEL TRAP ENTRY: "
-                    "hart=%d "
-                    "scause=%lx "
-                    "sepc=%lx "
-                    "stval=%lx "
-                    "sstatus=%lx "
-                    "SPP=%d "
-                    "SIE=%d "
-                    "satp=%lx "
-                    "stvec=%lx\n",
-                    get_cpu_id(),
-                    scause,
-                    sepc,
-                    stval,
-                    sstatus,
-                    (int)((sstatus & SSTATUS_SPP) != 0),
-                    (int)((sstatus & SSTATUS_SIE) != 0),
-                    r_satp(),
-                    r_stvec());
-
-                printk("Wrong with the cpu id: %d\n", get_cpu_id());
-                printk("   scause 保存异常发生时的 PC: %0#lx\n", scause);
-                printk("   sepc   保存异常发生时的 PC: %0#lx\n", sepc);
-                printk("   stval  异常的附加信息:%0#lx\n", stval);
-                while (1)
-                {
-                        /* code */
-                }
+                /* code */
         }
-        w_sepc(sepc);
-        w_sstatus(r_sstatus());
         // intr_on();
 }
 
@@ -105,18 +119,65 @@ uint64_t user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
 {
         intr_off();
 
-        // 获取当前的TAKS
+        /* Now get the task the regular way (this may deref cpus[r_tp()].ts) */
         struct task_struct *ts = get_task();
 
         if (ts == 0)
         {
-                panic(PANIC_ERROR, "usertrap: error!\n");
+                // 获取当前的TAKS
+                uint64_t cur_tp = r_tp();
+                uint64_t cur_sp = r_sp();
+                uint64_t cur_sscratch = r_sscratch();
+                uint64_t cur_sepc = r_sepc();
+                uint64_t cur_sstatus = r_sstatus();
+                uint64_t cur_scause = scause;
+
+                printk("usertrap: ts == NULL on hart=%d, attempting recovery...\n", get_cpu_id());
+
+                /* 尝试从 tasks[] 中找到可能属于本 hart 的 task */
+                struct task_struct *candidate = NULL;
+                for (int i = 0; i < NTASKS; i++)
+                {
+                        struct task_struct *t = &tasks[i];
+                        if (t->utf && t->trap_ctx_valid)
+                        {
+                                if (t->utf->kernel_hartid == get_cpu_id())
+                                {
+                                        candidate = t;
+                                        break;
+                                }
+                        }
+                }
+
+                if (candidate != NULL)
+                {
+                        /* 试着恢复 cpu->ts（保守日志）*/
+                        get_cpu()->ts = candidate;
+                        printk("usertrap: recovered cpu->ts from tasks[%d] @ %p pid=%d\n", (int)(candidate - tasks), candidate, candidate->pid);
+                        ts = candidate;
+                }
+                else
+                {
+                        printk("usertrap: cannot recover cpu->ts — dumping cpus[] and trapframe contents\n");
+                        for (int i = 0; i < NCPUS; i++)
+                        {
+                                struct cpu *cc = &cpus[i];
+                                printk(" cpus[%d] @ %p: ts=%p hart_id=%lu intena=%d noff=%d\n",
+                                       i, cc, cc->ts, (unsigned long)cc->hart_id, cc->intena, cc->noff);
+                        }
+                        /* 打印 TRAPFRAME_MAPPING 的前若干 qword */
+                        uint64_t *tf = (uint64_t *)TRAPFRAME_MAPPING;
+                        for (int i = 0; i < 16; i++)
+                        {
+                                printk(" TRAPFRAME[%02d] = %#016lx\n", i, tf[i]);
+                        }
+                        panic(PANIC_ERROR, "usertrap: error! ts == NULL\n");
+                }
         }
-        // printk("enter the user trap\n");
         struct trapframe *utf = ts->utf;
 
         // 切换当前trap
-        w_stvec((uint64_t)kernel_trap_vec);
+        task_set_stvec(ts, (uint64_t)kernel_trap_vec);
         ts->utf->sepc = sepc;
 
         // 状态判断
@@ -192,9 +253,8 @@ void setup_return_trapframe(struct task_struct *ts)
         ts->utf->kernel_trap = (uint64_t)user_trap_hanlder;
         // 4. 设置cpu id
         ts->utf->kernel_hartid = r_tp();
-
         // 5. 设置蹦床, 为下次进入做准备
-        w_stvec((uint64_t)(TRAMPOLINE));
+        task_set_stvec(ts, (uint64_t)TRAMPOLINE);
         // 6. 清空状态
         w_sstatus((r_sstatus() & ~SSTATUS_SPP) | SSTATUS_SPIE);
         // 7. 设置返回pc

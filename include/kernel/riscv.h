@@ -145,6 +145,17 @@ static inline uint64_t r_sp()
         return x;
 }
 
+static inline void w_sscratch(uint64_t x)
+{
+        asm volatile("csrw sscratch, %0" : : "r"(x));
+}
+
+static inline uint64_t r_sscratch()
+{
+        uint64_t x;
+        asm volatile("csrr %0, sscratch" : "=r"(x));
+        return x;
+}
 static inline uint64_t
 r_stvec()
 {
@@ -223,4 +234,16 @@ static inline uint64_t rdtime(void)
         asm volatile("rdtime %0" : "=r"(val));
         return val;
 }
+
+static inline void task_set_stvec(struct task_struct *ts, uint64_t stvec)
+{
+        ts->stvec = stvec; // 更新 task 自己保存的 stvec
+        w_stvec(stvec);    // 同步到当前 hart
+}
+
+static inline void task_restore_stvec(struct task_struct *ts)
+{
+        w_stvec(ts->stvec); // 将 task 的 stvec 恢复到当前 hart
+}
+
 #endif
