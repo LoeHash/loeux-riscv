@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #define NULL ((void *)0)
+#define NOFILE 64
 
 struct spinlock
 {
@@ -155,6 +156,8 @@ struct task_struct
         uint64_t kstack;            // 内核栈
         bool in_syscall;
         char cwd[256]; // 工作目录, 后期会改为inode
+
+        struct file *ofile[NOFILE]; // Open files
 
         uint64_t stvec;         // 当前 task 逻辑上的 stvec
         uint64_t trap_sepc;     // kernel trap 被打断时的 sepc

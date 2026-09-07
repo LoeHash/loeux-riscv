@@ -43,6 +43,10 @@ struct file
         int flags;               // 打开时的标志
         void *private;
         int type; // 0 块设备 1 字符设备
+        // 引用计数：fork 后父子进程共享同一个 struct file（共享读写位置），
+        // 每次共享 refcount++，每次 close refcount--，归 0 才真正释放底层资源。
+        // 使用原子操作修改，避免 SMP 下父子进程同时 close 时的竞态。
+        int refcount;
 };
 
 struct vfs_node
@@ -179,4 +183,9 @@ struct vfs_node *vfs_lookup(const char *path);
 int vfs_mount(char *mount_path, struct block_device *bdev, FSTYPE type);
 void print_mount_table(void);
 void test_fat12_operations(void);
+
+// 释放对 struct file 的一次引用：refcount-- 归 0 时真正调用底层 fs_close
+// 并 free_page。供 vfs_close 与 task 退出清理路径使用。
+// 调用者必须已经把 file 从 ofile[] 摘除（避免 double close）。
+void file_close(struct file *file);
 #endif

@@ -24,6 +24,7 @@
 #define PA2PTE(pa) ((((uint64_t)pa) >> 12) << 10)
 #define PGROUNDDOWN(a) (((a)) & ~(0xFFF))
 #define PGROUNDUP(sz) (((sz) + PG_4K_SIZE - 1) & ~(PG_4K_SIZE - 1))
+#define PTE_FLAGS(pte) ((pte) & 0x3FF)
 extern page_table kernel_pt;
 extern uint8_t vm_init_status;
 extern spinlock_t vm_init_lock;

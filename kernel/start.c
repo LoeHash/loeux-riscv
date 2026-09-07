@@ -52,7 +52,9 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         // 初始化虚拟文件系统
         init_vfs();
         init_uart();
-        init_vfs_std();
+        // init_vfs_std() 已移至 first_ret()：
+        // 该函数需要为当前 task 在 ofile[] 中分配 fd 0/1/2，
+        // boot 阶段还没有 current task，故推迟到首个进程启动时执行。
         pte *p = pte_walk(kernel_pt, MMIO_UART_OFFEST, 0);
         if (p && (*p & PTE_V))
         {

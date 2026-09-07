@@ -58,6 +58,13 @@ void init_kvmmap()
 }
 
 // dangerous....
+/// @brief 映射内存
+/// @param pagetable 页面表
+/// @param va 虚拟地址
+/// @param size 夠射大小
+/// @param pa 物理地址
+/// @param perm 权限
+/// @return 0 成功 -1 失败
 int mappages(page_table pagetable, uint64_t va, uint64_t size, uint64_t pa, int perm)
 {
         uint64_t a, last;
@@ -533,4 +540,53 @@ int copyinstr(page_table pagetable, char *dst, uint64_t srcva, uint64_t max)
         {
                 return -1;
         }
+}
+
+/// @brief 复制src_pg中的所有内容到dst_pg
+/// @param src_pg 源页表
+/// @param dst_pg 目标页表
+/// @param sz 复制的字节数
+/// TODO_FUTURE: 未来需要考虑COW机制
+/// @return 0 成功 -1 失败
+int vm_pagetbl_copy(page_table src_pg, page_table dst_pg, uint64_t sz)
+{
+        pte *p;
+        uint64_t va, pa;
+        char *chunk;
+        int32_t flag;
+
+        for (va = 0; va < sz; va += PG_4K_SIZE)
+        {
+                if (p = pte_walk(src_pg, va, 0) == 0)
+                {
+                        continue;
+                }
+                if ((*p & PTE_V) == 0)
+                {
+                        continue;
+                }
+                pa = PTE2PA(*p);
+                if (pa == 0)
+                {
+                        continue;
+                }
+                flag = PTE_FLAGS(*p);
+                chunk = kalloc(PG_4K_SIZE);
+                if (chunk == 0)
+                {
+                        pg_unmap(dst_pg, va, va / PG_4K_SIZE, 1);
+                        return -1;
+                }
+
+                memcpy(chunk, (char *)pa, PG_4K_SIZE);
+
+                if (mappages(dst_pg, va, PG_4K_SIZE, pa, flag) == -1)
+                {
+                        kfree(chunk);
+                        pg_unmap(dst_pg, va, va / PG_4K_SIZE, 1);
+                        return -1;
+                }
+        }
+
+        return 0;
 }
