@@ -34,6 +34,7 @@ OBJS := asm/kernel_trap_vec.o\
 	kernel/fdt.o\
 	kernel/panic.o\
 	kernel/spinlock.o\
+	kernel/sleeplock.o\
 	kernel/proc.o\
 	kernel/trap.o\
 	kernel/timer.o\
@@ -108,6 +109,7 @@ kernel/printk.o: kernel/printk.c
 kernel/fdt.o: kernel/fdt.c
 kernel/panic.o: kernel/panic.c
 kernel/spinlock.o: kernel/spinlock.c
+kernel/sleeplock.o: kernel/sleeplock.c
 kernel/proc.o: kernel/proc.c
 kernel/trap.o: kernel/trap.c
 kernel/timer.o: kernel/timer.c
