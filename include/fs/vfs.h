@@ -2,6 +2,7 @@
 #define _INC_VFS_
 #include <type.h>
 #include <block_device.h>
+#include <sleeplock.h>
 
 // 文件打开标志
 #define FS_O_READ 0x01   // bit 0
@@ -47,6 +48,13 @@ struct file
         // 每次共享 refcount++，每次 close refcount--，归 0 才真正释放底层资源。
         // 使用原子操作修改，避免 SMP 下父子进程同时 close 时的竞态。
         int refcount;
+
+        // 串行化对该 file 的访问：保护 pos（读写位置）以及底层 read/write 的原子性。
+        // fork 后父子共享同一个 struct file，因此也共享这把锁——父子并发写同一
+        // 文件（如 stdout）时会被这把锁排队，避免输出交错。
+        // 必须用 init_sleeplock 初始化（在 vfs_open 中完成），否则 wait_queue
+        // 未形成循环链表，release 时 wakeup 会解引用 NULL 触发缺页。
+        sleeplock_t flk;
 };
 
 struct vfs_node

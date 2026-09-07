@@ -151,7 +151,10 @@ int64_t vfs_write(int fd, const void *buf, uint64_t count)
                 return -1;
         }
 
-        // 调用文件系统的写
+        // 串行化写：fork 后父子共享同一个 struct file（及同一个 flk），
+        // 并发写 stdout 时在此排队，保证一次 write 的内容不被打断。
+        acquire_sleep(&file->flk);
+
         uint64_t out_len = 0;
         int ret;
         if (file->type == 1)
@@ -161,8 +164,10 @@ int64_t vfs_write(int fd, const void *buf, uint64_t count)
                 ret = cdev->ops->write(cdev->priv, buf, count, &out_len);
                 if (ret < 0)
                 {
+                        release_sleep(&file->flk);
                         return -1;
                 }
+                release_sleep(&file->flk);
                 return out_len;
         }
 
@@ -171,13 +176,17 @@ int64_t vfs_write(int fd, const void *buf, uint64_t count)
                 ret = file->mnt->fs_ops->fs_write(file, buf, count, &out_len);
                 if (ret < 0)
                 {
+                        release_sleep(&file->flk);
                         return -1;
                 }
 
                 file->pos += out_len;
 
+                release_sleep(&file->flk);
                 return out_len;
         }
+
+        release_sleep(&file->flk);
         return -1;
 }
 
@@ -199,7 +208,9 @@ int64_t vfs_read(int fd, void *buf, uint64_t count)
                 return -1;
         }
 
-        // 根据不同type进行分流
+        // 串行化读：与写同理，保护 pos 的原子性
+        acquire_sleep(&file->flk);
+
         uint64_t out_len = 0;
         int ret;
         if (file->type == 1)
@@ -208,24 +219,29 @@ int64_t vfs_read(int fd, void *buf, uint64_t count)
                 ret = cdev->ops->read(cdev->priv, buf, count, &out_len);
                 if (ret < 0)
                 {
+                        release_sleep(&file->flk);
                         return -1;
                 }
+                release_sleep(&file->flk);
                 return out_len;
         }
 
         if (file->type == 0)
         {
-                // 调用文件系统的读
                 ret = file->mnt->fs_ops->fs_read(file, buf, count, &out_len);
                 if (ret < 0)
                 {
+                        release_sleep(&file->flk);
                         return -1;
                 }
 
                 file->pos += out_len;
 
+                release_sleep(&file->flk);
                 return out_len;
         }
+
+        release_sleep(&file->flk);
         return -1;
 }
 
@@ -253,6 +269,7 @@ int vfs_open(const char *path, int flags)
                 file->pos = 0;
                 file->type = 1;     // 字符设备
                 file->refcount = 1; // 首次打开，引用计数为 1
+                init_sleeplock(&file->flk);
 
                 if (cdev->ops->open && cdev->ops->open(cdev->priv, flags) < 0)
                 {
@@ -291,6 +308,7 @@ int vfs_open(const char *path, int flags)
         file->type = 0;
         file->size = vnode->size;
         file->refcount = 1; // 首次打开，引用计数为 1
+        init_sleeplock(&file->flk);
 
         // 调用文件系统的open
         // 检查文件存在，权限等信息
