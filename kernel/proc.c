@@ -477,7 +477,7 @@ int kfork()
 
         // 目前我们持有new_ts的锁
         // 1. 复制父进程页表的所有内容
-        if (vm_pagetbl_copy(father_ts->pg, new_ts->pg, father_ts->size) == -1)
+        if ((vm_pagetbl_copy(father_ts->pg, new_ts->pg, father_ts->size)) == -1)
         {
                 // 失败路径必须释放锁，否则 free_task 之后该槽位被复用，
                 // 后续 acquire 会触发 reacquire panic。
@@ -488,7 +488,7 @@ int kfork()
 
         // 2. 设置子进程的pid和parent
         new_ts->size = father_ts->size;
-        new_ts->parent = father_ts->pid;
+        new_ts->parent = father_ts;
 
         // 3. 复制name和cwd
         strcpy(new_ts->name, father_ts->name);

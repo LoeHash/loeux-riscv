@@ -557,7 +557,7 @@ int vm_pagetbl_copy(page_table src_pg, page_table dst_pg, uint64_t sz)
 
         for (va = 0; va < sz; va += PG_4K_SIZE)
         {
-                if (p = pte_walk(src_pg, va, 0) == 0)
+                if ((p = pte_walk(src_pg, va, 0)) == 0)
                 {
                         continue;
                 }
