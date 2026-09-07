@@ -198,7 +198,6 @@ int64_t vfs_read(int fd, void *buf, uint64_t count)
                 }
 
                 file->pos += out_len;
-                printk("after file ops: %lu\n", file->pos);
 
                 return out_len;
         }
