@@ -1,5 +1,20 @@
 #include "ulib.h"
 
+int fork()
+{
+        int ret;
+
+        __asm__ volatile(
+            "li a7, %1\n"
+            "ecall\n"
+            "mv %0, a0\n"
+            : "=r"(ret)
+            : "i"(SYSCALL_FORK)
+            : "a0", "a7", "memory");
+
+        return ret;
+}
+
 int write(int fd, void *buf, uint64_t count)
 {
         int ret;
