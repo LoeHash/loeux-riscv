@@ -1,6 +1,7 @@
 #include <mm/memory.h>
 #include <mm/vm.h>
 #include <printk.h>
+#include <panic.h>
 #include <fdt.h>
 #include <lib.h>
 #include <spinlock.h>
@@ -10,6 +11,7 @@ struct gloal_memory_descriptor gmd = {0};
 uint64_t MEMORY_SIZE = 0;
 uint8_t memory_init_status = 0;
 spinlock_t memory_init_lock = {0};
+spinlock_t memory_lock = {0};
 
 static const uint32_t mem_buff_size = 128;
 extern char _phy_start[];
@@ -56,6 +58,9 @@ int detect_memory_info(const char *name, int depth,
 
 void init_memory()
 {
+        init_spinlock(&memory_init_lock);
+        init_spinlock(&memory_lock);
+
         acquire(&memory_init_lock);
         if (memory_init_status == 1)
         {
@@ -208,82 +213,117 @@ void *kalloc()
 {
         return alloc_page();
 }
-// mm/memory.c — 修改 free_page/kfree
+
 int kfree(void *pa)
 {
-        printk("kfree: pa=%p\n", pa);
         return free_page(pa);
 }
 
+// 释放一个物理页：校验合法性后挂回空闲链表尾部。
+// 全程持有 memory_lock；acquire() 内部 push_off 会关闭中断，
+// 因此在系统调用（开中断）上下文中调用也是安全的。
 int free_page(void *pa)
 {
-        struct page *pg = PHY_TO_PAGE(pa);
-
-        // 临时保护：检查是否要释放的页正被某个 task 的 trapframe 使用
-        for (int i = 0; i < NTASKS; i++)
+        if (pa == NULL)
         {
-                if (tasks[i].utf && (void *)tasks[i].utf == pa)
-                {
-                        printk("PANIC-WARNING: attempt to free trapframe page pa=%p for task[%d] pid=%d - skip free and log\n",
-                               pa, i, tasks[i].pid);
-                        // 跳过实际释放，返回但保留页（便于取证）
-                        return 0;
-                }
+                panic(PANIC_ERROR, "free_page: NULL pointer!\n");
         }
 
-        printk("free_page: pa=%p page=%p flags=%#x ref=%d\n", pa, pg, pg->flags, pg->refcount);
-        memset((char *)pg->paddr, 0, PG_4K_SIZE);
-        pg->flags &= 0;
-        pg->flags |= PG_FLAG_FREE;
+        uintptr_t addr = (uintptr_t)pa;
+
+        // 地址合法性：必须 4K 对齐，且落在受管的可分配物理内存范围内
+        // （低于 free_start_at 的是内核/SBI/页元数据保留页，
+        //   FDT 页虽在范围内但带 PG_FLAG_RESERVED 标记）
+        if ((addr & (PG_4K_SIZE - 1)) != 0 ||
+            addr < gmd.free_start_at || addr > gmd.free_end_at)
+        {
+                panic(PANIC_ERROR, "free_page: bad address %p!\n", pa);
+        }
+
+        struct page *pg = PHY_TO_PAGE(pa);
+
+        acquire(&memory_lock);
+
+        if (pg->flags & PG_FLAG_RESERVED)
+        {
+                release(&memory_lock);
+                panic(PANIC_ERROR, "free_page: freeing reserved page %p!\n", pa);
+        }
+        // 页必须处于已分配状态，否则就是双重释放/释放野指针
+        if (!(pg->flags & PG_FLAG_USED))
+        {
+                release(&memory_lock);
+                panic(PANIC_ERROR, "free_page: double free %p!\n", pa);
+        }
+
+        // 引用计数：当前没有共享页，分配时 refcount=1；
+        // 保留语义以便未来共享页表页使用
+        if (pg->refcount > 0)
+        {
+                pg->refcount--;
+        }
+        if (pg->refcount > 0)
+        {
+                // 仍被引用，不回收
+                release(&memory_lock);
+                return 0;
+        }
+
+        // 摘成干净节点，尾插到空闲链表
+        pg->flags = PG_FLAG_FREE;
+        pg->next = NULL;
+        pg->prev = gmd.free_tail;
         if (gmd.free_tail)
         {
                 gmd.free_tail->next = pg;
         }
         else
         {
-                gmd.free_tail = pg;
+                // 链表此前为空，head/tail 都指向该页
+                gmd.free_head = pg;
         }
+        gmd.free_tail = pg;
+
+        release(&memory_lock);
+
+        memset((char *)pg->paddr, 0, PG_4K_SIZE);
 
         return 0;
 }
-// int kfree(void *pa)
-// {
-//         return free_page(pa);
-// }
 
+// 从空闲链表头部分配一个物理页。
+// 锁内只做链表摘除和元数据更新，清零放锁外以缩短临界区。
 void *alloc_page()
 {
+        acquire(&memory_lock);
 
-        if (!gmd.free_head)
+        struct page *pg = gmd.free_head;
+        if (pg == NULL)
         {
+                release(&memory_lock);
                 return NULL;
         }
-        struct page *pg = gmd.free_head;
-        pg->flags |= PG_FLAG_USED;
 
-        // 我们保证是头部
-        // 我们把双向节点的node当作单向节点！
+        // 弹出头节点
         gmd.free_head = pg->next;
+        if (gmd.free_head == NULL)
+        {
+                // 链表取空，tail 必须同步清空，
+                // 否则之后 free 会挂到一个已分配出去的旧尾页上
+                gmd.free_tail = NULL;
+        }
+
         pg->next = NULL;
+        pg->prev = NULL;
+        pg->flags = PG_FLAG_USED;
+        // 取得一个引用：空闲链表上的页 refcount 必为 0，
+        // 这里自增后变为 1，与 free_page 中的 refcount-- 配对，
+        // 减到 0 时页才会被挂回空闲链表回收。
+        pg->refcount++;
+
+        release(&memory_lock);
+
         memset((char *)pg->paddr, 0, PG_4K_SIZE);
 
         return (void *)pg->paddr;
 }
-
-// int free_page(void *pa)
-// {
-//         struct page *pg = PHY_TO_PAGE(pa);
-//         memset((char *)pg->paddr, 0, PG_4K_SIZE);
-//         pg->flags &= 0;
-//         pg->flags |= PG_FLAG_FREE;
-//         if (gmd.free_tail)
-//         {
-//                 gmd.free_tail->next = pg;
-//         }
-//         else
-//         {
-//                 gmd.free_tail = pg;
-//         }
-
-//         return 0;
-// }
