@@ -11,11 +11,11 @@ int main(int argc, char **argv)
                 {
 
                         write(1, "hello! this is child process\n", 32);
-                        while (counter < 10000000)
-                        {
-                                counter++;
-                        }
-                        counter = 0;
+                        // while (counter < 10000000)
+                        // {
+                        //         counter++;
+                        // }
+                        // counter = 0;
                 }
         }
         else
@@ -25,11 +25,11 @@ int main(int argc, char **argv)
                 {
 
                         write(1, "hello! this is parent process\n", 32);
-                        while (counter < 10000000)
-                        {
-                                counter++;
-                        }
-                        counter = 0;
+                        // while (counter < 10000000)
+                        // {
+                        //         counter++;
+                        // }
+                        // counter = 0;
                 }
         }
 
