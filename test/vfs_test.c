@@ -4,7 +4,7 @@
 #include <fat12.h>
 #include <printk.h>
 #include <panic.h>
-extern struct file *fd_table[MAX_FD_NUM];
+#include <proc.h>
 extern struct mount_entry mount_points[MAX_MOUNT_NUM];
 
 // offset处读取文件n个字节
@@ -210,7 +210,7 @@ test2:
         }
 
         printk("\n[Test 4] Writing to /hello.txt (append)\n");
-        file = fd_table[fd];
+        file = get_task()->ofile[fd];
         if (file)
         {
                 struct fat12_node *fnode = (struct fat12_node *)file->private;
