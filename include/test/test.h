@@ -21,5 +21,5 @@ void dump_sector_n(struct virtio_blk_disk *disk, int n);
 void test_write_stdout(void);
 void vfs_test_read_file(const char *path);
 void vfs_test_seek_file(const char *path, int offset, uint64_t n);
-
+int vm_compare_full_pagetable(page_table pt1, page_table pt2);
 #endif

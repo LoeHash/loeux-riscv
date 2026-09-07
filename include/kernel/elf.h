@@ -2,6 +2,8 @@
 #define _INC_ELF_
 #include <type.h>
 
+#define USER_BASE_PROG_ADDR 0x1000
+
 #define ELF_MAGIC 0x464C457FU
 #define EI_MAG0_OFFSET 0
 #define EI_MAG1_OFFSET 1
@@ -26,7 +28,7 @@
 
 // pt
 #define PT_NULL 0    /* 空条目，忽略 */
-#define PT_LOAD 1    /* 可加载段（你要的） */
+#define PT_LOAD 1    /* 可加载段 */
 #define PT_DYNAMIC 2 /* 动态链接信息 */
 #define PT_INTERP 3  /* 动态链接器路径 */
 #define PT_NOTE 4    /* 辅助信息 */

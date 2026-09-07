@@ -8,10 +8,12 @@
 #include <panic.h>
 
 extern uint64_t sys_write();
+extern uint64_t sys_fork();
 
 static syscall_func_t syscalls[] = {
-    [0] 0,                    // syscall id = 0,
-    [SYSCALL_WRITE] sys_write // []
+    [0] 0,                     // syscall id = 0,
+    [SYSCALL_WRITE] sys_write, // []
+    [SYSCALL_FORK] sys_fork,   // []
 };
 
 static uint64_t get_arg_reg(int n)

@@ -157,6 +157,7 @@ int64_t vfs_write(int fd, const void *buf, uint64_t count)
         if (file->type == 1)
         {
                 struct char_device *cdev = (struct char_device *)file->private;
+
                 ret = cdev->ops->write(cdev->priv, buf, count, &out_len);
                 if (ret < 0)
                 {

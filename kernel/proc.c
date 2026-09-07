@@ -32,6 +32,7 @@ static uint64_t pid_counter = 1;
 static spinlock_t pid_lock = {0};
 static uint64_t alloc_pid();
 static int check_elf_header(struct elf64_ehdr *ehdr);
+static void _map_user_stack(page_table pg);
 static int read_phdr(int fd, uint64_t off, struct elf64_phdr *ph);
 static int flags_to_pte(uint32_t p_flags);
 static int load_segment(int fd, page_table pg, struct elf64_phdr *ph);
@@ -477,7 +478,7 @@ int kfork()
 
         // 目前我们持有new_ts的锁
         // 1. 复制父进程页表的所有内容
-        if ((vm_pagetbl_copy(father_ts->pg, new_ts->pg, father_ts->size)) == -1)
+        if ((vm_pagetbl_copy_asign(father_ts->pg, new_ts->pg, USER_BASE_PROG_ADDR, father_ts->size)) == -1)
         {
                 // 失败路径必须释放锁，否则 free_task 之后该槽位被复用，
                 // 后续 acquire 会触发 reacquire panic。
@@ -486,19 +487,27 @@ int kfork()
                 return -1;
         }
 
-        // 2. 设置子进程的pid和parent
+        // 2. 映射用户栈
+        if ((vm_pagetbl_copy_asign(father_ts->pg, new_ts->pg, USER_STACK_BASE, USER_STACK_SIZE)) == -1)
+        {
+                release(&new_ts->lk);
+                free_task(new_ts);
+                return -1;
+        }
+
+        // 3. 设置子进程的pid和parent
         new_ts->size = father_ts->size;
         new_ts->parent = father_ts;
 
-        // 3. 复制name和cwd
+        // 4. 复制name和cwd
         strcpy(new_ts->name, father_ts->name);
         strcpy(new_ts->cwd, father_ts->cwd);
 
-        // 4. 设置子进程的trapframe
+        // 5. 设置子进程的trapframe
         *(new_ts->utf) = *(father_ts->utf);
         new_ts->utf->a0 = 0;
 
-        // 5. 复制 ofile：父子共享同一个 struct file
+        // 6. 复制 ofile：父子共享同一个 struct file
         //    因此每共享一次 refcount++。
         //    father 是当前运行进程，其 ofile
         //    不会被其他 hart 并发修改，
@@ -559,17 +568,6 @@ int kexec(char *path, char **argv)
                 return -1;
         }
 
-        // // 打印
-        // for (int i = 0; i < 64; i++)
-        // {
-        //         printk(" %0#lx ", buf[i]);
-        //         if (i + 1 % 16 == 0)
-        //         {
-        //                 printk("\n");
-        //         }
-        // }
-        // printk("\n");
-
         int errcod;
         memcpy(&ehdr, buf, 64);
         if ((errcod = check_elf_header(&ehdr)) != 0)
@@ -620,10 +618,7 @@ int kexec(char *path, char **argv)
         // 运行的进程全部替换
         // 前面 create_task_pgtable 已经映射好了蹦床页和trapframe
         // 接下来映射用户栈
-        for (uint64_t i = USER_STACK_BASE; i < USER_STACK_TOP; i += PG_4K_SIZE)
-        {
-                mappages(new_page, i, PG_4K_SIZE, (uint64_t)kalloc(), PTE_R | PTE_W | PTE_U);
-        }
+        _map_user_stack(new_page);
         uint64_t new_sp = USER_STACK_TOP;
 
         // 映射参数
@@ -839,4 +834,13 @@ static int flags_to_pte(uint32_t p_flags)
                 perm |= PTE_R;
 
         return perm;
+}
+
+static void _map_user_stack(page_table pg)
+{
+        for (uint64_t i = USER_STACK_BASE; i < USER_STACK_TOP; i += PG_4K_SIZE)
+        {
+                mappages(pg, i, PG_4K_SIZE, (uint64_t)kalloc(), PTE_R | PTE_W | PTE_U);
+        }
+        uint64_t new_sp = USER_STACK_TOP;
 }

@@ -30,6 +30,7 @@ struct task_struct *alloc_task();
 void free_task_pgtable(page_table pagetable, uint64_t sz);
 page_table create_task_pgtable(struct task_struct *ts);
 int kexec(char *path, char **argv);
+int kfork();
 void init_user();
 void set_cwd(struct task_struct *ts, char *path);
 #endif

@@ -38,6 +38,7 @@ OBJS := asm/kernel_trap_vec.o\
 	kernel/proc.o\
 	kernel/trap.o\
 	kernel/timer.o\
+	kernel/syscall_impl.o\
 	kernel/syscall.o\
 	kernel/syscall_file.o\
 	mm/memory.o\
@@ -113,6 +114,7 @@ kernel/sleeplock.o: kernel/sleeplock.c
 kernel/proc.o: kernel/proc.c
 kernel/trap.o: kernel/trap.c
 kernel/timer.o: kernel/timer.c
+kernel/syscall_impl.o: kernel/syscall_impl.c
 kernel/syscall_file.o: kernel/syscall_file.c
 kernel/syscall.o: kernel/syscall.c
 mm/memory.o: mm/memory.c 

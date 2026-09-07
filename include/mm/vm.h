@@ -44,5 +44,6 @@ int mappages(page_table pagetable, uint64_t va, uint64_t size, uint64_t pa, int 
 uint64_t walkaddr(page_table pagetable, uint64_t va);
 int copyout(page_table pagetable, uint64_t dstva, char *src, uint64_t len);
 int copyin(page_table pagetable, char *dst, uint64_t srcva, uint64_t len);
-int vm_pagetbl_copy(page_table src_pg, page_table dst_pg, uint64_t sz);
+int vm_pagetbl_copy(page_table src_pg, page_table dst_pg, uint64_t sz, bool is_user_copy);
+int vm_pagetbl_copy_asign(page_table src_pg, page_table dst_pg, uint64_t va_start, uint64_t sz);
 #endif

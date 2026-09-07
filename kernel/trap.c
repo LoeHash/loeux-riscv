@@ -177,6 +177,7 @@ uint64_t user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
         else // else.
         {
                 // wrong
+                printk("the ssp %0#lx\n", r_sstatus_spp());
                 printk("Wrong with the cpu id: %d\n", get_cpu_id());
                 printk("   scause 保存异常发生时的 PC: %0#lx\n", scause);
                 printk("   sepc   保存异常发生时的 PC: %0#lx\n", sepc);

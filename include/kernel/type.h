@@ -122,6 +122,7 @@ enum TASK_STATE
         DEAD
 };
 typedef uint64_t pte;
+typedef uint64_t pte_t;
 typedef int pid_t;
 typedef uint64_t *page_table;
 

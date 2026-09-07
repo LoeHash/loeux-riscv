@@ -1,4 +1,5 @@
 #include <vm.h>
+#include <elf.h>
 #include <memory.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -548,14 +549,73 @@ int copyinstr(page_table pagetable, char *dst, uint64_t srcva, uint64_t max)
 /// @param sz 复制的字节数
 /// TODO_FUTURE: 未来需要考虑COW机制
 /// @return 0 成功 -1 失败
-int vm_pagetbl_copy(page_table src_pg, page_table dst_pg, uint64_t sz)
+int vm_pagetbl_copy(page_table src_pg, page_table dst_pg, uint64_t sz, bool is_user_copy)
 {
         pte *p;
         uint64_t va, pa;
         char *chunk;
         int32_t flag;
 
-        for (va = 0; va < sz; va += PG_4K_SIZE)
+        if (is_user_copy)
+        {
+                va = USER_BASE_PROG_ADDR;
+        }
+        else
+        {
+                va = 0;
+        }
+
+        for (; va <= sz; va += PG_4K_SIZE)
+        {
+                if ((p = pte_walk(src_pg, va, 0)) == 0)
+                {
+                        continue;
+                }
+                if ((*p & PTE_V) == 0)
+                {
+                        continue;
+                }
+                pa = PTE2PA(*p);
+                if (pa == 0)
+                {
+                        continue;
+                }
+                flag = PTE_FLAGS(*p);
+                chunk = kalloc(PG_4K_SIZE);
+                if (chunk == 0)
+                {
+                        pg_unmap(dst_pg, va, va / PG_4K_SIZE, 1);
+                        return -1;
+                }
+
+                memcpy(chunk, (char *)pa, PG_4K_SIZE);
+
+                if (mappages(dst_pg, va, PG_4K_SIZE, pa, flag) == -1)
+                {
+                        kfree(chunk);
+                        pg_unmap(dst_pg, va, va / PG_4K_SIZE, 1);
+                        return -1;
+                }
+        }
+
+        return 0;
+}
+
+/// @brief 指定从哪里开始复制src_pg中的内容到dst_pg
+/// @param src_pg
+/// @param dst_pg
+/// @param va_start
+/// @param sz
+/// @return
+int vm_pagetbl_copy_asign(page_table src_pg, page_table dst_pg, uint64_t va_start, uint64_t sz)
+{
+        pte *p;
+        uint64_t va, pa;
+        char *chunk;
+        int32_t flag;
+
+        va = va_start;
+        for (; va <= va_start + sz; va += PG_4K_SIZE)
         {
                 if ((p = pte_walk(src_pg, va, 0)) == 0)
                 {

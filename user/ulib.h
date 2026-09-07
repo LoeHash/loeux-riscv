@@ -60,5 +60,6 @@
 typedef unsigned long uint64_t;
 
 int write(int fd, void *buf, uint64_t count);
+int fork();
 
 #endif
