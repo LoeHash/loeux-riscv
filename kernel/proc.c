@@ -80,17 +80,18 @@ void first_ret()
                 init_task_startup = 1;
                 __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
+                // 为 init 进程建立 std fds（fd 0/1/2）。
+                // 必须在 kexec 之前完成：kexec 内部会 vfs_open 目标 ELF，
+                // 那次 open 会占用 ofile 的下一个空闲槽位；若先 kexec 再建 std，
+                // stdin 会被 ELF 文件占用，错位。
+                init_vfs_std();
+
                 // exec
                 ts->utf->a0 = kexec("/_init", (char *[]){"hello!", 0});
                 if (ts->utf->a0 == -1)
                 {
                         panic(PANIC_ERROR, "inituser: a0 is -1!\n");
                 }
-        }
-
-        if (ts->pid == 2)
-        {
-                ts->utf->a0 = kexec("/_init2", (char *[]){"hello!", 0});
         }
 
         setup_return_trapframe(ts);
@@ -386,6 +387,21 @@ static uint64_t alloc_pid()
 
 void free_task(struct task_struct *t)
 {
+        // 关闭该 task 所有打开的文件：
+        // fork 时共享出去的 file->refcount 会被 file_close 的原子减抵消，
+        // 最后一个引用者负责真正回收底层资源。
+        // 先把 ofile[i] 摘除（置 NULL）再 drop 引用，确保即便有重入也不会
+        // 重复 close 同一个槽位。
+        for (int i = 0; i < NOFILE; i++)
+        {
+                struct file *f = t->ofile[i];
+                t->ofile[i] = NULL;
+                if (f)
+                {
+                        file_close(f);
+                }
+        }
+
         if (t->utf)
                 kfree((void *)t->utf);
         t->utf = 0;
@@ -439,6 +455,74 @@ page_table create_task_pgtable(struct task_struct *ts)
         }
 
         return pg;
+}
+
+/// @brief  创建一个子进程
+/// @return 子进程的 pid
+int kfork()
+{
+        pid_t new_pid, parent_pid;
+        struct task_struct *new_ts, *father_ts;
+        father_ts = get_task();
+
+        if (father_ts == NULL)
+        {
+                panic(PANIC_ERROR, "kfork: father_ts is NULL!\n");
+        }
+
+        if ((new_ts = alloc_task()) == NULL)
+        {
+                return -1;
+        }
+
+        // 目前我们持有new_ts的锁
+        // 1. 复制父进程页表的所有内容
+        if (vm_pagetbl_copy(father_ts->pg, new_ts->pg, father_ts->size) == -1)
+        {
+                // 失败路径必须释放锁，否则 free_task 之后该槽位被复用，
+                // 后续 acquire 会触发 reacquire panic。
+                release(&new_ts->lk);
+                free_task(new_ts);
+                return -1;
+        }
+
+        // 2. 设置子进程的pid和parent
+        new_ts->size = father_ts->size;
+        new_ts->parent = father_ts->pid;
+
+        // 3. 复制name和cwd
+        strcpy(new_ts->name, father_ts->name);
+        strcpy(new_ts->cwd, father_ts->cwd);
+
+        // 4. 设置子进程的trapframe
+        *(new_ts->utf) = *(father_ts->utf);
+        new_ts->utf->a0 = 0;
+
+        // 5. 复制 ofile：父子共享同一个 struct file
+        //    因此每共享一次 refcount++。
+        //    father 是当前运行进程，其 ofile
+        //    不会被其他 hart 并发修改，
+        //    但共享出的 file->refcount 必须原子自增
+        //    因为后续父子任意一方 close 时会原子减
+        //    避免与对方的 fork/close 竞争。
+        for (int i = 0; i < NOFILE; i++)
+        {
+                struct file *f = father_ts->ofile[i];
+                if (f)
+                {
+                        __atomic_add_fetch(&f->refcount, 1, __ATOMIC_RELAXED);
+                        new_ts->ofile[i] = f;
+                }
+                else
+                {
+                        new_ts->ofile[i] = NULL;
+                }
+        }
+
+        new_ts->state = RUNNABLE;
+        release(&new_ts->lk);
+
+        return new_ts->pid;
 }
 
 int kexec(char *path, char **argv)
