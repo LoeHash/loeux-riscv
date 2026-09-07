@@ -5,6 +5,7 @@
 #include <proc.h>
 #include <printk.h>
 #include <lib.h>
+#include <panic.h>
 
 extern uint64_t sys_write();
 
@@ -71,6 +72,11 @@ void get_arg_int(int n, int *buf)
 void syscall()
 {
         struct task_struct *ts = get_task();
+
+        if (ts == 0)
+        {
+                panic(PANIC_ERROR, "syscall: ts == NULL!\n");
+        }
 
         int sys_id = ts->utf->a7;
 

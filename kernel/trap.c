@@ -104,6 +104,7 @@ void kernel_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
         printk("   scause 保存异常发生时的 PC: %0#lx\n", scause);
         printk("   sepc   保存异常发生时的 PC: %0#lx\n", sepc);
         printk("   stval  异常的附加信息:%0#lx\n", stval);
+
         while (1)
         {
                 /* code */
@@ -124,55 +125,7 @@ uint64_t user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
 
         if (ts == 0)
         {
-                // 获取当前的TAKS
-                uint64_t cur_tp = r_tp();
-                uint64_t cur_sp = r_sp();
-                uint64_t cur_sscratch = r_sscratch();
-                uint64_t cur_sepc = r_sepc();
-                uint64_t cur_sstatus = r_sstatus();
-                uint64_t cur_scause = scause;
-
-                printk("usertrap: ts == NULL on hart=%d, attempting recovery...\n", get_cpu_id());
-
-                /* 尝试从 tasks[] 中找到可能属于本 hart 的 task */
-                struct task_struct *candidate = NULL;
-                for (int i = 0; i < NTASKS; i++)
-                {
-                        struct task_struct *t = &tasks[i];
-                        if (t->utf && t->trap_ctx_valid)
-                        {
-                                if (t->utf->kernel_hartid == get_cpu_id())
-                                {
-                                        candidate = t;
-                                        break;
-                                }
-                        }
-                }
-
-                if (candidate != NULL)
-                {
-                        /* 试着恢复 cpu->ts（保守日志）*/
-                        get_cpu()->ts = candidate;
-                        printk("usertrap: recovered cpu->ts from tasks[%d] @ %p pid=%d\n", (int)(candidate - tasks), candidate, candidate->pid);
-                        ts = candidate;
-                }
-                else
-                {
-                        printk("usertrap: cannot recover cpu->ts — dumping cpus[] and trapframe contents\n");
-                        for (int i = 0; i < NCPUS; i++)
-                        {
-                                struct cpu *cc = &cpus[i];
-                                printk(" cpus[%d] @ %p: ts=%p hart_id=%lu intena=%d noff=%d\n",
-                                       i, cc, cc->ts, (unsigned long)cc->hart_id, cc->intena, cc->noff);
-                        }
-                        /* 打印 TRAPFRAME_MAPPING 的前若干 qword */
-                        uint64_t *tf = (uint64_t *)TRAPFRAME_MAPPING;
-                        for (int i = 0; i < 16; i++)
-                        {
-                                printk(" TRAPFRAME[%02d] = %#016lx\n", i, tf[i]);
-                        }
-                        panic(PANIC_ERROR, "usertrap: error! ts == NULL\n");
-                }
+                panic(PANIC_ERROR, "usertrap: error! ts == NULL\n");
         }
         struct trapframe *utf = ts->utf;
 

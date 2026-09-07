@@ -101,7 +101,18 @@ void first_ret()
 
 struct task_struct *get_task()
 {
-        return get_cpu()->ts;
+        // 修复: get_task() 可能在中断开启的上下文（如 syscall 路径）中被调用。
+        // 若在 r_tp() 读取 tp 之后、访问 cpus[tp].ts 之前发生定时器中断，
+        // task 可能被迁移到其他 hart，sched() 中 w_tp() 更新了 tp，
+        // 导致此处用旧 tp 索引到已被 drop 的 cpus[旧hart].ts（=NULL），
+        // 随后解引用引发内核态缺页。
+        // 用 intr_off/intr_on 保护 tp 读取与 cpus[tp].ts 读取的原子性。
+        int old = intr_get();
+        intr_off();
+        struct task_struct *t = get_cpu()->ts;
+        if (old)
+                intr_on();
+        return t;
 }
 
 struct cpu *get_cpu()
@@ -205,6 +216,7 @@ void sched()
         // 同时读取cpu先前的ctx
         // we got a big mistake! but fixed
         int intena = get_cpu()->intena;
+
         swtch(&ts->ctx, &get_cpu()->ctx);
         //
         // !!! DO NOT REMOVE !!!
@@ -217,6 +229,7 @@ void sched()
         // 错误的 per-cpu 数据，出现 cpu->ts == NULL、锁状态错乱、
         // 甚至内核态缺页等问题。
         w_tp(ts->utf->kernel_hartid);
+
         get_cpu()->intena = intena;
 }
 

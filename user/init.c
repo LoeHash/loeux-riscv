@@ -8,10 +8,10 @@ int main(int argc, char **argv)
         while (1)
         {
                 write(1, "hello\n", 6);
-                while (counter < 100000000)
-                {
-                        counter++;
-                }
+                // while (counter < 100000000)
+                // {
+                //         counter++;
+                // }
                 counter = 0;
         }
 

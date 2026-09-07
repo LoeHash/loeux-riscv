@@ -147,7 +147,7 @@ qemu:
 			-nographic \
 			-global virtio-mmio.force-legacy=false\
 			-drive file=./loeux.img,format=raw,if=none,id=loeux \
-			-device virtio-blk-device,drive=loeux,bus=virtio-mmio-bus.0\
+			-device virtio-blk-device,drive=loeux,bus=virtio-mmio-bus.0
 
 
 gdb:
