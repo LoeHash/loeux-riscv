@@ -59,6 +59,7 @@
 #define SYSCALL_SETSOCKOPT 54
 #define SYSCALL_GETSOCKOPT 55
 #define SYSCALL_EXIT 56
+#define SYSCALL_GETPPID 57
 
 typedef uint64_t (*syscall_func_t)(void);
 
