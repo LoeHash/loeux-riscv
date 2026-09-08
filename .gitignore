@@ -11,3 +11,4 @@ user/_*
 .gdb_history
 commit_history.txt
 kernel.dump
+user.dump
