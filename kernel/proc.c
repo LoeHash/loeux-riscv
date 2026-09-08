@@ -446,7 +446,7 @@ page_table create_task_pgtable(struct task_struct *ts)
                 pg_user_vmfree(pg, 0);
                 return 0;
         }
-        printk("trapframe: %0#lx\n", TRAPFRAME_MAPPING);
+        // printk("trapframe: %0#lx\n", TRAPFRAME_MAPPING);
         if (mappages(pg, TRAPFRAME_MAPPING, PG_4K_SIZE,
                      (uint64_t)(ts->utf), PTE_R | PTE_W) < 0)
         {
@@ -684,7 +684,7 @@ int kexec(char *path, char **argv)
         t->utf->sp = new_sp;
         t->utf->sepc = ehdr.e_entry;
 
-        printk("elf entry: %0#lx\n", ehdr.e_entry);
+        // printk("elf entry: %0#lx\n", ehdr.e_entry);
 
         free_task_pgtable(old_page, old_size);
         free_page(buf);

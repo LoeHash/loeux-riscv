@@ -81,7 +81,7 @@ int mappages(page_table pagetable, uint64_t va, uint64_t size, uint64_t pa, int 
                 panic(PANIC_ERROR, "mappages: size\n");
 
         a = va;
-        printk("va: %0#lx, pa: %0#lx size: %lu\n", a, pa, size);
+        // printk("va: %0#lx, pa: %0#lx size: %lu\n", a, pa, size);
 
         last = va + size - PG_4K_SIZE;
         for (;;)
@@ -584,16 +584,16 @@ int vm_pagetbl_copy(page_table src_pg, page_table dst_pg, uint64_t sz, bool is_u
                 chunk = kalloc(PG_4K_SIZE);
                 if (chunk == 0)
                 {
-                        pg_unmap(dst_pg, va, va / PG_4K_SIZE, 1);
+                        pg_unmap(dst_pg, va, 1, 1);
                         return -1;
                 }
 
                 memcpy(chunk, (char *)pa, PG_4K_SIZE);
 
-                if (mappages(dst_pg, va, PG_4K_SIZE, pa, flag) == -1)
+                if (mappages(dst_pg, va, PG_4K_SIZE, (uint64_t)chunk, flag) == -1)
                 {
                         kfree(chunk);
-                        pg_unmap(dst_pg, va, va / PG_4K_SIZE, 1);
+                        pg_unmap(dst_pg, va, 1, 1);
                         return -1;
                 }
         }
@@ -634,16 +634,19 @@ int vm_pagetbl_copy_asign(page_table src_pg, page_table dst_pg, uint64_t va_star
                 chunk = kalloc(PG_4K_SIZE);
                 if (chunk == 0)
                 {
-                        pg_unmap(dst_pg, va, va / PG_4K_SIZE, 1);
+                        pg_unmap(dst_pg, va, 1, 1);
                         return -1;
                 }
 
                 memcpy(chunk, (char *)pa, PG_4K_SIZE);
 
-                if (mappages(dst_pg, va, PG_4K_SIZE, pa, flag) == -1)
+                // 必须映射新分配的 chunk，不能映射父进程的 pa。
+                // 若映射 pa，父子会共享同一物理页：父进程后续修改栈/数据
+                // 会直接破坏子进程的内存，且 chunk 被泄漏。
+                if (mappages(dst_pg, va, PG_4K_SIZE, (uint64_t)chunk, flag) == -1)
                 {
                         kfree(chunk);
-                        pg_unmap(dst_pg, va, va / PG_4K_SIZE, 1);
+                        pg_unmap(dst_pg, va, 1, 1);
                         return -1;
                 }
         }
