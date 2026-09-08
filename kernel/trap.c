@@ -99,7 +99,7 @@ void kernel_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
             (int)((sstatus & SSTATUS_SIE) != 0),
             r_satp(),
             r_stvec());
-
+        printk("Kernel trap!\n");
         printk("Wrong with the cpu id: %d\n", get_cpu_id());
         printk("   scause 保存异常发生时的 PC: %0#lx\n", scause);
         printk("   sepc   保存异常发生时的 PC: %0#lx\n", sepc);
@@ -109,7 +109,6 @@ void kernel_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
         {
                 /* code */
         }
-        // intr_on();
 }
 
 /// @brief
@@ -120,7 +119,6 @@ uint64_t user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
 {
         intr_off();
 
-        /* Now get the task the regular way (this may deref cpus[r_tp()].ts) */
         struct task_struct *ts = get_task();
 
         if (ts == 0)
@@ -177,7 +175,7 @@ uint64_t user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
         else // else.
         {
                 // wrong
-                printk("the ssp %0#lx\n", r_sstatus_spp());
+                printk("User trap!\n");
                 printk("Wrong with the cpu id: %d\n", get_cpu_id());
                 printk("   scause 保存异常发生时的 PC: %0#lx\n", scause);
                 printk("   sepc   保存异常发生时的 PC: %0#lx\n", sepc);
