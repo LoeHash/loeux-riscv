@@ -9,11 +9,15 @@
 
 extern uint64_t sys_write();
 extern uint64_t sys_fork();
+extern uint64_t sys_getpid();
+extern uint64_t sys_getppid();
 
 static syscall_func_t syscalls[] = {
-    [0] 0,                     // syscall id = 0,
-    [SYSCALL_WRITE] sys_write, // []
-    [SYSCALL_FORK] sys_fork,   // []
+    [0] 0,                         // syscall id = 0,
+    [SYSCALL_WRITE] sys_write,     // []
+    [SYSCALL_FORK] sys_fork,       // []
+    [SYSCALL_GETPID] sys_getpid,   // []
+    [SYSCALL_GETPPID] sys_getppid, // []
 };
 
 static uint64_t get_arg_reg(int n)
