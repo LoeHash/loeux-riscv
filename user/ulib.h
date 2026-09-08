@@ -1,5 +1,6 @@
 #ifndef _INC_USER_ULIB
 #define _INC_USER_ULIB
+#include <stdarg.h>
 #define SYSCALL_FORK 1
 #define SYSCALL_EXEC 2
 #define SYSCALL_READ 3
@@ -56,10 +57,13 @@
 #define SYSCALL_SETSOCKOPT 54
 #define SYSCALL_GETSOCKOPT 55
 #define SYSCALL_EXIT 56
-
+#define SYSCALL_GETPPID 57
+#define NULL (void *)0
 typedef unsigned long uint64_t;
 
 int write(int fd, void *buf, uint64_t count);
 int fork();
-
+int get_pid();
+int get_ppid();
+int printf(const char *fmt, ...);
 #endif
