@@ -5,6 +5,7 @@ CC := $(CROSS_COMPILE)gcc
 # 根目录 Makefile
 INCLUDES := -I. -I../include -I../include/mm -I../include/kernel -I../include/drivers -I../include/fs -I../include/test
 CFLAGS := -march=rv64gc -mabi=lp64 -nostdlib -ffreestanding $(INCLUDES)  -g
+CFLAGS += -MMD -MP
 
 SRC_C := $(wildcard *.c)
 OBJS  := $(SRC_C:.c=.o)
@@ -23,4 +24,5 @@ all: $(OBJS)
 # all: $(OBJS) $(ASMOBJS)
 
 clean:
-	rm -f *.o
+	rm -f *.o *.d
+-include $(OBJS:.o=.d)

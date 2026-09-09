@@ -6,6 +6,7 @@ LD := $(CROSS_COMPILE)ld
 INCLUDES := -I. -I../include -I../include/mm -I../include/kernel -I../include/drivers -I../include/fs -I../include/test
 
 CFLAGS := -march=rv64gc -mabi=lp64 -nostdlib -ffreestanding $(INCLUDES) -g
+CFLAGS += -MMD -MP
 ASFLAGS := -march=rv64gc -mabi=lp64 $(INCLUDES) -g
 
 CRT0 := crt0.o
@@ -41,3 +42,4 @@ _%: %.o $(CRT0) $(USER_LIBS) user.ld
 
 clean:
 	rm -f *.o $(PROGS)
+-include $(OBJS:.o=.d)

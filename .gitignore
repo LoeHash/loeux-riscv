@@ -5,6 +5,7 @@
 *.dtb
 *.dts
 *.img
+*.d
 user/_*
 .vscode
 .vscode/*
