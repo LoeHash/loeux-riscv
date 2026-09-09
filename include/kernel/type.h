@@ -119,12 +119,19 @@ enum TASK_STATE
         RUNNING,
         BLOCKED,
         SLEEP,
+        ZOMBIE,
         DEAD
 };
 typedef uint64_t pte;
 typedef uint64_t pte_t;
 typedef int pid_t;
 typedef uint64_t *page_table;
+
+// sleep_chan 的取值：标记任务睡在 wait() 里等子进程退出。
+// kexit 唤醒父进程前必须检查该标志：
+// 绝不能把睡在睡眠锁上的任务直接置 RUNNABLE（那类任务由
+// 睡眠锁的等待队列管理，提前唤醒会脱离队列、损坏链表）。
+#define SLEEP_CHAN_CHILD ((void *)1)
 
 struct wait_node
 {
@@ -155,6 +162,12 @@ struct task_struct
         int return_val;             // 进程运行完毕后的返回值
         bool dead;                  // 是否死亡
         uint64_t kstack;            // 内核栈
+
+        // wait/kexit 同步：置位表示有子进程已退出但尚未被 wait 回收。
+        // 由 kexit 在父进程锁保护下设置，wait 消费，
+        // 用于关闭"扫描完成到真正睡下"之间的丢失唤醒窗口。
+        uint8_t child_exit_pending;
+        void *sleep_chan; // 睡眠通道，见 SLEEP_CHAN_CHILD
         bool in_syscall;
         char cwd[256]; // 工作目录, 后期会改为inode
 
