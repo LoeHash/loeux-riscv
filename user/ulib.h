@@ -58,6 +58,7 @@
 #define SYSCALL_GETSOCKOPT 55
 #define SYSCALL_EXIT 56
 #define SYSCALL_GETPPID 57
+#define SYSCALL_WAIT 58
 #define NULL (void *)0
 typedef unsigned long uint64_t;
 
@@ -65,5 +66,7 @@ int write(int fd, void *buf, uint64_t count);
 int fork();
 int get_pid();
 int get_ppid();
+int wait(int *status);
+int exit(int exit_code);
 int printf(const char *fmt, ...);
 #endif
