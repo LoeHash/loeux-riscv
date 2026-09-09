@@ -237,6 +237,9 @@ int free_page(void *pa)
         if ((addr & (PG_4K_SIZE - 1)) != 0 ||
             addr < gmd.free_start_at || addr > gmd.free_end_at)
         {
+                // TEMP-DIAG: 打印调用者返回地址便于定位野指针来源
+                printk("free_page: bad address %p caller=%p ra2=%p\n",
+                       pa, __builtin_return_address(0), __builtin_return_address(1));
                 panic(PANIC_ERROR, "free_page: bad address %p!\n", pa);
         }
 
