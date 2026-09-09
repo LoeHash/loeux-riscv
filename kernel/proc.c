@@ -36,6 +36,8 @@ static void _map_user_stack(page_table pg);
 static int read_phdr(int fd, uint64_t off, struct elf64_phdr *ph);
 static int flags_to_pte(uint32_t p_flags);
 static int load_segment(int fd, page_table pg, struct elf64_phdr *ph);
+static void exit_fs(struct task_struct *ts);
+static void wake_wait_parent(struct task_struct *p);
 
 // 初始化用户第一个进程
 void init_user()
@@ -159,6 +161,14 @@ struct task_struct *alloc_task()
 
                         memset(&ft->ctx, 0, sizeof(ft->ctx));
                         ft->ctx.ra = (uint64_t)first_ret;
+                        // 槽位复用：清掉上一任残留的 trap 续跑状态，
+                        // 否则新任务第一次被时钟打断并 yield 后，
+                        // kernel trap 路径会"恢复"上一任遗留的 sepc/sstatus
+                        ft->trap_ctx_valid = 0;
+                        ft->trap_sepc = 0;
+                        ft->trap_sstatus = 0;
+                        ft->child_exit_pending = 0;
+                        ft->sleep_chan = 0;
                         // 进程内核栈，而不是cpu调度器栈
                         ft->ctx.sp = ft->kstack;
                         return ft;
@@ -388,20 +398,7 @@ static uint64_t alloc_pid()
 
 void free_task(struct task_struct *t)
 {
-        // 关闭该 task 所有打开的文件：
-        // fork 时共享出去的 file->refcount 会被 file_close 的原子减抵消，
-        // 最后一个引用者负责真正回收底层资源。
-        // 先把 ofile[i] 摘除（置 NULL）再 drop 引用，确保即便有重入也不会
-        // 重复 close 同一个槽位。
-        for (int i = 0; i < NOFILE; i++)
-        {
-                struct file *f = t->ofile[i];
-                t->ofile[i] = NULL;
-                if (f)
-                {
-                        file_close(f);
-                }
-        }
+        exit_fs(t);
 
         if (t->utf)
                 kfree((void *)t->utf);
@@ -425,10 +422,12 @@ void free_task_pgtable(page_table pagetable, uint64_t sz)
         // 但不释放对应物理页
         pg_unmap(pagetable, TRAMPOLINE, 1, 0);
         pg_unmap(pagetable, TRAPFRAME_MAPPING, 1, 0);
+
+        // 这里就不会取消映射了
         pg_user_vmfree(pagetable, sz);
 }
 
-/// @brief 映射进程的页表, 基本映射
+/// @brief 映射进程的页表, 基本映射：仅包含蹦床页和trapframe映射
 /// @param ts
 /// @return
 page_table create_task_pgtable(struct task_struct *ts)
@@ -456,6 +455,197 @@ page_table create_task_pgtable(struct task_struct *ts)
         }
 
         return pg;
+}
+static void exit_fs(struct task_struct *ts)
+{
+        // 关闭该 task 所有打开的文件：
+        // fork 时共享出去的 file->refcount 会被 file_close 的原子减抵消，
+        // 最后一个引用者负责真正回收底层资源。
+        for (int i = 0; i < NOFILE; i++)
+        {
+                struct file *f = ts->ofile[i];
+                ts->ofile[i] = NULL;
+                if (f)
+                {
+                        file_close(f);
+                }
+        }
+}
+
+/// @brief 记录"有子进程退出"的 pending 标志，
+///        并唤醒正睡在 wait() 里的父进程。
+/// @param p 父进程
+/// @note  只允许唤醒睡在 SLEEP_CHAN_CHILD 上的任务。
+///        绝不能把睡在睡眠锁上的任务直接置 RUNNABLE：
+///        那类任务挂在睡眠锁的等待队列上，由 release_sleep 负责
+///        摘链唤醒，提前置 RUNNABLE 会让它的 sleep_node 残留在
+///        队列里，之后 wakeup 摘链时会访问已脱队的节点、损坏链表。
+static void wake_wait_parent(struct task_struct *p)
+{
+        acquire(&p->lk);
+        p->child_exit_pending = 1;
+        if (p->state == SLEEP && p->sleep_chan == SLEEP_CHAN_CHILD)
+        {
+                p->state = RUNNABLE;
+        }
+        release(&p->lk);
+}
+
+pid_t wait(int *status)
+{
+        struct task_struct *ts = get_task();
+        if (ts == NULL)
+        {
+                panic(PANIC_ERROR, "wait: ts is NULL!\n");
+        }
+
+        while (1)
+        {
+                struct task_struct *zombie = NULL;
+                int child_count = 0;
+
+                // 扫描所有任务，寻找当前进程的 ZOMBIE 子进程。
+                // parent/state 都在 child->lk 保护下修改，必须持锁读取。
+                // 注意：任一时刻最多只持有一个 child 的锁，
+                // 与 kexit 的持锁顺序不构成循环等待。
+                for (struct task_struct *child = tasks;
+                     child < &tasks[NTASKS];
+                     child++)
+                {
+                        acquire(&child->lk);
+                        if (child->parent == ts)
+                        {
+                                if (child->state == ZOMBIE)
+                                {
+                                        zombie = child;
+                                        break; // 持锁跳出，回收在锁内完成
+                                }
+                                child_count++;
+                        }
+                        release(&child->lk);
+                }
+
+                if (zombie != NULL)
+                {
+                        pid_t pid = zombie->pid;
+                        *status = zombie->return_val;
+
+                        // 回收 ZOMBIE 剩余资源
+                        // （页表/用户内存已由 kexit 释放，这里回收 trapframe 页）
+                        kfree((void *)zombie->utf);
+                        zombie->utf = 0;
+                        zombie->pid = 0;
+                        zombie->parent = 0;
+                        zombie->name[0] = 0;
+                        zombie->dead = 0;
+
+                        // trampoline是共享的, 不需要回收
+                        zombie->state = INITLIZED;
+                        release(&zombie->lk);
+                        return pid;
+                }
+
+                // 如果没有子进程，直接返回 -1
+                if (child_count == 0)
+                {
+                        return -1;
+                }
+
+                // 有子进程但都没有退出：睡眠等待 kexit 唤醒。
+                // pending 检查与 SLEEP 置位必须在同一临界区内完成，
+                // 否则子进程恰好在这两步之间退出会造成丢失唤醒
+                acquire(&ts->lk);
+                if (ts->child_exit_pending)
+                {
+                        ts->child_exit_pending = 0;
+                        release(&ts->lk);
+                        continue; // 有子进程刚退出，重新扫描
+                }
+                ts->sleep_chan = SLEEP_CHAN_CHILD;
+                ts->state = SLEEP;
+                sched(); // 切出；调度器切回时已重新持有 ts->lk
+                ts->sleep_chan = 0;
+                release(&ts->lk);
+        }
+}
+
+/// @brief 退出当前进程
+/// @return
+int kexit(int exit_code)
+{
+        struct task_struct *ts = get_task();
+        if (ts == NULL)
+        {
+                panic(PANIC_ERROR, "kexit: ts is NULL!\n");
+        }
+
+        // init 进程是所有孤儿的最终收容者，绝不允许退出
+        if (ts->pid == 1)
+        {
+                panic(PANIC_ERROR, "kexit: init process can not exit!\n");
+        }
+
+        acquire(&ts->lk);
+
+        // 1. 关闭所有打开的文件
+        exit_fs(ts);
+
+        // 2. 保存返回值
+        ts->return_val = exit_code;
+
+        // 3. 释放所有页表内存和物理页, 以及用户栈
+        free_task_pgtable(ts->pg, ts->size);
+        ts->pg = 0;
+        ts->size = 0;
+
+        // 4. 孤儿收容：所有子进程改投 init。
+        //    必须先释放自身锁：否则这里"持 ts->lk 再取 child->lk"
+        //    与父进程 wait() 扫描"持 child->lk 再取 ts->lk"会形成
+        //    循环等待（典型场景：父子进程在不同 hart 上同时退出）。
+        //    窗口期内 state 仍为 RUNNING，父进程只会把它当作
+        //    存活子进程计数，不会提前回收。
+        release(&ts->lk);
+        uint8_t orphan_zombie = 0;
+        for (struct task_struct *c = tasks; c < &tasks[NTASKS]; c++)
+        {
+                acquire(&c->lk);
+                if (c->parent == ts)
+                {
+                        c->parent = initask;
+                        if (c->state == ZOMBIE)
+                        {
+                                orphan_zombie = 1; // 有孤儿已是僵尸，通知 init 回收
+                        }
+                }
+                release(&c->lk);
+        }
+        if (orphan_zombie)
+        {
+                wake_wait_parent(initask);
+        }
+        acquire(&ts->lk);
+
+        // 5. 最后才置 ZOMBIE：
+        //    父进程只能通过 acquire(ts->lk) 观察到 ZOMBIE，而本锁会
+        //    一直持有到 sched() 切出、由调度器释放——这保证父进程
+        //    真正拿到锁开始回收时，本任务已彻底停止运行
+        //    若过早置 ZOMBIE，父进程可能在 install trapframe 页仍被
+        //    本任务使用时就 kfree(utf)，甚至把槽位置回 INITLIZED
+        //    交给 alloc_task 复用——而本任务还在自己的内核栈上跑着。
+        ts->state = ZOMBIE;
+        ts->dead = 1;
+
+        // 6. 唤醒正在 wait() 的父进程
+        if (ts->parent != NULL)
+        {
+                wake_wait_parent(ts->parent);
+        }
+
+        // 7. 切出，永不返回
+        sched();
+
+        // 8. should never reach here
+        panic(PANIC_ERROR, "kexit: sched() error! exit_code: %d!\n", exit_code);
 }
 
 /// @brief  创建一个子进程
@@ -531,6 +721,10 @@ int kfork()
         new_ts->state = RUNNABLE;
         release(&new_ts->lk);
 
+        // 注意：锁已释放，new_ts 生命周期不再受控——
+        // 子进程可能已被其他 hart 调度、甚至 exit 并被回收。
+        // 此处绝不能再解引用 new_ts
+
         return new_ts->pid;
 }
 
@@ -557,7 +751,7 @@ int kexec(char *path, char **argv)
         buf = alloc_page();
         if (buf == NULL)
         {
-                free_page(buf);
+                // buf 本来就是 NULL，不能再 free_page（会触发 NULL 指针 panic）
                 panic(PANIC_ERROR, "kexec: oom!\n");
         }
 

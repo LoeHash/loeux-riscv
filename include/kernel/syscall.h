@@ -60,6 +60,7 @@
 #define SYSCALL_GETSOCKOPT 55
 #define SYSCALL_EXIT 56
 #define SYSCALL_GETPPID 57
+#define SYSCALL_WAIT 58
 
 typedef uint64_t (*syscall_func_t)(void);
 

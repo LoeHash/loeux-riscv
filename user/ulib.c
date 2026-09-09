@@ -44,6 +44,18 @@ int fork()
 
         return ret;
 }
+int wait(int *status)
+{
+        int ret;
+        __asm__ volatile(
+            "li a7, %1\n"
+            "ecall\n"
+            "mv %0, a0\n"
+            : "=r"(ret)
+            : "i"(SYSCALL_WAIT), "r"(status)
+            : "a0", "a1", "a7", "memory");
+        return ret;
+}
 
 int write(int fd, void *buf, uint64_t count)
 {
@@ -56,6 +68,17 @@ int write(int fd, void *buf, uint64_t count)
             : "r"(fd), "r"(buf), "r"(count), "i"(SYSCALL_WRITE)
             : "a0", "a1", "a2", "a7", "memory");
         return ret;
+}
+
+int exit(int exit_code)
+{
+        __asm__ volatile(
+            "li a7, %1\n"
+            "ecall\n"
+            :
+            : "r"(exit_code), "i"(SYSCALL_EXIT)
+            : "a0", "a7", "memory");
+        return 0;
 }
 
 // 往 stdout 写字符串
