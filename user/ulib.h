@@ -64,6 +64,7 @@ typedef unsigned long uint64_t;
 
 int write(int fd, void *buf, uint64_t count);
 int fork();
+int exec(const char *path, char **argv);
 int get_pid();
 int get_ppid();
 int wait(int *status);

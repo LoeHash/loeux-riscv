@@ -44,6 +44,22 @@ int fork()
 
         return ret;
 }
+
+int exec(const char *path, char **argv)
+{
+        int ret;
+        __asm__ volatile(
+            "mv a0, %1\n"
+            "mv a1, %2\n"
+            "li a7, %3\n"
+            "ecall\n"
+            "mv %0, a0\n"
+            : "=r"(ret)
+            : "r"(path), "r"(argv), "i"(SYSCALL_EXEC)
+            : "a0", "a1", "a7", "memory");
+        return ret;
+}
+
 int wait(int *status)
 {
         int ret;

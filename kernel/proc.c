@@ -90,7 +90,7 @@ void first_ret()
                 init_vfs_std();
 
                 // exec
-                ts->utf->a0 = kexec("/_init", (char *[]){"hello!", 0});
+                ts->utf->a0 = kexec("/_init", (char *[]){"init", NULL});
                 if (ts->utf->a0 == -1)
                 {
                         panic(PANIC_ERROR, "inituser: a0 is -1!\n");
@@ -876,9 +876,8 @@ int kexec(char *path, char **argv)
         t->pg = new_page;
         t->size = new_size;
         t->utf->sp = new_sp;
+        t->utf->a0 = argc; // crt0 的 _start 直接 call main，main 从 a0 读 argc
         t->utf->sepc = ehdr.e_entry;
-
-        // printk("elf entry: %0#lx\n", ehdr.e_entry);
 
         free_task_pgtable(old_page, old_size);
         free_page(buf);
