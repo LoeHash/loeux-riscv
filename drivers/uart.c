@@ -31,12 +31,16 @@ int uart_read(void *priv, void *buf, uint64_t count, uint64_t *out_len)
 {
         uint8_t *p = (uint8_t *)buf;
 
-        // 行模式：
+        // 行模式（cooked mode）：
         // - 遇到回车/换行即结束，把 \r 统一转为 \n
         // - 读满 count 字节也结束
+        // - 退格删除前一个字符（缓冲区和屏幕同时回退）
         // - 返回实际读到的字节数（含末尾的 \n）
-        uint64_t i;
-        for (i = 0; i < count; i++)
+        // 必须用 while 而非 for(i;i++)：
+        // 退格做 i-- 后 continue 会触发 for 的 i++，把退格抵消，
+        // 导致后续字符写到错误位置，中间留下 \0 空洞。
+        uint64_t i = 0;
+        while (i < count)
         {
                 char c = uart_getchar();
 
@@ -49,13 +53,19 @@ int uart_read(void *priv, void *buf, uint64_t count, uint64_t *out_len)
                         i++;
                         break;
                 }
-                if ((c == '\b' || c == 0x7f) && i > 0)
+                if (c == '\b' || c == 0x7f)
                 {
-                        i--;
+                        if (i > 0)
+                        {
+                                i--;
+                                p[i] = '\0';
+                        }
+                        // i==0 时忽略退格，不存入缓冲区
                         continue;
                 }
 
                 p[i] = c;
+                i++;
         }
 
         *out_len = i;
