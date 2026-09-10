@@ -51,19 +51,50 @@ void init_user()
 
         initask = ts;
 
-        set_cwd(ts, "/");
+        if (set_cwd(ts, "/") == -1)
+        {
+                panic(PANIC_ERROR, "init_tasks: set_cwd failed!\n");
+        }
 
         ts->state = RUNNABLE;
         release(&ts->lk);
 }
 
-/// @brief 设置进程的工作目录, path必须以\0结尾
-/// @param ts
-/// @param path
-void set_cwd(struct task_struct *ts, char *path)
+/// @brief 设置进程工作目录：通过 VFS 验证路径有效性
+/// @param ts 目标进程
+/// @param path 绝对路径（必须以 / 开头）
+/// @return 0 成功, -1 路径不存在或不是目录
+int set_cwd(struct task_struct *ts, const char *path)
 {
-        // 设置工作目录
-        memcpy(ts->cwd, path, strlen(path) + 1);
+        if (!path || !ts)
+                return -1;
+
+        // 通过 VFS 解析路径，获取节点
+        struct vfs_node *node = vfs_lookup(path);
+        if (node == NULL)
+        {
+                return -1; // 路径不存在
+        }
+
+        // 必须是目录
+        if (!node->is_dir)
+        {
+                node->mount->fs_ops->fs_free_node(node->private);
+                free_page(node);
+                return -1;
+        }
+
+        // 释放旧的工作目录节点
+        if (ts->cwd_node != NULL)
+        {
+                ts->cwd_node->mount->fs_ops->fs_free_node(ts->cwd_node->private);
+                free_page(ts->cwd_node);
+        }
+
+        ts->cwd_node = node;
+        strncpy(ts->cwd, path, 255);
+        ts->cwd[255] = '\0';
+        return 0;
 }
 
 /// @brief 所有fork出来的进程
@@ -470,6 +501,14 @@ static void exit_fs(struct task_struct *ts)
                         file_close(f);
                 }
         }
+
+        // 释放工作目录的 VFS 节点
+        if (ts->cwd_node)
+        {
+                ts->cwd_node->mount->fs_ops->fs_free_node(ts->cwd_node->private);
+                free_page(ts->cwd_node);
+                ts->cwd_node = NULL;
+        }
 }
 
 /// @brief 记录"有子进程退出"的 pending 标志，
@@ -705,7 +744,12 @@ int kfork()
 
         // 4. 复制name和cwd
         strcpy(new_ts->name, father_ts->name);
-        strcpy(new_ts->cwd, father_ts->cwd);
+        if (set_cwd(new_ts, father_ts->cwd) == -1)
+        {
+                // cwd 设置失败（不应该发生，因为父进程的 cwd 是有效的）
+                // 退回到根目录
+                set_cwd(new_ts, "/");
+        }
 
         // 5. 设置子进程的trapframe
         *(new_ts->utf) = *(father_ts->utf);

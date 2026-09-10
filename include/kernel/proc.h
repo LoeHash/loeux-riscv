@@ -33,7 +33,7 @@ int kexec(char *path, char **argv);
 int kfork();
 int kexit(int exit_code);
 void init_user();
-void set_cwd(struct task_struct *ts, char *path);
+int set_cwd(struct task_struct *ts, const char *path);
 pid_t wait(int *status);
 pid_t waitpid(pid_t pid, int *status);
 #endif

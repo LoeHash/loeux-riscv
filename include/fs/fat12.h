@@ -113,6 +113,7 @@ int fat12_open(void *node, struct file *file, int flags);
 int fat12_read(struct file *file, void *buf, uint64_t count, uint64_t *out_len);
 int fat12_write(struct file *file, const void *buf, uint64_t count, uint64_t *out_len);
 int fat12_close(struct file *file);
+int fat12_is_dir(void *node);
 /// @brief mode = 0 文件 1 目录
 int fat12_create(void *fs_priv, const char *rel_path, int mode);
 extern struct file_operation fat12_ops;

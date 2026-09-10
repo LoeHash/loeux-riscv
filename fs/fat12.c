@@ -14,7 +14,8 @@ struct file_operation fat12_ops = {
     .fs_mount = fat12_mount,
     .fs_open = fat12_open,
     .fs_read = fat12_read,
-    .fs_write = fat12_write};
+    .fs_write = fat12_write,
+    .fs_is_dir = fat12_is_dir};
 
 static int find_in_dir(struct fat12_priv *fs, uint32_t start_sector, uint32_t dir_size,
                        const char *filename, struct fat12_dirent *out);
@@ -272,6 +273,14 @@ int fat12_close(struct file *file)
 void fat12_free_node(void *out_node)
 {
         free_page(out_node);
+}
+
+int fat12_is_dir(void *node)
+{
+        struct fat12_node *fnode = (struct fat12_node *)node;
+        if (!fnode)
+                return 0;
+        return fnode->is_root || (fnode->attr & FAT12_ATTR_DIRECTORY);
 }
 
 int fat12_write(struct file *file, const void *buf, uint64_t count, uint64_t *out_len)

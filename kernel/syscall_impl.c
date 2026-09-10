@@ -21,13 +21,18 @@ uint64_t sys_chdir()
                 return -1;
         }
 
+        // 必须是绝对路径
+        if (path[0] != '/')
+        {
+                return -1;
+        }
+
         struct task_struct *t = get_task();
         acquire(&t->lk);
-        memset(t->cwd, 0, sizeof(t->cwd));
-        strcpy(t->cwd, path);
+        int ret = set_cwd(t, path);
         release(&t->lk);
 
-        return 0;
+        return ret;
 }
 
 uint64_t sys_wait()

@@ -148,6 +148,9 @@ int write(int fd, void *buf, uint64_t count)
 {
         int ret;
         __asm__ volatile(
+            "mv a0, %1\n"
+            "mv a1, %2\n"
+            "mv a2, %3\n"
             "li a7, %4\n"
             "ecall\n"
             "mv %0, a0\n"

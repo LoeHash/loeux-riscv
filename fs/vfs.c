@@ -352,12 +352,8 @@ struct vfs_node *vfs_lookup(const char *path)
                 rel_path++;
         }
 
-        if (*rel_path == '\0')
-        {
-                rel_path = ".";
-        }
-
-        // priv 是一个文件系统的私有结构
+        // rel_path 为空串时表示挂载点根目录，直接传给 fs_lookup，
+        // 文件系统自己判断空串为根目录（如 fat12_lookup 检查 *path == '\0'）
         void *priv_node = NULL;
         int ret = mp->fs_ops->fs_lookup(mp->fs_priv, rel_path, &priv_node);
         if (ret < 0 || !priv_node)
@@ -377,6 +373,7 @@ struct vfs_node *vfs_lookup(const char *path)
         vnode->mount = mp;
         vnode->private = priv_node;
         vnode->size = ret;
+        vnode->is_dir = mp->fs_ops->fs_is_dir ? mp->fs_ops->fs_is_dir(priv_node) : 0;
 
         return vnode;
 }

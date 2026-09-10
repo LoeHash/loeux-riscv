@@ -168,6 +168,8 @@ struct file_operation
         int (*fs_close)(struct file *file);
         /// @brief mode = 0 文件 1 目录
         int (*fs_create)(void *fs_priv, const char *rel_path, int mode);
+        /// @brief 判断节点是否为目录
+        int (*fs_is_dir)(void *node);
 };
 
 typedef enum

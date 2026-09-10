@@ -169,7 +169,8 @@ struct task_struct
         uint8_t child_exit_pending;
         void *sleep_chan; // 睡眠通道，见 SLEEP_CHAN_CHILD
         bool in_syscall;
-        char cwd[256]; // 工作目录, 后期会改为inode
+        char cwd[256];             // 工作目录路径字符串
+        struct vfs_node *cwd_node; // 工作目录的 VFS 节点，与 cwd 同步
 
         struct file *ofile[NOFILE]; // Open files
 
