@@ -1,74 +1,67 @@
-# 🧵 loeux — Loe's Unix
+# loeux — Loe's Unix
 
-**A hobby RISC-V kernel that actually runs.**
-
----
-
-## 🧠 What is loeux?
-
-loeux is a from‑scratch operating system kernel for the RISC-V architecture.  
-It is built for fun, for learning, and for the sheer joy of making something that *works*.
-
-The name? **Loe** + **Unix** = **loeux**.  
-Because every great system starts with a name that means something to its creator.
+A hobby RISC-V operating system kernel, written from scratch.
 
 ---
 
-## 📖 The Story of loeux
+## What is loeux?
 
-It started in the summer of 2026 — the break between freshman and sophomore year.
+loeux is a from-scratch operating system kernel for the RISC-V architecture.
 
-I had spent weeks fighting with xv6, trying to implement copy‑on‑write and semaphores.  
-I failed. Hard.
+The name is **Loe** + **Unix**. It is built for learning how a real system works — from the first instruction after reset to a user-mode shell.
 
-One commit from that time says it all:
+---
+
+## Origin
+
+This project started in the summer of 2026, between freshman and sophomore year.
+
+Before loeux, I spent weeks on xv6 trying to implement copy-on-write and semaphores. I did not get them working. One commit from that period reads:
 
 > *“i closed the c.o.w. ... fuck it! i've spend a week for the bullshit semaphore thing, i will fix it! besides, if you extremly want to use cow, go ahead ... this is very dangerous”*
 
-That was June 12.
+That was June 12, 2026.
 
-I took a step back. I realized I was fighting a system I didn't fully own. So I decided to build my own — from scratch — on RISC-V, where there was no legacy, no 32‑bit cruft, and no borrowed code I didn't understand.
+Rather than continue fighting a system I did not fully own, I decided to build one from scratch on RISC-V — no legacy, no 32-bit cruft, no code I did not understand.
 
-On July 24, I wrote the first commit:
+On July 24, 2026, I wrote the first commit:
 
 > *`<init> init....`*
 
-25 days later, on August 17, loeux ran its first user program.
+25 days later, on August 17, 2026, loeux ran its first user program.
 
 > *`<feat> we are finally running the user program! the kernel executing stream and exception controling stream had been verified! enjoy it!`*
 
-It wasn't a breakthrough. It was just one commit after another, day after day — until suddenly, it worked.
-
-That's the story of loeux.  
-Not a grand plan. Just a lot of small steps that added up to something real.
+There was no single breakthrough. Just consistent progress, one commit at a time.
 
 ---
 
-## ✨ Features
+## Features
 
-- 🧩 **Multi‑core boot** — Brings up all available RISC-V cores.
-- 🧠 **Virtual memory** — Sv39 page tables with full kernel/user space separation.
-- ⏱️ **Preemptive scheduling** — Round‑robin scheduler with timer interrupts (CLINT).
-- 💾 **Block I/O** — VirtIO block device driver (`virtio_blk`) with synchronous read/write.
-- 📁 **FAT12 filesystem** — Complete FAT12 support with a full VFS abstraction layer (`open`, `read`, `write`, `close`, `mount`).
-- 📟 **Standard I/O** — `stdin`, `stdout`, `stderr` working through the VFS layer.
-- 👤 **User mode** — Can execute user programs and handle system calls.
-- 🔧 **Debugging tools** — `vmprint` for page table visualization, built‑in test suites.
+- **Multi-core boot** — Brings up all available RISC-V harts.
+- **Virtual memory** — Sv39 page tables with kernel/user address space separation.
+- **Preemptive scheduling** — Round-robin scheduler driven by CLINT timer interrupts.
+- **Block I/O** — VirtIO block device driver with synchronous read/write.
+- **Filesystem** — FAT12 implementation with a VFS abstraction layer (`open`, `read`, `write`, `close`, `mount`).
+- **Standard I/O** — `stdin`, `stdout`, `stderr` exposed through the VFS layer.
+- **User mode** — Loads and executes user programs; handles system calls.
+- **Shell** — A minimal user-space shell, based on [brenns10/lsh](https://github.com/brenns10/lsh).
+- **Debugging tools** — `vmprint` for page-table inspection, built-in test suites.
 
 ---
 
-## 🚀 Build & Run
+## Build & Run
 
 ```bash
 make
 make qemu
 ```
 
-This will build the kernel and launch it in QEMU with a 64 MB FAT12 disk image.
+Builds the kernel and launches it in QEMU with a 64 MB FAT12 disk image.
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 ```
 .
@@ -86,22 +79,30 @@ This will build the kernel and launch it in QEMU with a 64 MB FAT12 disk image
 
 ---
 
-## 📊 Current Status
+## Status
 
-- [x] Multi‑core boot  
-- [x] Sv39 virtual memory  
-- [x] Process scheduler  
-- [x] Timer interrupts  
-- [x] VirtIO block driver  
-- [x] FAT12 + VFS  
-- [x] `stdin` / `stdout` / `stderr`  
-- [x] User programs  
-- [ ] Copy‑on‑Write (coming soon)  
-- [ ] Slab allocator (planned)  
-- [ ] More system calls (planned)
+- [√] Multi-core boot
+- [√] Sv39 virtual memory
+- [√] Process scheduler
+- [√] Timer interrupts
+- [√] VirtIO block driver
+- [√] FAT12 + VFS
+- [√] `stdin` / `stdout` / `stderr`
+- [√] User programs
+- [√] Shell
+- [x] Copy-on-Write
+- [x] Slab allocator
+- [x] More system calls
 
 ---
-## 🛠️ Code Stats
+
+## Acknowledgements
+This project includes code and ideas from the following sources:
+
+- **[brenns10/lsh](https://github.com/brenns10/lsh)** — A simple shell implementation in C by Stephen Brennan. The user-space shell in loeux is adapted from this project.  
+---
+
+## Code Stats
 
 ```text
 -------------------------------------------------------------------------------
@@ -120,15 +121,14 @@ SUM:                            71           1265           1439           6817
 -------------------------------------------------------------------------------
 ```
 
-**~6800 lines** of C, assembly, and headers.  
-**~1400 lines** of comments — because future me will thank past me.
+Roughly 6800 lines of C, assembly, and headers, with about 1400 lines of comments.
 
 ---
 
-## 📜 License
+## License
 
-MIT License — do whatever you want with it, just keep my name somewhere.
+MIT License. See `LICENSE` for details.
 
 ---
 
-**LoeHash** · Summer 2026 · 🧵 from `init....` to `sret`
+**LoeHash** · 2026 · from `init....` to `sret`
