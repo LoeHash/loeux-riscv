@@ -5,7 +5,7 @@
 #include <sbi.h>
 
 static spinlock_t uart_lock = {0};
-
+static void do_screen_echo(char c, int internal_i);
 struct char_device_ops uart_ops = {
     .open = uart_open,
     .read = uart_read,
@@ -39,12 +39,22 @@ int uart_read(void *priv, void *buf, uint64_t count, uint64_t *out_len)
         for (i = 0; i < count; i++)
         {
                 char c = uart_getchar();
+
+                // 回显
+                do_screen_echo(c, i);
+
                 if (c == '\r' || c == '\n')
                 {
                         p[i] = '\n';
                         i++;
                         break;
                 }
+                if ((c == '\b' || c == 0x7f) && i > 0)
+                {
+                        i--;
+                        continue;
+                }
+
                 p[i] = c;
         }
 
@@ -121,4 +131,28 @@ void uart_puthex(uint64_t val)
 int uart_available(void)
 {
         return !(*((volatile uint32_t *)(MMIO_UART_OFFEST + UART_RXFIFO_OFFSET)) & UART_RXFIFO_EMPTY);
+}
+
+static void do_screen_echo(char c, int internal_i)
+{
+        if (c == '\r' || c == '\n')
+        {
+                uart_putchar('\r');
+                uart_putchar('\n');
+                return;
+        }
+        else if (c == '\b' || c == 0x7f)
+        {
+                if (internal_i > 0)
+                {
+                        // 退格
+                        uart_putchar('\b');
+                        uart_putchar(' ');
+                        uart_putchar('\b');
+                }
+        }
+        else
+        {
+                uart_putchar(c); // 普通字符直接回显
+        }
 }
