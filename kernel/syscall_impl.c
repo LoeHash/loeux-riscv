@@ -66,7 +66,7 @@ uint64_t sys_exit()
         int exit_code;
         get_arg_int(0, &exit_code);
         kexit(exit_code);
-        return 0; // never reaches
+        return 0; // never reaches maybe.
 }
 
 uint64_t sys_getppid()

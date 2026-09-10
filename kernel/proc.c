@@ -635,7 +635,10 @@ int kexit(int exit_code)
         // init 进程是所有孤儿的最终收容者，绝不允许退出
         if (ts->pid == 1)
         {
-                panic(PANIC_ERROR, "kexit: init process can not exit!\n");
+                // 为了稳定性
+                // 不做处理
+                // panic(PANIC_ERROR, "kexit: init process can not exit!\n");
+                return 0;
         }
 
         acquire(&ts->lk);
@@ -1108,4 +1111,11 @@ static void _map_user_stack(page_table pg)
                 mappages(pg, i, PG_4K_SIZE, (uint64_t)kalloc(), PTE_R | PTE_W | PTE_U);
         }
         uint64_t new_sp = USER_STACK_TOP;
+}
+
+void to_kill(struct task_struct *t)
+{
+        acquire(&t->lk);
+        t->dead = 1;
+        release(&t->lk);
 }

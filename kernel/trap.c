@@ -181,11 +181,12 @@ uint64_t user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
                 printk("   sepc   保存异常发生时的 PC: %0#lx\n", sepc);
                 printk("   stval  异常的附加信息:%0#lx\n", stval);
 
-                ts->dead = 1;
+                to_kill(ts);
+        }
 
-                // 暂时直接停住，方便调试
-                while (1)
-                        ;
+        if (ts->dead == 1)
+        {
+                kexit(-1);
         }
 
         setup_return_trapframe(ts);

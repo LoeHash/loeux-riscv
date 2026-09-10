@@ -36,4 +36,5 @@ void init_user();
 int set_cwd(struct task_struct *ts, const char *path);
 pid_t wait(int *status);
 pid_t waitpid(pid_t pid, int *status);
+void to_kill(struct task_struct *t);
 #endif
