@@ -73,8 +73,8 @@ int lsh_launch(char **args)
         }
         else
         {
-                // 父进程等待
-                wait(&status);
+                // 父进程等待指定子进程退出
+                waitpid(pid, &status);
         }
         return 1;
 }

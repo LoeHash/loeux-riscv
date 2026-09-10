@@ -491,12 +491,16 @@ static void wake_wait_parent(struct task_struct *p)
         release(&p->lk);
 }
 
-pid_t wait(int *status)
+/// @brief 等待指定子进程退出，回收其资源
+/// @param pid 要等待的子进程 pid；-1 表示等待任意子进程
+/// @param status 接收子进程退出码的指针，NULL 则丢弃
+/// @return 成功返回被回收的 pid；无子进程返回 -1
+pid_t waitpid(pid_t pid, int *status)
 {
         struct task_struct *ts = get_task();
         if (ts == NULL)
         {
-                panic(PANIC_ERROR, "wait: ts is NULL!\n");
+                panic(PANIC_ERROR, "waitpid: ts is NULL!\n");
         }
 
         while (1)
@@ -515,20 +519,24 @@ pid_t wait(int *status)
                         acquire(&child->lk);
                         if (child->parent == ts)
                         {
-                                if (child->state == ZOMBIE)
+                                if (pid == -1 || child->pid == pid)
                                 {
-                                        zombie = child;
-                                        break; // 持锁跳出，回收在锁内完成
+                                        if (child->state == ZOMBIE)
+                                        {
+                                                zombie = child;
+                                                break; // 持锁跳出，回收在锁内完成
+                                        }
+                                        child_count++;
                                 }
-                                child_count++;
                         }
                         release(&child->lk);
                 }
 
                 if (zombie != NULL)
                 {
-                        pid_t pid = zombie->pid;
-                        *status = zombie->return_val;
+                        pid_t reaped = zombie->pid;
+                        if (status)
+                                *status = zombie->return_val;
 
                         // 回收 ZOMBIE 剩余资源
                         // （页表/用户内存已由 kexit 释放，这里回收 trapframe 页）
@@ -542,10 +550,10 @@ pid_t wait(int *status)
                         // trampoline是共享的, 不需要回收
                         zombie->state = INITLIZED;
                         release(&zombie->lk);
-                        return pid;
+                        return reaped;
                 }
 
-                // 如果没有子进程，直接返回 -1
+                // 如果没有匹配的子进程，直接返回 -1
                 if (child_count == 0)
                 {
                         return -1;
@@ -567,6 +575,12 @@ pid_t wait(int *status)
                 ts->sleep_chan = 0;
                 release(&ts->lk);
         }
+}
+
+/// @brief 等待任意子进程退出（waitpid 的便捷包装）
+pid_t wait(int *status)
+{
+        return waitpid(-1, status);
 }
 
 /// @brief 退出当前进程

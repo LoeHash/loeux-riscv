@@ -34,12 +34,26 @@ uint64_t sys_wait()
 {
         uint64_t status;
         get_arg_addr(0, &status);
-        // copy_data_addr 按 uint64_t 拷贝，必须用 8 字节对齐的接收变量，
-        // 不能直接对 4 字节 int 取址，否则会越界写栈上相邻内存
         uint64_t status_u = 0;
         pid_t pid = wait((int *)&status_u);
         copy_data_addr(status, &status_u);
         return pid;
+}
+
+uint64_t sys_waitpid()
+{
+        int pid;
+        uint64_t status_addr;
+        get_arg_int(0, &pid);
+        get_arg_addr(1, &status_addr);
+
+        uint64_t status_u = 0;
+        pid_t ret = waitpid(pid, (int *)&status_u);
+        if (status_addr != 0)
+        {
+                copy_data_addr(status_addr, &status_u);
+        }
+        return ret;
 }
 
 uint64_t sys_exit()

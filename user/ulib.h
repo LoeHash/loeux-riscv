@@ -69,6 +69,7 @@
 #define SYSCALL_GETPPID 57
 #define SYSCALL_WAIT 58
 #define SYSCALL_CHDIR 59
+#define SYSCALL_WAITPID 60
 ///////////////////////////////SYSCALLS END///////////////////////////////
 
 ///////////////////////////////TYPE DEFINITIONS///////////////////////////////
@@ -424,6 +425,7 @@ int exec(const char *path, char **argv);
 int get_pid();
 int get_ppid();
 int wait(int *status);
+int waitpid(int pid, int *status);
 int exit(int exit_code);
 int printf(const char *fmt, ...);
 int read(int fd, void *buf, uint64_t count);

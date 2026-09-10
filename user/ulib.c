@@ -129,6 +129,21 @@ int wait(int *status)
         return ret;
 }
 
+int waitpid(int pid, int *status)
+{
+        int ret;
+        __asm__ volatile(
+            "mv a0, %1\n"
+            "mv a1, %2\n"
+            "li a7, %3\n"
+            "ecall\n"
+            "mv %0, a0\n"
+            : "=r"(ret)
+            : "r"(pid), "r"(status), "i"(SYSCALL_WAITPID)
+            : "a0", "a1", "a7", "memory");
+        return ret;
+}
+
 int write(int fd, void *buf, uint64_t count)
 {
         int ret;

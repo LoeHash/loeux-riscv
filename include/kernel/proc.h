@@ -35,4 +35,5 @@ int kexit(int exit_code);
 void init_user();
 void set_cwd(struct task_struct *ts, char *path);
 pid_t wait(int *status);
+pid_t waitpid(pid_t pid, int *status);
 #endif
