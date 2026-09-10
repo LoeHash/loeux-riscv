@@ -81,18 +81,18 @@ Builds the kernel and launches it in QEMU with a 64 MB FAT12 disk image.
 
 ## Status
 
-- [√] Multi-core boot
-- [√] Sv39 virtual memory
-- [√] Process scheduler
-- [√] Timer interrupts
-- [√] VirtIO block driver
-- [√] FAT12 + VFS
-- [√] `stdin` / `stdout` / `stderr`
-- [√] User programs
-- [√] Shell
-- [x] Copy-on-Write
-- [x] Slab allocator
-- [x] More system calls
+- [x] Multi-core boot
+- [x] Sv39 virtual memory
+- [x] Process scheduler
+- [x] Timer interrupts
+- [x] VirtIO block driver
+- [x] FAT12 + VFS
+- [x] `stdin` / `stdout` / `stderr`
+- [x] User programs
+- [x] Shell
+- [ ] Copy-on-Write
+- [ ] Slab allocator
+- [ ] More system calls
 
 ---
 
@@ -108,20 +108,21 @@ This project includes code and ideas from the following sources:
 -------------------------------------------------------------------------------
 Language                     files          blank        comment           code
 -------------------------------------------------------------------------------
-C                               25            774            822           4091
-C/C++ Header                    28            293            521           2008
-make                             8             72             18            241
-Assembly                         6             33             78            218
-Text                             1             91              0            206
+C                               28           1000           1137           5540
+C/C++ Header                    29            345            653           2342
+Text                             1            515              0           1371
+D                               29              0              0            576
+make                             9             82             26            270
+Assembly                         6             51             92            241
+Markdown                         1             40              0             94
 JSON                             1              0              0             36
 Linker Script                    1              2              0             14
-Markdown                         1              0              0              3
 -------------------------------------------------------------------------------
-SUM:                            71           1265           1439           6817
+SUM:                           105           2035           1908          10484
 -------------------------------------------------------------------------------
 ```
 
-Roughly 6800 lines of C, assembly, and headers, with about 1400 lines of comments.
+Roughly 10000 lines of C, assembly, and headers, with about 1400 lines of comments.
 
 ---
 
