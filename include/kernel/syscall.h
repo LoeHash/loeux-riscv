@@ -65,6 +65,7 @@
 typedef uint64_t (*syscall_func_t)(void);
 
 int copy_data_addr(uint64_t addr, uint64_t *ip);
+int copy_data_str_out(uint64_t addr, char *buf, int max);
 int copy_data_str(uint64_t addr, char *buf, int max);
 void get_arg_addr(int n, uint64_t *buf);
 void get_arg_int(int n, int *buf);

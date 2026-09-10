@@ -208,7 +208,7 @@ int64_t vfs_read(int fd, void *buf, uint64_t count)
                 return -1;
         }
 
-        // 串行化读：与写同理，保护 pos 的原子性
+        // 串行化读, 保护 pos 的原子性
         acquire_sleep(&file->flk);
 
         uint64_t out_len = 0;

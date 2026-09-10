@@ -31,12 +31,24 @@ int uart_read(void *priv, void *buf, uint64_t count, uint64_t *out_len)
 {
         uint8_t *p = (uint8_t *)buf;
 
-        for (uint64_t i = 0; i < count; i++)
+        // 行模式：
+        // - 遇到回车/换行即结束，把 \r 统一转为 \n
+        // - 读满 count 字节也结束
+        // - 返回实际读到的字节数（含末尾的 \n）
+        uint64_t i;
+        for (i = 0; i < count; i++)
         {
-                p[i] = uart_getchar();
+                char c = uart_getchar();
+                if (c == '\r' || c == '\n')
+                {
+                        p[i] = '\n';
+                        i++;
+                        break;
+                }
+                p[i] = c;
         }
 
-        *out_len = count;
+        *out_len = i;
         return 0;
 }
 

@@ -60,7 +60,11 @@ OBJS := asm/kernel_trap_vec.o\
 TARGET := kernel.elf
 TARGET_BIN := kernel.bin
 
-.PHONY: all clean boot kernel
+# $(OBJS) 必须标记为 phony：根 make 对每个 .o 只知道 .c 显式依赖，
+# 若 .o 比 .c 新就跳过递归——子目录 make 里的 .d 头文件依赖
+# （-MMD -MP 生成）根本没机会被检查，导致改头文件后旧 .o 残留混编。
+# 标记后根 make 每次都递归进子目录，由子 make 依据 .d 决定真正编译哪些。
+.PHONY: all clean boot kernel $(OBJS)
 
 all: $(TARGET_BIN)
 	$(MAKE) -C user

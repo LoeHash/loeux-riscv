@@ -1,5 +1,24 @@
 #include "ulib.h"
 
+int read(int fd, void *buf, uint64_t count)
+{
+        int ret;
+        // 必须显式把参数放进 a0/a1/a2：
+        // 用 "r" 约束编译器会自由分配寄存器（之前发现 fd/buf/count
+        // 被放进 a3/a4/a5，ecall 时内核从 a0/a1/a2 取到的是垃圾值）。
+        __asm__ volatile(
+            "mv a0, %1\n"
+            "mv a1, %2\n"
+            "mv a2, %3\n"
+            "li a7, %4\n"
+            "ecall\n"
+            "mv %0, a0\n"
+            : "=r"(ret)
+            : "r"(fd), "r"(buf), "r"(count), "i"(SYSCALL_READ)
+            : "a0", "a1", "a2", "a7", "memory");
+        return ret;
+}
+
 int get_pid()
 {
         int pid;

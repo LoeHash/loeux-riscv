@@ -10,9 +10,12 @@ int main(int argc, char **argv)
                 if (pid == 0)
                 {
 
-                        int ret = exec("/_init2", (char *[]){"/weww", NULL});
-                        printf("%d\n", ret);
-                        printf("child %d (ppid %d) running, will exit\n", get_pid(), get_ppid());
+                        // int ret = exec("/_init2", (char *[]){"/weww", NULL});
+                        // printf("%d\n", ret);
+                        printf("child %d (ppid %d) will go to read\n", get_pid(), get_ppid());
+                        char buf[32];
+                        int ret = read(0, buf, sizeof(buf));
+                        printf("child %d (ppid %d) read %d bytes, buf=%s\n", get_pid(), get_ppid(), ret, buf);
                         while (counter < 100000000)
                         {
                                 counter++;

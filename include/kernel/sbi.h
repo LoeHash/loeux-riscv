@@ -202,17 +202,25 @@ static inline unsigned long sbi_putchar(char c)
 // 非阻塞读取：立即返回，如果没有字符则返回-1
 static inline int sbi_getchar_nonblocking(void)
 {
-        unsigned char ch;
+        // 必须使用 legacy CONSOLE_GETCHAR（字符直接在 a0 返回），
+        // 不能用 DBCN CONSOLE_READ：后者要求传入【物理地址】缓冲区，
+        // OpenSBI 在 M-mode 直接按物理地址写入（M-mode 不经过 satp 翻译）。
+        // 而进程内核栈的虚拟地址（TASK_KERNEL_STACK = 0x3FF7FFxxxx）
+        // 映射到 alloc_page 分配的物理页（0x81xxxxxx），虚 ≠ 实，
+        // 传内核栈指针会让 OpenSBI 把它当物理地址写 →
+        // 地址远超物理内存 → M-mode store access fault（mcause=7），
+        // SBI 自身 trap handler 无法处理直接 sbi_trap_error。
+        // legacy getchar 无内存操作，无此问题。
         struct sbiret ret;
+        ret = sbi_ecall(SBI_EXT_0_1_CONSOLE_GETCHAR, SBI_FID_ZERO,
+                        0, 0, 0, 0, 0, 0);
 
-        ret = sbi_ecall(SBI_EXT_DBCN, SBI_EXT_DBCN_CONSOLE_READ,
-                        1, (long)&ch, 0, 0, 0, 0);
-
-        if (ret.error == 0 && ret.value == 1)
+        // OpenSBI legacy getchar：无字符返回 (long)-1，有字符返回字节值 0~255
+        if ((long)ret.error == -1)
         {
-                return ch;
+                return -1;
         }
-        return -1;
+        return (int)(ret.error & 0xff);
 }
 
 // 阻塞读取：一直等待直到有字符输入

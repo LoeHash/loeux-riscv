@@ -14,6 +14,7 @@ extern uint64_t sys_getpid();
 extern uint64_t sys_getppid();
 extern uint64_t sys_wait();
 extern uint64_t sys_exit();
+extern uint64_t sys_read();
 
 static syscall_func_t syscalls[] = {
     [0] 0,                         // syscall id = 0,
@@ -23,8 +24,8 @@ static syscall_func_t syscalls[] = {
     [SYSCALL_GETPID] sys_getpid,   // []
     [SYSCALL_GETPPID] sys_getppid, // []
     [SYSCALL_WAIT] sys_wait,       // []
-    [SYSCALL_EXIT] sys_exit        // []
-};
+    [SYSCALL_EXIT] sys_exit,       // []
+    [SYSCALL_READ] sys_read};
 
 static uint64_t get_arg_reg(int n)
 {
@@ -57,6 +58,26 @@ int copy_data_addr(uint64_t addr, uint64_t *ip)
         return copyout(t->pg, addr, (char *)ip, sizeof(*ip));
 }
 
+/// @brief 从内核缓冲区 buf 复制 max 字节到用户虚拟地址 addr 中
+/// @param addr 用户虚拟地址
+/// @param buf 内核缓冲区
+/// @param max 最大复制字节数
+/// @return 实际复制字节数
+int copy_data_str_out(uint64_t addr, char *buf, int max)
+{
+        struct task_struct *t = get_task();
+        if (copyout(t->pg, addr, buf, max) < 0)
+        {
+                return -1;
+        }
+        return max;
+}
+
+/// @brief 从用户虚拟地址 addr 复制 max 字节到 buf 中
+/// @param addr 用户虚拟地址
+/// @param buf 内核缓冲区
+/// @param max 最大复制字节数
+/// @return 实际复制字节数
 int copy_data_str(uint64_t addr, char *buf, int max)
 {
         struct task_struct *t = get_task();
