@@ -11,6 +11,25 @@
 #define MAX_PATH_LEN 128
 #define MAX_ARGS 32
 
+uint64_t sys_chdir()
+{
+        char path[MAX_PATH_LEN];
+        uint64_t path_addr;
+        get_arg_addr(0, &path_addr);
+        if (copyinstr(get_task()->pg, path, path_addr, MAX_PATH_LEN) < 0)
+        {
+                return -1;
+        }
+
+        struct task_struct *t = get_task();
+        acquire(&t->lk);
+        memset(t->cwd, 0, sizeof(t->cwd));
+        strcpy(t->cwd, path);
+        release(&t->lk);
+
+        return 0;
+}
+
 uint64_t sys_wait()
 {
         uint64_t status;
@@ -54,8 +73,7 @@ uint64_t sys_fork()
 /// @param a0 path 指针（用户空间字符串）
 /// @param a1 argv 指针（用户空间 char*[]，以 NULL 结尾）
 /// @return 成功不返回（用户程序被替换），失败返回 -1
-///
-/// 关键点：kexec 是普通 C 函数，在内核空间正常返回。
+/// kexec 是普通 C 函数，在内核空间正常返回。
 /// 与 kexit 不同（kexit 调 sched() 切走永不返回），
 /// kexec 只替换用户页表和 trapframe，内核调用链继续执行。
 /// 因此 kexec 返回后可以安全地 kfree 所有内核侧分配的字符串副本。

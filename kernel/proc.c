@@ -629,7 +629,7 @@ int kexit(int exit_code)
         //    父进程只能通过 acquire(ts->lk) 观察到 ZOMBIE，而本锁会
         //    一直持有到 sched() 切出、由调度器释放——这保证父进程
         //    真正拿到锁开始回收时，本任务已彻底停止运行
-        //    若过早置 ZOMBIE，父进程可能在 install trapframe 页仍被
+        //    若过早置 ZOMBIE，父进程可能在 trapframe 页仍被
         //    本任务使用时就 kfree(utf)，甚至把槽位置回 INITLIZED
         //    交给 alloc_task 复用——而本任务还在自己的内核栈上跑着。
         ts->state = ZOMBIE;
@@ -898,6 +898,14 @@ static int load_segment(int fd, page_table pg, struct elf64_phdr *ph)
 
         uint64_t start = PGROUNDDOWN(ph->p_vaddr);           // 段起始页
         uint64_t end = PGROUNDUP(ph->p_vaddr + ph->p_memsz); // 段结束页
+
+        // BSS 边界：p_memsz > p_filesz 时，超出 filesz 的部分是 BSS（零填充、可写）。
+        // 链接器可能把 .text 和 .bss 放进同一个 LOAD 段，整体标为 R+E（无 W），
+        // 但 BSS 必须可写。file_end_round_down 是最后一个含文件数据页的起始，
+        // 从该页起（含）需要加 PTE_W——因为该页内 file_end 之后就是 BSS。
+        uint64_t file_end = ph->p_vaddr + ph->p_filesz;
+        uint64_t bss_page_start = PGROUNDDOWN(file_end); // 第一个含 BSS 的页
+
         int seg_size = 0;
         for (uint64_t va = start; va < end; va += PG_4K_SIZE)
         {
@@ -910,24 +918,30 @@ static int load_segment(int fd, page_table pg, struct elf64_phdr *ph)
                 memset(pa, 0, PG_4K_SIZE); // 清零
 
                 // 计算这个页内哪些部分需要从文件读
-                uint64_t page_start = MAX(va, ph->p_vaddr);         // 本页内段的起始
-                uint64_t file_end = ph->p_vaddr + ph->p_filesz;     // 文件数据结束
-                uint64_t page_end = MIN(va + PG_4K_SIZE, file_end); // 本页内文件数据结束
+                uint64_t page_start = MAX(va, ph->p_vaddr);
+                uint64_t page_end = MIN(va + PG_4K_SIZE, file_end);
 
                 if (page_start < page_end)
                 {
                         // 这个页内有文件数据
-                        uint64_t file_off = ph->p_offset + (page_start - ph->p_vaddr); // 对应文件偏移
-                        uint64_t len = page_end - page_start;                          // 拷贝长度
-                        uint64_t pa_off = page_start - va;                             // 物理页内偏移
+                        uint64_t file_off = ph->p_offset + (page_start - ph->p_vaddr);
+                        uint64_t len = page_end - page_start;
+                        uint64_t pa_off = page_start - va;
 
-                        // 从文件读数据到物理页的正确位置
                         vfs_seek(fd, file_off);
                         vfs_read(fd, pa + pa_off, len);
                 }
 
-                // 映射物理页到虚拟地址
-                mappages(pg, va, PG_4K_SIZE, (uint64_t)pa, flags_to_pte(ph->p_flags));
+                // 确定页权限：
+                // - 含 BSS 的页（>= bss_page_start）必须可写
+                // - 纯文件数据页用段原始权限
+                int pte_flags = flags_to_pte(ph->p_flags);
+                if (ph->p_memsz > ph->p_filesz && va >= bss_page_start)
+                {
+                        pte_flags |= PTE_W;
+                }
+
+                mappages(pg, va, PG_4K_SIZE, (uint64_t)pa, pte_flags);
                 seg_size += PG_4K_SIZE;
         }
         return seg_size;

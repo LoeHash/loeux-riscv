@@ -15,6 +15,7 @@ extern uint64_t sys_getppid();
 extern uint64_t sys_wait();
 extern uint64_t sys_exit();
 extern uint64_t sys_read();
+extern uint64_t sys_chdir();
 
 static syscall_func_t syscalls[] = {
     [0] 0,                         // syscall id = 0,
@@ -25,7 +26,9 @@ static syscall_func_t syscalls[] = {
     [SYSCALL_GETPPID] sys_getppid, // []
     [SYSCALL_WAIT] sys_wait,       // []
     [SYSCALL_EXIT] sys_exit,       // []
-    [SYSCALL_READ] sys_read};
+    [SYSCALL_READ] sys_read,       // []
+    [SYSCALL_CHDIR] sys_chdir,     // []
+};
 
 static uint64_t get_arg_reg(int n)
 {

@@ -1,5 +1,41 @@
 #include "ulib.h"
 
+// STDIO //////////////////////////////////////////////////////////
+int getchar(void)
+{
+        static char buf[256];
+        static int pos = 0;
+        static int len = 0;
+
+        if (pos >= len)
+        {
+                int n = read(0, buf, 256);
+                if (n <= 0)
+                {
+                        return -1; // EOF
+                }
+                len = n;
+                pos = 0;
+        }
+        return (int)(unsigned char)buf[pos++];
+}
+
+////////////////////////////////////////////////////////////
+
+int chdir(const char *path)
+{
+        int ret;
+        __asm__ volatile(
+            "mv a0, %1\n"
+            "li a7, %2\n"
+            "ecall\n"
+            "mv %0, a0\n"
+            : "=r"(ret)
+            : "r"(path), "i"(SYSCALL_CHDIR)
+            : "a0", "a7", "memory");
+        return ret;
+}
+
 int read(int fd, void *buf, uint64_t count)
 {
         int ret;
@@ -83,12 +119,13 @@ int wait(int *status)
 {
         int ret;
         __asm__ volatile(
-            "li a7, %1\n"
+            "mv a0, %1\n"
+            "li a7, %2\n"
             "ecall\n"
             "mv %0, a0\n"
             : "=r"(ret)
-            : "i"(SYSCALL_WAIT), "r"(status)
-            : "a0", "a1", "a7", "memory");
+            : "r"(status), "i"(SYSCALL_WAIT)
+            : "a0", "a7", "memory");
         return ret;
 }
 

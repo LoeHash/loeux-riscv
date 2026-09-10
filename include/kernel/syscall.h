@@ -61,6 +61,7 @@
 #define SYSCALL_EXIT 56
 #define SYSCALL_GETPPID 57
 #define SYSCALL_WAIT 58
+#define SYSCALL_CHDIR 59
 
 typedef uint64_t (*syscall_func_t)(void);
 

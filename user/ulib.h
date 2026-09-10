@@ -1,6 +1,15 @@
 #ifndef _INC_USER_ULIB
 #define _INC_USER_ULIB
+
 #include <stdarg.h>
+
+///////////////////////////////MACROS///////////////////////////////
+#define EXIT_SUCCESS (0)
+#define EXIT_FAILURE (1)
+#define EOF (-1)
+///////////////////////////////MACROS END///////////////////////////////
+
+///////////////////////////////SYSCALLS///////////////////////////////
 #define SYSCALL_FORK 1
 #define SYSCALL_EXEC 2
 #define SYSCALL_READ 3
@@ -59,27 +68,33 @@
 #define SYSCALL_EXIT 56
 #define SYSCALL_GETPPID 57
 #define SYSCALL_WAIT 58
+#define SYSCALL_CHDIR 59
+///////////////////////////////SYSCALLS END///////////////////////////////
+
+///////////////////////////////TYPE DEFINITIONS///////////////////////////////
 #define NULL (void *)0
 
-#ifndef __LIB_H__
-#define __LIB_H__
-
-///////////////////////////////
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
 typedef unsigned long uint64_t;
-///////////////////////////////
+
 typedef signed char int8_t;
 typedef signed short int16_t;
 typedef signed int int32_t;
 typedef signed long int64_t;
-///////////////////////////////
+
 typedef unsigned long size_t;
-///////////////////////////////
+typedef void *voidp_t;
+typedef int pid_t;
+///////////////////////////////TYPE DEFINITIONS END///////////////////////////////
+
+///////////////////////////////LIBRARY FUNCTIONS///////////////////////////////
+#ifndef __LIB_H__
+#define __LIB_H__
 #define MAX(a, b) a > b ? a : b
 #define MIN(a, b) a < b ? a : b
-///////////////////////////////
+
 static inline char *strcpy_with_terminate(char *s, const char *t, int n)
 {
         char *os;
@@ -279,6 +294,7 @@ static inline char *strncat(char *dest, const char *src, size_t n)
         p[i] = '\0';
         return dest;
 }
+
 /**
  * strchr - 在字符串中查找字符第一次出现的位置
  * @s: 字符串
@@ -294,6 +310,43 @@ static inline char *strchr(const char *s, int c)
                 return (char *)s;
         return NULL;
 }
+
+/* 将字符串按分隔符切分为若干 token
+ * str:   首次传待分割字符串，后续传 NULL
+ * delim: 分隔符集合，任意一个字符都算分隔符
+ * 返回:  下一个 token 的指针，没有更多时返回 NULL
+ * 注意:  会修改原字符串，且不可重入 */
+static inline char *strtok(char *str, const char *delim)
+{
+        static char *last = NULL;
+        char *start;
+
+        if (str != NULL)
+                last = str;
+
+        if (last == NULL || *last == '\0')
+                return NULL;
+
+        while (*last && strchr(delim, *last))
+                last++;
+
+        if (*last == '\0')
+                return NULL;
+
+        start = last;
+
+        while (*last && !strchr(delim, *last))
+                last++;
+
+        if (*last)
+        {
+                *last = '\0';
+                last++;
+        }
+
+        return start;
+}
+
 /**
  * strrchr - 在字符串中查找字符最后一次出现的位置
  * @s: 字符串
@@ -363,6 +416,7 @@ static inline int strcasecmp(const char *s1, const char *s2)
         return *s1 - *s2;
 }
 #endif
+///////////////////////////////LIBRARY FUNCTIONS END///////////////////////////////
 
 int write(int fd, void *buf, uint64_t count);
 int fork();
@@ -373,4 +427,6 @@ int wait(int *status);
 int exit(int exit_code);
 int printf(const char *fmt, ...);
 int read(int fd, void *buf, uint64_t count);
+int getchar(void);
+int chdir(const char *path);
 #endif
