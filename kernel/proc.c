@@ -121,7 +121,7 @@ void first_ret()
                 init_vfs_std();
 
                 // exec
-                ts->utf->a0 = kexec("/_init", (char *[]){"init", NULL});
+                ts->utf->a0 = kexec("/init", (char *[]){"init", NULL});
                 if (ts->utf->a0 == -1)
                 {
                         panic(PANIC_ERROR, "inituser: a0 is -1!\n");
