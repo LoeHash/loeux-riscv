@@ -19,9 +19,9 @@ uint64_t sys_mkdir()
         {
                 return -1;
         }
-
         // 构建绝对路径
         do_build_user_path(path, u_path, ts->cwd);
+        printk("mkdir: %s\n", path);
 
         return vfs_create(path, 1);
 }

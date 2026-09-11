@@ -68,22 +68,31 @@ int virtio_blk_write(void *dev, uint64_t sector, const void *buf)
         struct virtio_blk_disk *vblk = (struct virtio_blk_disk *)dev;
 
         // 构建参数req
-        struct virtio_blk_req req;
-        uint8_t status;
+        // 注意: 和 virtio_blk_read 一样, 必须用 alloc_page() 分配
+        // 因为此函数可能在系统调用上下文中被调用, 此时栈在高虚拟地址,
+        // virtio 设备需要物理(低)地址做 DMA
+        struct virtio_blk_req *req = alloc_page();
+        if (!req)
+        {
+                return -1;
+        }
+        uint8_t *status = (uint8_t *)req + sizeof(struct virtio_blk_req);
         int ret;
 
-        req.type = VIRTIO_BLK_T_OUT;
-        req.sector = sector;
-        req.ioprio = 0;
+        req->type = VIRTIO_BLK_T_OUT;
+        req->sector = sector;
+        req->ioprio = 0;
 
-        ret = virtio_disk_rw_sync(vblk, &req, (void *)buf, 512, &status);
+        ret = virtio_disk_rw_sync(vblk, req, (void *)buf, 512, status);
 
         if (ret < 0)
         {
-                printk("write sector 0 failed: status=%d\n", status);
+                printk("write sector 0 failed: status=%d\n", *status);
+                free_page(req);
                 return -1;
         }
 
+        free_page(req);
         return ret;
 }
 
@@ -134,7 +143,7 @@ int virtio_blk_read(void *dev, uint64_t sector, void *buf)
 
         if (ret < 0)
         {
-                printk("Read sector 0 failed: status=%d\n", status);
+                printk("Read sector 0 failed: status=%d\n", *status);
                 return -1;
         }
         free_page(req);
