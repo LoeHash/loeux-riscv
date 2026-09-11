@@ -56,7 +56,7 @@ int vfs_seek(int fd, uint64_t offset)
         return 0;
 }
 
-int vfs_create(const char *path, int is_dir)
+int vfs_create(const char *path, file_attr_t attr)
 {
         struct mount_entry *mp = vfs_find_mount(path);
         if (!mp)
@@ -68,7 +68,7 @@ int vfs_create(const char *path, int is_dir)
         if (*rel_path == '\0')
                 return -1;
 
-        return mp->fs_ops->fs_create(mp->fs_priv, rel_path, is_dir);
+        return mp->fs_ops->fs_create(mp->fs_priv, rel_path, attr);
 }
 
 int vfs_close(int fd)

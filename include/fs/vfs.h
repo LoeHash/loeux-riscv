@@ -27,6 +27,35 @@
 typedef int fd_t;
 typedef uint64_t fs_off_t;
 
+/// @brief 文件模式
+/*
+        从低位开始算
+                0x1: 表示可读
+                0x2: 表示可写
+                0x4: 表示可执行
+                0x8: 表示目录
+                0x10及以后的位: 表示其他
+*/
+typedef int file_mode_t;
+
+/// @brief 检查文件模式是否具有某权限
+#define HAS_PERM(fm, offset) (((fm) >> (offset)) & 1U)
+#define SETPERM(fm, offset) ((fm) |= (1U << (offset)))
+#define IRPERM 0
+#define IWPERM 1
+#define IXPERM 2
+#define ISDIR 3
+
+/// @brief 通用文件属性（跨文件系统）
+/// VFS 层使用此结构传递文件属性，各文件系统自行转换为内部属性格式。
+/// 例如 FAT12 通过 fat12_attr_from_generic() 转换为 FAT 属性字节。
+typedef struct
+{
+        int is_dir;   // 是否为目录
+        int readable; // 可读
+        int writable; // 可写
+} file_attr_t;
+
 struct mount_entry
 {
         char mount_point[32];
@@ -166,8 +195,7 @@ struct file_operation
         int (*fs_read)(struct file *file, void *buf, uint64_t count, uint64_t *out_len);
         int (*fs_write)(struct file *file, const void *buf, uint64_t count, uint64_t *out_len);
         int (*fs_close)(struct file *file);
-        /// @brief mode = 0 文件 1 目录
-        int (*fs_create)(void *fs_priv, const char *rel_path, int mode);
+        int (*fs_create)(void *fs_priv, const char *rel_path, file_attr_t attr);
         /// @brief 判断节点是否为目录
         int (*fs_is_dir)(void *node);
 };
@@ -183,7 +211,7 @@ typedef enum
 extern struct mount_entry mount_points[MAX_MOUNT_NUM];
 void init_vfs(void);
 void init_vfs_std();
-int vfs_create(const char *path, int is_dir);
+int vfs_create(const char *path, file_attr_t attr);
 int vfs_close(int fd);
 int64_t vfs_write(int fd, const void *buf, uint64_t count);
 int64_t vfs_read(int fd, void *buf, uint64_t count);
