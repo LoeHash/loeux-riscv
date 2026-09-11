@@ -290,7 +290,8 @@ int vfs_open(const char *path, int flags)
 
         if (!vnode)
         {
-                return -1;
+                // not exist.
+                return -2;
         }
 
         struct file *file = alloc_page();
