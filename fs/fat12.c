@@ -29,7 +29,8 @@ static void fat12_parse_filename(const char *filename, uint8_t *name, uint8_t *e
 static void fat12_update_dirent_size(struct fat12_priv *fs, struct fat12_node *fnode);
 static int fat12_expand_file(struct fat12_priv *fs, struct fat12_node *fnode, uint32_t new_size);
 static int fat12_create_dirent(struct fat12_priv *fs, uint32_t *start_sector, uint32_t *dir_size,
-                               const char *filename, uint16_t cluster, int fat12_attr);
+                               const char *filename, uint16_t cluster, int fat12_attr,
+                               uint16_t parent_start_cluster);
 static void fat12_set_dirent_timestamps(struct fat12_dirent *e);
 static uint8_t fat12_attr_from_generic(file_attr_t attr);
 static void fat12_set_dirent_case_flags(struct fat12_dirent *e, const char *filename);
@@ -53,6 +54,7 @@ int fat12_create(void *fs_priv, const char *rel_path, file_attr_t attr)
         const char *path = rel_path;
         uint32_t parent_sector;
         uint32_t parent_size;
+        uint16_t parent_start_cluster = 0; // 0 = 根目录
         int ret;
 
         // 跳过开头的 '/'
@@ -64,24 +66,53 @@ int fat12_create(void *fs_priv, const char *rel_path, file_attr_t attr)
                 return -1; // 不能创建根目录
         }
 
-        // 提取文件名
-        int i = 0;
-        while (path[i] && path[i] != '/')
-        {
-                filename[i] = path[i];
-                i++;
-        }
-        filename[i] = '\0';
-
-        // 如果还有下一级，暂不支持
-        if (path[i] == '/')
-        {
-                return -1; // 暂不支持子目录创建
-        }
-
-        // 从根目录开始查找父目录
+        // 遍历路径组件，找到实际的父目录
+        // 例如 "tmp/foo.txt" -> 先找到 tmp 目录，再在其中创建 foo.txt
         parent_sector = fs->root_dir_start;
         parent_size = fs->root_entries * 32;
+        parent_start_cluster = 0; // 根目录
+
+        while (1)
+        {
+                // 提取当前组件
+                int i = 0;
+                while (path[i] && path[i] != '/')
+                {
+                        filename[i] = path[i];
+                        i++;
+                }
+                filename[i] = '\0';
+
+                if (path[i] == '\0')
+                {
+                        // 最后一个组件 -> 这是要创建的文件/目录名
+                        break;
+                }
+
+                // 还有下一级 -> 当前组件必须是目录
+                struct fat12_dirent entry;
+                ret = find_in_dir(fs, parent_sector, parent_size, filename, &entry);
+                if (ret < 0)
+                {
+                        // printk("fat12_create: parent component '%s' not found\n", filename);
+                        return -1;
+                }
+                if (!(entry.dir_attr & FAT12_ATTR_DIRECTORY))
+                {
+                        return -1; // 不是目录
+                }
+
+                // 进入该子目录
+                uint16_t cluster = entry.dir_first_cluster_low;
+                parent_sector = fs->data_start + (cluster - 2) * fs->sectors_per_cluster;
+                parent_size = entry.dir_file_size;
+                if (parent_size == 0)
+                {
+                        parent_size = fs->sectors_per_cluster * 512;
+                }
+                parent_start_cluster = cluster;
+                path += i + 1;
+        }
 
         // 检查文件是否已存在
         struct fat12_dirent entry;
@@ -98,11 +129,15 @@ int fat12_create(void *fs_priv, const char *rel_path, file_attr_t attr)
                 return -1; // 磁盘已满
         }
 
+        // printk("fat12_create: name='%s' cluster=%d attr=0x%02x parent_cluster=%d\n",
+        //        filename, cluster, fat12_attr, parent_start_cluster);
+
         // 标记簇为结束
         fat12_write_fat_entry(fs, cluster, 0xFFF);
 
-        // 在目录中创建目录项（如果目录满了会自动扩展）
-        ret = fat12_create_dirent(fs, &parent_sector, &parent_size, filename, cluster, fat12_attr);
+        // 在父目录中创建目录项
+        ret = fat12_create_dirent(fs, &parent_sector, &parent_size, filename, cluster,
+                                  fat12_attr, parent_start_cluster);
         if (ret < 0)
         {
                 // 回滚
@@ -113,8 +148,16 @@ int fat12_create(void *fs_priv, const char *rel_path, file_attr_t attr)
         // 如果是目录，初始化 . 和 .. 条目
         if (attr.is_dir)
         {
-                // 根目录的起始簇在 FAT12 中没有标准簇号，用 0 表示
-                fat12_init_new_dir(fs, cluster, 0);
+                fat12_init_new_dir(fs, cluster, parent_start_cluster);
+
+                // 更新父目录中该目录项的 file_size 为一个簇的大小
+                struct fat12_node dir_fnode;
+                memset(&dir_fnode, 0, sizeof(dir_fnode));
+                fat12_parse_filename(filename, dir_fnode.name, dir_fnode.name + 8);
+                dir_fnode.start_cluster = cluster;
+                dir_fnode.file_size = fs->sectors_per_cluster * 512;
+                fat12_update_dirent_size(fs, &dir_fnode);
+                // printk("fat12_create: dir size updated to %d\n", dir_fnode.file_size);
         }
 
         return 0;
@@ -328,7 +371,8 @@ static void fat12_init_new_dir(struct fat12_priv *fs, uint16_t cluster, uint16_t
 }
 
 static int fat12_create_dirent(struct fat12_priv *fs, uint32_t *start_sector, uint32_t *dir_size,
-                               const char *filename, uint16_t cluster, int fat12_attr)
+                               const char *filename, uint16_t cluster, int fat12_attr,
+                               uint16_t parent_start_cluster)
 {
         uint8_t *buf = alloc_page();
         if (!buf)
@@ -369,19 +413,14 @@ static int fat12_create_dirent(struct fat12_priv *fs, uint32_t *start_sector, ui
         }
 
         // 目录已满，需要扩展
-        // 检查是否是根目录（根目录不能扩展，因为是固定大小）
-        if (*start_sector == fs->root_dir_start)
+        // 根目录不能扩展（固定大小）
+        if (parent_start_cluster == 0)
         {
                 free_page(buf);
                 return -1; // 根目录已满
         }
 
-        // 扩展目录（分配新簇）
-        // 需要找到目录对应的 node（或者通过父目录的起始簇号）
-        // 这里简化：假设我们知道父目录的簇号
-        // 实际应该通过传入父目录 node 来处理
-
-        // 分配新簇
+        // 子目录扩展：分配新簇并链接到簇链末尾
         uint16_t new_cluster = fat12_alloc_cluster(fs);
         if (new_cluster == 0)
         {
@@ -389,7 +428,7 @@ static int fat12_create_dirent(struct fat12_priv *fs, uint32_t *start_sector, ui
                 return -1; // 磁盘已满
         }
 
-        // 清空新簇（所有扇区写0）
+        // 清空新簇
         uint32_t new_sector = fat12_cluster_to_sector(fs, new_cluster);
         memset(buf, 0, 512);
         for (uint8_t i = 0; i < fs->sectors_per_cluster; i++)
@@ -397,11 +436,8 @@ static int fat12_create_dirent(struct fat12_priv *fs, uint32_t *start_sector, ui
                 fs->bdev->driver.write(fs->bdev->private_data, new_sector + i, buf);
         }
 
-        // 链接到目录链末尾
-        // 找到目录的最后一个簇
-        // 需要知道目录的起始簇号，这里假设通过查找得到
-        // 简化：通过 *start_sector 反推簇号
-        uint16_t last_cluster = fat12_sector_to_cluster(fs, *start_sector);
+        // 沿簇链找到最后一个簇
+        uint16_t last_cluster = parent_start_cluster;
         while (1)
         {
                 uint16_t next = fat12_read_fat_entry(fs, last_cluster);
@@ -415,12 +451,7 @@ static int fat12_create_dirent(struct fat12_priv *fs, uint32_t *start_sector, ui
         // 更新目录大小
         *dir_size += fs->sectors_per_cluster * 512;
 
-        // 更新目录的目录项中的大小字段（需要找到目录对应的目录项）
-        // 这里简化，实际需要更新父目录中的目录项
-        // 可以通过查找目录名来更新
-
-        // 在新簇的第一个扇区创建目录项
-        sector_count = *dir_size / 512;
+        // 在新簇中创建目录项
         fs->bdev->driver.read(fs->bdev->private_data, new_sector, buf);
 
         for (int i = 0; i < 16; i++)
@@ -828,6 +859,9 @@ int fat12_lookup(void *fs_priv, const char *rel_path, void **out_node)
         uint32_t current_sector = fs_p->root_dir_start;
         uint32_t current_size = fs_p->root_entries * 32;
 
+        // printk("fat12_lookup: path='%s' root_dir_start=%d root_entries=%d\n",
+        //        path, fs_p->root_dir_start, fs_p->root_entries);
+
         while (*path)
         {
                 // 提取文件名
@@ -843,6 +877,8 @@ int fat12_lookup(void *fs_priv, const char *rel_path, void **out_node)
                 ret = find_in_dir(fs_priv, current_sector, current_size, filename, &entry);
                 if (ret < 0)
                 {
+                        // printk("fat12_lookup: NOT FOUND '%s' sector=%d size=%d\n",
+                        //        filename, current_sector, current_size);
                         return -1;
                 }
 
@@ -856,6 +892,12 @@ int fat12_lookup(void *fs_priv, const char *rel_path, void **out_node)
                         uint16_t cluster = entry.dir_first_cluster_low;
                         current_sector = fs_p->data_start + (cluster - 2) * fs_p->sectors_per_cluster;
                         current_size = entry.dir_file_size;
+                        // FAT 子目录的 size 可能为 0（旧数据或某些实现），
+                        // 但目录至少占一个簇，按簇链计算实际大小
+                        if (current_size == 0 && (entry.dir_attr & FAT12_ATTR_DIRECTORY))
+                        {
+                                current_size = fs_p->sectors_per_cluster * 512;
+                        }
                         path += i + 1;
                         continue;
                 }
@@ -961,6 +1003,9 @@ static int find_in_dir(struct fat12_priv *fs, uint32_t start_sector, uint32_t di
         if (dir_size % 512)
                 sector_count++;
 
+        // printk("find_in_dir: looking for '%s' start_sector=%d sectors=%d\n",
+        //        filename, start_sector, sector_count);
+
         for (int s = 0; s < sector_count; s++)
         {
                 // 读扇区
@@ -972,6 +1017,7 @@ static int find_in_dir(struct fat12_priv *fs, uint32_t start_sector, uint32_t di
 
                         if (e->dir_name[0] == 0x00)
                         {
+                                // printk("find_in_dir: end of dir at sector+%d entry+%d\n", s, i);
                                 free_page(buf);
                                 return -1;
                         }
@@ -981,6 +1027,21 @@ static int find_in_dir(struct fat12_priv *fs, uint32_t start_sector, uint32_t di
                                 continue; // 长文件名
                         if (e->dir_attr == 0x08)
                                 continue; // 卷标
+
+                        // 打印当前条目名用于调试
+                        char dbg[13];
+                        int k = 0;
+                        for (int j = 0; j < 8 && e->dir_name[j] != ' '; j++)
+                                dbg[k++] = e->dir_name[j];
+                        for (int j = 0; j < 3 && e->dir_ext[j] != ' '; j++)
+                        {
+                                if (j == 0)
+                                        dbg[k++] = '.';
+                                dbg[k++] = e->dir_ext[j];
+                        }
+                        dbg[k] = '\0';
+                        // printk("find_in_dir: entry[%d:%d] name='%s' attr=0x%02x cluster=%d\n",
+                        //        s, i, dbg, e->dir_attr, e->dir_first_cluster_low);
 
                         if (match_dos_name(e, filename))
                         {

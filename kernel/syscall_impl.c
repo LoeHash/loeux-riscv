@@ -10,24 +10,28 @@
 
 uint64_t sys_chdir()
 {
-        char path[MAX_PATH_LEN];
+        struct task_struct *ts = get_task();
+        char *path = kalloc();
+        char *u_path = kalloc();
         uint64_t path_addr;
-        get_arg_addr(0, &path_addr);
-        if (copyinstr(get_task()->pg, path, path_addr, MAX_PATH_LEN) < 0)
-        {
-                return -1;
-        }
+        uint32_t flags;
+        int ret;
 
-        // 必须是绝对路径
-        if (path[0] != '/')
+        get_arg_addr(0, &path_addr); // a0 = path
+
+        if (copyinstr(ts->pg, u_path, path_addr, MAX_PATH_LEN) < 0)
         {
                 return -1;
         }
+        // 构建绝对路径
+        do_build_user_path(path, u_path, ts->cwd);
 
         struct task_struct *t = get_task();
         acquire(&t->lk);
-        int ret = set_cwd(t, path);
+        ret = set_cwd(t, path);
         release(&t->lk);
+        kfree(path);
+        kfree(u_path);
 
         return ret;
 }

@@ -99,13 +99,19 @@ uint64_t sys_open()
                         {
                                 attr.writable = 1;
                         }
-
-                        return vfs_create(path, attr);
+                        ret = vfs_create(path, attr);
+                        kfree(path);
+                        kfree(u_path);
+                        return ret;
                 }
+                kfree(path);
+                kfree(u_path);
                 return -1;
         }
         else
         {
+                kfree(path);
+                kfree(u_path);
                 return ret;
         }
 }
