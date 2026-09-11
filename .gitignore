@@ -10,6 +10,8 @@ user/_*
 user/bin/*
 user/bin/
 report/*
+no-kernel/*
+no-kernel
 report
 .vscode
 .vscode/*
