@@ -22,6 +22,35 @@ int getchar(void)
 
 ////////////////////////////////////////////////////////////
 
+int close(int fd)
+{
+        int ret;
+        __asm__ volatile(
+            "mv a0, %1\n"
+            "li a7, %2\n"
+            "ecall\n"
+            "mv %0, a0\n"
+            : "=r"(ret)
+            : "r"(fd), "i"(SYSCALL_CLOSE)
+            : "a0", "a7", "memory");
+        return ret;
+}
+
+int open(const char *path, int flags)
+{
+        int ret;
+        __asm__ volatile(
+            "mv a0, %1\n"
+            "mv a1, %2\n"
+            "li a7, %3\n"
+            "ecall\n"
+            "mv %0, a0\n"
+            : "=r"(ret)
+            : "r"(path), "r"(flags), "i"(SYSCALL_OPEN)
+            : "a0", "a1", "a7", "memory");
+        return ret;
+}
+
 int mkdir(const char *path)
 {
         int ret;

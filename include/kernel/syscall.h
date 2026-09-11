@@ -18,6 +18,8 @@
 #define SYSCALL_READ 9
 #define SYSCALL_CHDIR 10
 #define SYSCALL_MKDIR 11
+#define SYSCALL_OPEN 12
+#define SYSCALL_CLOSE 13
 
 typedef uint64_t (*syscall_func_t)(void);
 

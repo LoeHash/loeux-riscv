@@ -7,7 +7,10 @@
 #include <lib.h>
 #include <panic.h>
 
+extern uint64_t sys_close();
+extern uint64_t sys_open();
 extern uint64_t sys_write();
+extern uint64_t sys_read();
 extern uint64_t sys_fork();
 extern uint64_t sys_exec();
 extern uint64_t sys_getpid();
@@ -15,7 +18,6 @@ extern uint64_t sys_getppid();
 extern uint64_t sys_wait();
 extern uint64_t sys_waitpid();
 extern uint64_t sys_exit();
-extern uint64_t sys_read();
 extern uint64_t sys_chdir();
 extern uint64_t sys_mkdir();
 
@@ -31,7 +33,9 @@ static syscall_func_t syscalls[] = {
     [SYSCALL_READ] sys_read,       // []
     [SYSCALL_CHDIR] sys_chdir,     // []
     [SYSCALL_WAITPID] sys_waitpid, // []
-    [SYSCALL_MKDIR] sys_mkdir      // []
+    [SYSCALL_MKDIR] sys_mkdir,     // []
+    [SYSCALL_OPEN] sys_open,       // []
+    [SYSCALL_CLOSE] sys_close,     // []
 };
 
 static uint64_t get_arg_reg(int n)

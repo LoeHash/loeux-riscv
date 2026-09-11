@@ -13,8 +13,6 @@ uint64_t sys_mkdir()
 
         get_arg_addr(0, &path_addr); // a0 = path
 
-        // 1. 从用户空间拷贝 path 字符串
-        //    copyinstr 遍历用户页表翻译地址，遇到 \0 停止
         if (copyinstr(ts->pg, u_path, path_addr, MAX_PATH_LEN) < 0)
         {
                 return -1;
@@ -53,6 +51,63 @@ uint64_t sys_read()
         copy_data_str_out(buf, kbuf, ret);
         kfree(kbuf);
         return ret;
+}
+
+uint64_t sys_close()
+{
+        int fd;
+
+        get_arg_int(0, &fd);
+
+        return vfs_close(fd);
+}
+
+uint64_t sys_open()
+{
+        struct task_struct *ts = get_task();
+        char *path = kalloc();
+        char *u_path = kalloc();
+        uint64_t path_addr;
+        uint32_t flags;
+        int ret;
+
+        get_arg_addr(0, &path_addr); // a0 = path
+        get_arg_int(1, &flags);      // a1 = flags
+
+        if (copyinstr(ts->pg, u_path, path_addr, MAX_PATH_LEN) < 0)
+        {
+                return -1;
+        }
+        // 构建绝对路径
+        do_build_user_path(path, u_path, ts->cwd);
+
+        // 现在我们有绝对路径了
+        // 不存在
+        if ((ret = vfs_open(path, flags)) < 0)
+        {
+                // 创建文件
+                if (flags & FS_O_CREAT)
+                {
+
+                        file_attr_t attr = {.is_dir = 0, .readable = 0, .writable = 0};
+                        if (flags & FS_O_READ)
+                        {
+                                attr.readable = 1;
+                        }
+
+                        if (flags & FS_O_WRITE)
+                        {
+                                attr.writable = 1;
+                        }
+
+                        return vfs_create(path, attr);
+                }
+                return -1;
+        }
+        else
+        {
+                return ret;
+        }
 }
 
 uint64_t sys_write()

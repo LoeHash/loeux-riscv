@@ -7,6 +7,13 @@
 #define EXIT_SUCCESS (0)
 #define EXIT_FAILURE (1)
 #define EOF (-1)
+#define O_READ (0x01)   // bit 0
+#define O_WRITE (0x02)  // bit 1
+#define O_RW (0x03)     // READ | WRITE
+#define O_EXEC (0x04)   // bit 2
+#define O_CREAT (0x08)  // bit 3
+#define O_TRUNC (0x10)  // bit 4
+#define O_APPEND (0x20) // bit 5
 ///////////////////////////////MACROS END///////////////////////////////
 
 ///////////////////////////////SYSCALLS///////////////////////////////
@@ -21,6 +28,8 @@
 #define SYSCALL_READ 9
 #define SYSCALL_CHDIR 10
 #define SYSCALL_MKDIR 11
+#define SYSCALL_OPEN 12
+#define SYSCALL_CLOSE 13
 ///////////////////////////////SYSCALLS END///////////////////////////////
 
 ///////////////////////////////TYPE DEFINITIONS///////////////////////////////
@@ -383,4 +392,6 @@ int read(int fd, void *buf, uint64_t count);
 int getchar(void);
 int chdir(const char *path);
 int mkdir(const char *path);
+int open(const char *path, int flags);
+int close(int fd);
 #endif
