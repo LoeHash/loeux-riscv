@@ -4,6 +4,28 @@
 #include <lib.h>
 #include <proc.h>
 
+uint64_t sys_mkdir()
+{
+        struct task_struct *ts = get_task();
+        char path[MAX_PATH_LEN];
+        char u_path[MAX_PATH_LEN];
+        uint64_t path_addr;
+
+        get_arg_addr(0, &path_addr); // a0 = path
+
+        // 1. 从用户空间拷贝 path 字符串
+        //    copyinstr 遍历用户页表翻译地址，遇到 \0 停止
+        if (copyinstr(ts->pg, u_path, path_addr, MAX_PATH_LEN) < 0)
+        {
+                return -1;
+        }
+
+        // 构建绝对路径
+        do_build_user_path(path, u_path, ts->cwd);
+
+        return vfs_create(path, 1);
+}
+
 uint64_t sys_read()
 {
         int fd;
