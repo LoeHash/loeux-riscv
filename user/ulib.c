@@ -22,6 +22,20 @@ int getchar(void)
 
 ////////////////////////////////////////////////////////////
 
+int mkdir(const char *path)
+{
+        int ret;
+        __asm__ volatile(
+            "mv a0, %1\n"
+            "li a7, %2\n"
+            "ecall\n"
+            "mv %0, a0\n"
+            : "=r"(ret)
+            : "r"(path), "i"(SYSCALL_MKDIR)
+            : "a0", "a7", "memory");
+        return ret;
+}
+
 int chdir(const char *path)
 {
         int ret;
