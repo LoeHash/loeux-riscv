@@ -5,6 +5,7 @@
 #include <printk.h>
 #include <vfs.h>
 #include <lib.h>
+#include <timer.h>
 
 struct file_operation fat12_ops = {
     .fs_close = fat12_close,
@@ -28,11 +29,17 @@ static void fat12_parse_filename(const char *filename, uint8_t *name, uint8_t *e
 static void fat12_update_dirent_size(struct fat12_priv *fs, struct fat12_node *fnode);
 static int fat12_expand_file(struct fat12_priv *fs, struct fat12_node *fnode, uint32_t new_size);
 static int fat12_create_dirent(struct fat12_priv *fs, uint32_t *start_sector, uint32_t *dir_size,
-                               const char *filename, uint16_t cluster, int mode);
+                               const char *filename, uint16_t cluster, int fat12_attr);
+static void fat12_set_dirent_timestamps(struct fat12_dirent *e);
+static uint8_t fat12_attr_from_generic(file_attr_t attr);
+static void fat12_set_dirent_case_flags(struct fat12_dirent *e, const char *filename);
+static void fat12_init_new_dir(struct fat12_priv *fs, uint16_t cluster, uint16_t parent_cluster);
 static uint16_t fat12_sector_to_cluster(struct fat12_priv *fs, uint32_t sector);
 static void fat12_update_dir_size(struct fat12_priv *fs, struct fat12_node *dir_node);
 
-int fat12_create(void *fs_priv, const char *rel_path, int mode)
+/// @brief 创建文件或目录
+/// @param attr 通用文件属性，由 VFS 层传入，各文件系统自行转换为内部格式
+int fat12_create(void *fs_priv, const char *rel_path, file_attr_t attr)
 {
         if (!fs_priv || !rel_path)
         {
@@ -40,6 +47,8 @@ int fat12_create(void *fs_priv, const char *rel_path, int mode)
         }
 
         struct fat12_priv *fs = (struct fat12_priv *)fs_priv;
+        uint8_t fat12_attr = fat12_attr_from_generic(attr);
+
         char filename[256];
         const char *path = rel_path;
         uint32_t parent_sector;
@@ -92,13 +101,20 @@ int fat12_create(void *fs_priv, const char *rel_path, int mode)
         // 标记簇为结束
         fat12_write_fat_entry(fs, cluster, 0xFFF);
 
-        // 在目录中创建目录项如果目录满了，会自动扩展
-        ret = fat12_create_dirent(fs, &parent_sector, &parent_size, filename, cluster, mode);
+        // 在目录中创建目录项（如果目录满了会自动扩展）
+        ret = fat12_create_dirent(fs, &parent_sector, &parent_size, filename, cluster, fat12_attr);
         if (ret < 0)
         {
                 // 回滚
                 fat12_write_fat_entry(fs, cluster, 0);
                 return -1;
+        }
+
+        // 如果是目录，初始化 . 和 .. 条目
+        if (attr.is_dir)
+        {
+                // 根目录的起始簇在 FAT12 中没有标准簇号，用 0 表示
+                fat12_init_new_dir(fs, cluster, 0);
         }
 
         return 0;
@@ -131,8 +147,188 @@ static void fat12_update_dir_size(struct fat12_priv *fs, struct fat12_node *dir_
         fat12_update_dirent_size(fs, dir_node);
 }
 
+/// @brief 将通用文件属性转换为 FAT12 属性字节
+static uint8_t fat12_attr_from_generic(file_attr_t attr)
+{
+        uint8_t fat_attr = 0;
+        if (attr.is_dir)
+                fat_attr |= FAT12_ATTR_DIRECTORY;
+        if (!attr.writable)
+                fat_attr |= FAT12_ATTR_READ_ONLY;
+        if (!attr.is_dir)
+                fat_attr |= FAT12_ATTR_ARCHIVE;
+        return fat_attr;
+}
+
+/// @brief 检查文件名是否包含小写字母
+static int fat12_has_lower(const char *s)
+{
+        while (*s)
+        {
+                if (*s >= 'a' && *s <= 'z')
+                        return 1;
+                s++;
+        }
+        return 0;
+}
+
+/// @brief 设置目录项的 NT 大小写标志
+/// FAT12 文件名在磁盘上存为大写，但通过 dir_nt_reserved 中的标志位
+/// 可告知读取方原始文件名含小写，从而正确显示。
+static void fat12_set_dirent_case_flags(struct fat12_dirent *e, const char *filename)
+{
+        uint8_t nt_flags = 0;
+        // 检查文件名部分（点号前）是否有小写
+        const char *dot = filename;
+        while (*dot && *dot != '.')
+                dot++;
+        int name_len = dot - filename;
+        int has_lower_name = 0;
+        for (int i = 0; i < name_len; i++)
+        {
+                if (filename[i] >= 'a' && filename[i] <= 'z')
+                {
+                        has_lower_name = 1;
+                        break;
+                }
+        }
+        if (has_lower_name)
+                nt_flags |= 0x08; // BASE (8.3) name is in lowercase
+
+        // 检查扩展名部分是否有小写
+        if (*dot == '.')
+        {
+                const char *ext = dot + 1;
+                while (*ext)
+                {
+                        if (*ext >= 'a' && *ext <= 'z')
+                        {
+                                nt_flags |= 0x10; // extension is in lowercase
+                                break;
+                        }
+                        ext++;
+                }
+        }
+        e->dir_nt_reserved = nt_flags;
+}
+
+/// @brief 用当前系统时间设置目录项的时间戳字段
+static void fat12_set_dirent_timestamps(struct fat12_dirent *e)
+{
+        uint64_t ticks = get_sys_timer_tick();
+        // 假设 100 Hz 时钟频率，转换为 Unix 秒
+        uint32_t unix_time = (uint32_t)(ticks / 100) + 1700000000U;
+
+        uint32_t sec = unix_time % 60;
+        unix_time /= 60;
+        uint32_t min = unix_time % 60;
+        unix_time /= 60;
+        uint32_t hour = unix_time % 24;
+        uint32_t days = unix_time / 24;
+
+        // 计算年月日（从 1970-01-01 开始）
+        uint16_t year = 1970;
+        uint8_t month = 1;
+        uint8_t day;
+        static const uint8_t days_in_month[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+
+        while (1)
+        {
+                uint16_t ydays = 365;
+                if ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0)
+                        ydays = 366;
+                if (days >= ydays)
+                {
+                        days -= ydays;
+                        year++;
+                }
+                else
+                        break;
+        }
+
+        for (int m = 0; m < 12; m++)
+        {
+                uint8_t md = days_in_month[m];
+                if (m == 1 && ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0))
+                        md = 29;
+                if (days >= md)
+                {
+                        days -= md;
+                        month++;
+                }
+                else
+                        break;
+        }
+        day = days + 1;
+
+        // FAT 时间格式：年从 1980 开始
+        if (year < 1980)
+        {
+                year = 1980;
+                month = 1;
+                day = 1;
+        }
+
+        uint16_t fat_time = (hour << 11) | (min << 5) | (sec / 2);
+        uint16_t fat_date = ((year - 1980) << 9) | (month << 5) | day;
+
+        e->dir_create_time_tenth = 0;
+        e->dir_create_time = fat_time;
+        e->dir_create_date = fat_date;
+        e->dir_write_time = fat_time;
+        e->dir_write_date = fat_date;
+        e->dir_last_access_date = fat_date;
+}
+
+/// @brief 初始化新目录的 . 和 .. 条目
+/// 即将过时，目前仅用于测试！
+static void fat12_init_new_dir(struct fat12_priv *fs, uint16_t cluster, uint16_t parent_cluster)
+{
+        uint8_t *buf = alloc_page();
+        if (!buf)
+                return;
+
+        uint32_t first_sector = fat12_cluster_to_sector(fs, cluster);
+
+        // 清零整个簇的所有扇区（防止残留垃圾数据被当作目录项）
+        memset(buf, 0, 512);
+        for (uint8_t i = 0; i < fs->sectors_per_cluster; i++)
+        {
+                fs->bdev->driver.write(fs->bdev->private_data, first_sector + i, buf);
+        }
+
+        // "." 条目 -> 指向自身簇
+        struct fat12_dirent *dot = (struct fat12_dirent *)buf;
+        dot->dir_name[0] = '.';
+        for (int i = 1; i < 8; i++)
+                dot->dir_name[i] = ' ';
+        for (int i = 0; i < 3; i++)
+                dot->dir_ext[i] = ' ';
+        dot->dir_attr = FAT12_ATTR_DIRECTORY;
+        dot->dir_first_cluster_high = 0;
+        dot->dir_first_cluster_low = cluster;
+        dot->dir_file_size = 0;
+
+        // ".." 条目 -> 指向父目录簇（根目录为 0）
+        struct fat12_dirent *dotdot = (struct fat12_dirent *)(buf + 32);
+        dotdot->dir_name[0] = '.';
+        dotdot->dir_name[1] = '.';
+        for (int i = 2; i < 8; i++)
+                dotdot->dir_name[i] = ' ';
+        for (int i = 0; i < 3; i++)
+                dotdot->dir_ext[i] = ' ';
+        dotdot->dir_attr = FAT12_ATTR_DIRECTORY;
+        dotdot->dir_first_cluster_high = 0;
+        dotdot->dir_first_cluster_low = parent_cluster;
+        dotdot->dir_file_size = 0;
+
+        // 写回第一扇区（包含 . 和 ..）
+        fs->bdev->driver.write(fs->bdev->private_data, first_sector, buf);
+        free_page(buf);
+}
+
 static int fat12_create_dirent(struct fat12_priv *fs, uint32_t *start_sector, uint32_t *dir_size,
-                               const char *filename, uint16_t cluster, int mode)
+                               const char *filename, uint16_t cluster, int fat12_attr)
 {
         uint8_t *buf = alloc_page();
         if (!buf)
@@ -157,15 +353,10 @@ static int fat12_create_dirent(struct fat12_priv *fs, uint32_t *start_sector, ui
                                 // 填充目录项
                                 fat12_parse_filename(filename, e->dir_name, e->dir_ext);
 
-                                e->dir_attr = FAT12_ATTR_ARCHIVE;
-                                e->dir_nt_reserved = 0;
-                                e->dir_create_time_tenth = 0;
-                                e->dir_create_time = 0;
-                                e->dir_create_date = 0;
-                                e->dir_last_access_date = 0;
+                                e->dir_attr = fat12_attr;
+                                fat12_set_dirent_case_flags(e, filename);
+                                fat12_set_dirent_timestamps(e);
                                 e->dir_first_cluster_high = 0;
-                                e->dir_write_time = 0;
-                                e->dir_write_date = 0;
                                 e->dir_first_cluster_low = cluster;
                                 e->dir_file_size = 0;
 
@@ -238,15 +429,10 @@ static int fat12_create_dirent(struct fat12_priv *fs, uint32_t *start_sector, ui
                 if (e->dir_name[0] == 0x00 || e->dir_name[0] == 0xE5)
                 {
                         fat12_parse_filename(filename, e->dir_name, e->dir_ext);
-                        e->dir_attr = FAT12_ATTR_ARCHIVE;
-                        e->dir_nt_reserved = 0;
-                        e->dir_create_time_tenth = 0;
-                        e->dir_create_time = 0;
-                        e->dir_create_date = 0;
-                        e->dir_last_access_date = 0;
+                        e->dir_attr = fat12_attr;
+                        fat12_set_dirent_case_flags(e, filename);
+                        fat12_set_dirent_timestamps(e);
                         e->dir_first_cluster_high = 0;
-                        e->dir_write_time = 0;
-                        e->dir_write_date = 0;
                         e->dir_first_cluster_low = cluster;
                         e->dir_file_size = 0;
 

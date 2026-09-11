@@ -23,7 +23,8 @@ uint64_t sys_mkdir()
         do_build_user_path(path, u_path, ts->cwd);
         printk("mkdir: %s\n", path);
 
-        return vfs_create(path, 1);
+        file_attr_t attr = {.is_dir = 1, .readable = 1, .writable = 1};
+        return vfs_create(path, attr);
 }
 
 uint64_t sys_read()
