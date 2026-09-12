@@ -8,5 +8,7 @@
 #define PANIC_WRONG 2
 
 void panic(int panic_id, char *reason, ...);
+void panic_wrong(char *reason, ...);
+void panic_error(char *reason, ...);
 void print_notice_flag(int panic_id);
 #endif

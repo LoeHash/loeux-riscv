@@ -37,3 +37,27 @@ void panic(int panic_id, char *reason, ...)
                         ;
         }
 }
+
+void panic_wrong(char *reason, ...)
+{
+        va_list args;
+        char buf[PRINT_BUFFER_SIZE];
+
+        va_start(args, reason);
+        vsprintf(buf, reason, args);
+        va_end(args);
+
+        panic(PANIC_WRONG, "%s", buf);
+}
+
+void panic_error(char *reason, ...)
+{
+        va_list args;
+        char buf[PRINT_BUFFER_SIZE];
+
+        va_start(args, reason);
+        vsprintf(buf, reason, args);
+        va_end(args);
+
+        panic(PANIC_ERROR, "%s", buf);
+}
