@@ -1,4 +1,5 @@
 #include <ulib.h>
+#include <stdio.h>
 
 #define LSH_MAX_LINE 1024 // 命令行最大长度
 #define LSH_MAX_ARGS 64   // 最大参数个数

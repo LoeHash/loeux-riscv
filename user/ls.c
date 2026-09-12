@@ -15,6 +15,8 @@
 #define LS_PATH_MAX 256
 #define LS_BUF_ENTRIES 8 /* 8 × sizeof(struct dirent) ≈ 2.2KB，用户栈 4 页够用 */
 
+#include <stdio.h>
+
 /* 由 st_mode 生成 "-rwxrwxrwx" 形式的权限串 */
 static void mode_string(uint32_t mode, char out[11])
 {
