@@ -56,6 +56,178 @@ int vfs_seek(int fd, uint64_t offset)
         return 0;
 }
 
+static void vfs_kstat_to_stat(const struct vfs_kstat *ks, dev_t dev, struct stat *st)
+{
+        memset(st, 0, sizeof(*st));
+        st->st_dev = dev;
+        st->st_ino = ks->ino;
+        st->st_mode = ks->mode;
+        st->st_nlink = ks->nlink;
+        st->st_uid = ks->uid;
+        st->st_gid = ks->gid;
+        st->st_rdev = ks->rdev;
+        st->st_size = (off_t)ks->size;
+        st->st_blksize = (blksize_t)ks->blksize;
+        st->st_blocks = (blkcnt_t)ks->blocks;
+        st->st_atime = ks->atime;
+        st->st_mtime = ks->mtime;
+        st->st_ctime = ks->ctime;
+}
+
+static int vfs_getattr_fallback(struct file *file, struct vfs_kstat *ks)
+{
+        int is_dir = 0;
+
+        memset(ks, 0, sizeof(*ks));
+        ks->size = file->size;
+        ks->nlink = 1;
+        ks->uid = 0;
+        ks->gid = 0;
+        ks->blksize = 512;
+        ks->blocks = (ks->size + 511) / 512;
+        ks->ino = (uint64_t)file->private;
+
+        if (file->mnt && file->mnt->fs_ops->fs_is_dir)
+                is_dir = file->mnt->fs_ops->fs_is_dir(file->private);
+
+        if (is_dir)
+                ks->mode = S_IFDIR | 0755;
+        else
+                ks->mode = S_IFREG | 0644;
+
+        return 0;
+}
+
+int vfs_fstat(int fd, struct stat *st)
+{
+        struct file *file;
+        struct vfs_kstat ks;
+        int ret;
+
+        if (!st || fd_check(fd) == -1)
+                return -1;
+
+        file = get_task()->ofile[fd];
+        if (!file)
+                return -1;
+
+        memset(st, 0, sizeof(*st));
+        memset(&ks, 0, sizeof(ks));
+
+        acquire_sleep(&file->flk);
+
+        if (file->type == 1)
+        {
+                struct char_device *cdev = (struct char_device *)file->private;
+                int minor = (int)(cdev - char_devices);
+
+                release_sleep(&file->flk);
+
+                st->st_dev = 0;
+                st->st_rdev = ((uint64_t)1 << 8) | (uint64_t)(minor & 0xFF);
+                st->st_ino = (ino_t)(minor + 1);
+                st->st_mode = S_IFCHR | 0666;
+                st->st_nlink = 1;
+                st->st_uid = 0;
+                st->st_gid = 0;
+                st->st_size = 0;
+                st->st_blksize = 4096;
+                st->st_blocks = 0;
+                return 0;
+        }
+
+        if (file->type != 0 || !file->mnt || !file->mnt->fs_ops)
+        {
+                release_sleep(&file->flk);
+                return -1;
+        }
+
+        if (file->mnt->fs_ops->fs_getattr)
+                ret = file->mnt->fs_ops->fs_getattr(file->private, &ks);
+        else
+                ret = vfs_getattr_fallback(file, &ks);
+
+        if (ret < 0)
+        {
+                release_sleep(&file->flk);
+                return -1;
+        }
+
+        vfs_kstat_to_stat(&ks, (dev_t)((file->mnt - mount_points) + 1), st);
+        release_sleep(&file->flk);
+        return 0;
+}
+
+/*
+ * getdents：从目录 fd 的当前位置读取若干定长 struct dirent 到 kbuf。
+ * 迭代位置就是 file->pos（作为 FS 私有的 cookie，FAT12 里是目录流字节偏移），
+ * 全程持 flk：fork 后父子共享同一 file 时，目录迭代不会交错。
+ * 返回填入的字节数；目录结束返回 0；错误返回 -1。
+ */
+int64_t vfs_getdents(int fd, void *kbuf, uint64_t count)
+{
+        struct file *file;
+        struct vfs_dirent vde;
+        uint64_t total = 0;
+        int ret;
+
+        if (!kbuf || fd_check(fd) == -1)
+                return -1;
+
+        file = get_task()->ofile[fd];
+        if (!file)
+                return -1;
+
+        if (!(file->flags & FS_O_READ) && !(file->flags & FS_O_RW))
+                return -1;
+
+        /* 字符设备不是目录；块文件且 FS 实现了 readdir 才支持 */
+        if (file->type != 0 || !file->mnt || !file->mnt->fs_ops ||
+            !file->mnt->fs_ops->fs_readdir)
+                return -1;
+
+        /* 缓冲区小到连一条都放不下：直接报错，避免误返回 0 被当成 EOF */
+        if (count < sizeof(struct dirent))
+                return -1;
+
+        acquire_sleep(&file->flk);
+
+        if (file->mnt->fs_ops->fs_is_dir &&
+            !file->mnt->fs_ops->fs_is_dir(file->private))
+        {
+                release_sleep(&file->flk);
+                return -1;
+        }
+
+        while (total + sizeof(struct dirent) <= count)
+        {
+                ret = file->mnt->fs_ops->fs_readdir(file->private, &file->pos, &vde);
+                if (ret < 0)
+                {
+                        if (total > 0)
+                                break; /* 已读到的条目先交付，下次再报错 */
+                        release_sleep(&file->flk);
+                        return -1;
+                }
+                if (ret == 0)
+                        break; /* 目录结束 */
+
+                struct dirent *de = (struct dirent *)((char *)kbuf + total);
+                memset(de, 0, sizeof(*de));
+                de->d_ino = vde.ino;
+                de->d_off = (int64_t)vde.off;
+                de->d_reclen = (uint16_t)sizeof(struct dirent);
+                de->d_type = vde.type;
+                /* 两端 name 都是 VFS_NAME_MAX+1，FS 侧已保证长度 */
+                strcpy(de->d_name, vde.name);
+
+                total += sizeof(struct dirent);
+        }
+
+        release_sleep(&file->flk);
+        return (int64_t)total;
+}
+
 int vfs_create(const char *path, file_attr_t attr)
 {
         struct mount_entry *mp = vfs_find_mount(path);

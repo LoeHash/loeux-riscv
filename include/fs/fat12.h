@@ -94,7 +94,7 @@ struct fat12_priv
         struct block_device *bdev;
 };
 
-// 查找结果
+// 查找结果。本内核没有 inode 对象；fat12_node 就是 FAT 侧的文件身份。
 struct fat12_node
 {
         uint16_t start_cluster;
@@ -103,6 +103,16 @@ struct fat12_node
         uint8_t name[11];
         int is_root;
         struct fat12_priv *fs_priv;
+
+        /* 目录项在盘上的位置：用作 st_ino（根目录约定为 1） */
+        uint32_t dirent_sector;
+        uint16_t dirent_off;
+
+        uint16_t create_time;
+        uint16_t create_date;
+        uint16_t write_time;
+        uint16_t write_date;
+        uint16_t access_date;
 };
 
 // 挂载函数: 读 BPB，校验，构造 fat12_priv
@@ -114,6 +124,8 @@ int fat12_read(struct file *file, void *buf, uint64_t count, uint64_t *out_len);
 int fat12_write(struct file *file, const void *buf, uint64_t count, uint64_t *out_len);
 int fat12_close(struct file *file);
 int fat12_is_dir(void *node);
+int fat12_getattr(void *node, struct vfs_kstat *out);
+int fat12_readdir(void *node, uint64_t *cookie, struct vfs_dirent *out);
 int fat12_create(void *fs_priv, const char *rel_path, file_attr_t attr);
 extern struct file_operation fat12_ops;
 

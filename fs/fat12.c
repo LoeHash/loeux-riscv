@@ -16,10 +16,13 @@ struct file_operation fat12_ops = {
     .fs_open = fat12_open,
     .fs_read = fat12_read,
     .fs_write = fat12_write,
-    .fs_is_dir = fat12_is_dir};
+    .fs_is_dir = fat12_is_dir,
+    .fs_getattr = fat12_getattr,
+    .fs_readdir = fat12_readdir};
 
 static int find_in_dir(struct fat12_priv *fs, uint32_t start_sector, uint32_t dir_size,
-                       const char *filename, struct fat12_dirent *out);
+                       const char *filename, struct fat12_dirent *out,
+                       uint32_t *out_sector, uint16_t *out_off);
 static int match_dos_name(struct fat12_dirent *e, const char *name);
 static uint32_t fat12_cluster_to_sector(struct fat12_priv *fs, uint16_t cluster);
 static uint16_t fat12_read_fat_entry(struct fat12_priv *fs, uint16_t cluster);
@@ -37,6 +40,7 @@ static void fat12_set_dirent_case_flags(struct fat12_dirent *e, const char *file
 static void fat12_init_new_dir(struct fat12_priv *fs, uint16_t cluster, uint16_t parent_cluster);
 static uint16_t fat12_sector_to_cluster(struct fat12_priv *fs, uint32_t sector);
 static void fat12_update_dir_size(struct fat12_priv *fs, struct fat12_node *dir_node);
+static uint32_t fat12_dir_logical_size(struct fat12_priv *fs, struct fat12_node *dir);
 
 /// @brief 创建文件或目录
 /// @param attr 通用文件属性，由 VFS 层传入，各文件系统自行转换为内部格式
@@ -91,7 +95,7 @@ int fat12_create(void *fs_priv, const char *rel_path, file_attr_t attr)
 
                 // 还有下一级 -> 当前组件必须是目录
                 struct fat12_dirent entry;
-                ret = find_in_dir(fs, parent_sector, parent_size, filename, &entry);
+                ret = find_in_dir(fs, parent_sector, parent_size, filename, &entry, NULL, NULL);
                 if (ret < 0)
                 {
                         // printk("fat12_create: parent component '%s' not found\n", filename);
@@ -116,7 +120,7 @@ int fat12_create(void *fs_priv, const char *rel_path, file_attr_t attr)
 
         // 检查文件是否已存在
         struct fat12_dirent entry;
-        ret = find_in_dir(fs, parent_sector, parent_size, filename, &entry);
+        ret = find_in_dir(fs, parent_sector, parent_size, filename, &entry, NULL, NULL);
         if (ret == 0)
         {
                 return -1; // 文件已存在
@@ -500,6 +504,405 @@ int fat12_is_dir(void *node)
         return fnode->is_root || (fnode->attr & FAT12_ATTR_DIRECTORY);
 }
 
+static int fat12_is_leap(int year)
+{
+        return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+}
+
+/* FAT 日期/时间是本地时间且无时区；按 UTC 解释成 Unix 秒，便于 st_*time。 */
+static int64_t fat_datetime_to_unix(uint16_t date, uint16_t time)
+{
+        int year;
+        int month;
+        int day;
+        int hour;
+        int min;
+        int sec;
+        int64_t days;
+        int y;
+        int m;
+        static const int mdays[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+
+        if (date == 0)
+                return 0;
+
+        year = ((date >> 9) & 0x7F) + 1980;
+        month = (date >> 5) & 0x0F;
+        day = date & 0x1F;
+        hour = (time >> 11) & 0x1F;
+        min = (time >> 5) & 0x3F;
+        sec = (time & 0x1F) * 2;
+
+        if (month < 1 || month > 12 || day < 1 || day > 31)
+                return 0;
+
+        days = 0;
+        for (y = 1970; y < year; y++)
+                days += fat12_is_leap(y) ? 366 : 365;
+        for (m = 1; m < month; m++)
+        {
+                days += mdays[m];
+                if (m == 2 && fat12_is_leap(year))
+                        days++;
+        }
+        days += day - 1;
+
+        return days * 86400 + (int64_t)hour * 3600 + (int64_t)min * 60 + sec;
+}
+
+static uint64_t fat12_alloc_blocks_512(struct fat12_node *n)
+{
+        struct fat12_priv *fs = n->fs_priv;
+        uint16_t c;
+        uint32_t guard;
+        uint64_t clusters = 0;
+
+        if (!fs)
+                return 0;
+
+        if (n->is_root)
+                return fs->root_dir_sectors;
+
+        if (n->start_cluster < 2)
+                return 0;
+
+        c = n->start_cluster;
+        guard = fs->cluster_count + 2;
+        while (c >= 2 && c < FAT12_EOF && guard--)
+        {
+                clusters++;
+                c = fat12_read_fat_entry(fs, c);
+        }
+
+        return clusters * fs->sectors_per_cluster;
+}
+
+int fat12_getattr(void *node, struct vfs_kstat *out)
+{
+        struct fat12_node *n = (struct fat12_node *)node;
+        struct fat12_priv *fs;
+        int dir;
+        uint32_t cluster_bytes;
+
+        if (!n || !out || !n->fs_priv)
+                return -1;
+
+        fs = n->fs_priv;
+        memset(out, 0, sizeof(*out));
+
+        dir = fat12_is_dir(n);
+        cluster_bytes = (uint32_t)fs->sectors_per_cluster * fs->bytes_per_sector;
+        if (cluster_bytes == 0)
+                cluster_bytes = FAT12_SECTOR_SIZE;
+
+        if (n->is_root)
+        {
+                out->ino = 1;
+                out->size = (uint64_t)fs->root_dir_sectors * fs->bytes_per_sector;
+                out->nlink = 2;
+                out->mode = S_IFDIR | 0755;
+        }
+        else
+        {
+                out->ino = ((uint64_t)n->dirent_sector << 32) | n->dirent_off;
+                out->nlink = dir ? 2 : 1;
+                if (dir)
+                {
+                        out->mode = S_IFDIR | 0755;
+                        /* 旧工具建的目录项 file_size 可能为 0：沿簇链补算 */
+                        out->size = n->file_size ? n->file_size
+                                                 : fat12_dir_logical_size(fs, n);
+                }
+                else
+                {
+                        out->size = n->file_size;
+                        if (n->attr & FAT12_ATTR_READ_ONLY)
+                                out->mode = S_IFREG | 0444;
+                        else
+                                out->mode = S_IFREG | 0644;
+                }
+
+                out->atime = fat_datetime_to_unix(n->access_date, 0);
+                out->mtime = fat_datetime_to_unix(n->write_date, n->write_time);
+                /* FAT 没有 POSIX ctime；用创建时间把三个时间戳都暴露出来 */
+                out->ctime = fat_datetime_to_unix(n->create_date, n->create_time);
+        }
+
+        out->uid = 0;
+        out->gid = 0;
+        out->rdev = 0;
+        out->blksize = cluster_bytes;
+        out->blocks = fat12_alloc_blocks_512(n);
+        return 0;
+}
+
+/*
+ * 目录的逻辑大小（字节，32 的倍数）。
+ * 根目录区大小固定；子目录用目录项里记录的 size，旧数据可能为 0，
+ * 此时沿 FAT 簇链统计。
+ */
+static uint32_t fat12_dir_logical_size(struct fat12_priv *fs, struct fat12_node *dir)
+{
+        uint16_t c;
+        uint32_t total = 0;
+        uint32_t guard;
+
+        if (dir->is_root)
+                return (uint32_t)fs->root_dir_sectors * fs->bytes_per_sector;
+
+        if (dir->file_size != 0)
+                return dir->file_size;
+
+        c = dir->start_cluster;
+        guard = fs->cluster_count + 2;
+        while (c >= 2 && c < FAT12_EOF && guard--)
+        {
+                total += (uint32_t)fs->sectors_per_cluster * fs->bytes_per_sector;
+                c = fat12_read_fat_entry(fs, c);
+        }
+        return total;
+}
+
+/*
+ * 读取目录逻辑偏移 off（必须 32 字节对齐）处的原始目录项。
+ * 根目录区连续存放；子目录沿簇链定位扇区。
+ * 成功返回 0 并填 *out / *out_sector；越过目录结尾或 I/O 失败返回 -1。
+ */
+static int fat12_dir_read_slot(struct fat12_priv *fs, struct fat12_node *dir,
+                               uint32_t off, struct fat12_dirent *out,
+                               uint32_t *out_sector)
+{
+        uint8_t *buf;
+        uint32_t sector_idx = off / fs->bytes_per_sector;
+        uint32_t slot = (off % fs->bytes_per_sector) / FAT12_DIRENT_SIZE;
+        uint32_t sector;
+        uint16_t cluster;
+
+        if (dir->is_root)
+        {
+                if (sector_idx >= fs->root_dir_sectors)
+                        return -1;
+                sector = fs->root_dir_start + sector_idx;
+        }
+        else
+        {
+                cluster = dir->start_cluster;
+                if (cluster < 2)
+                        return -1;
+
+                /* 沿簇链走到 sector_idx 所在的簇 */
+                while (sector_idx >= fs->sectors_per_cluster)
+                {
+                        sector_idx -= fs->sectors_per_cluster;
+                        cluster = fat12_read_fat_entry(fs, cluster);
+                        if (cluster >= FAT12_EOF)
+                                return -1;
+                }
+                sector = fat12_cluster_to_sector(fs, cluster) + sector_idx;
+        }
+
+        buf = alloc_page();
+        if (!buf)
+                return -1;
+
+        if (fs->bdev->driver.read(fs->bdev->private_data, sector, buf) < 0)
+        {
+                free_page(buf);
+                return -1;
+        }
+
+        *out = *(struct fat12_dirent *)(buf + slot * FAT12_DIRENT_SIZE);
+        if (out_sector)
+                *out_sector = sector;
+        free_page(buf);
+        return 0;
+}
+
+/*
+ * 8.3 目录项名字解码：去空格填充、补 '.'，并按 dir_nt_reserved 的
+ * case 标志恢复小写（fat12_set_dirent_case_flags 写入时用的同一约定）。
+ * 不支持长文件名（LFN），长名文件返回其 8.3 别名。
+ */
+static void fat12_dirent_decode_name(const struct fat12_dirent *e, char *dst)
+{
+        int base_len = 8;
+        int ext_len = 3;
+        int lower_base = (e->dir_nt_reserved & 0x08) != 0;
+        int lower_ext = (e->dir_nt_reserved & 0x10) != 0;
+        int j = 0;
+        int i;
+
+        while (base_len > 0 && e->dir_name[base_len - 1] == ' ')
+                base_len--;
+        while (ext_len > 0 && e->dir_ext[ext_len - 1] == ' ')
+                ext_len--;
+
+        for (i = 0; i < base_len; i++)
+        {
+                char c = (char)e->dir_name[i];
+                if (lower_base && c >= 'A' && c <= 'Z')
+                        c += 'a' - 'A';
+                dst[j++] = c;
+        }
+
+        if (ext_len > 0)
+        {
+                dst[j++] = '.';
+                for (i = 0; i < ext_len; i++)
+                {
+                        char c = (char)e->dir_ext[i];
+                        if (lower_ext && c >= 'A' && c <= 'Z')
+                                c += 'a' - 'A';
+                        dst[j++] = c;
+                }
+        }
+
+        dst[j] = '\0';
+}
+
+/*
+ * LFN（长文件名）组装。
+ * Linux/mtools 写小写名或长名时，会在 8.3 目录项前面放若干 attr=0x0F
+ * 的片段：每片 13 个 UCS-2 字符，物理顺序与逻辑顺序相反，seq 的低 5 位
+ * 是 1 基的片序号（bit6=1 表示物理第一片），字节 13 是短名校验和。
+ */
+static const uint8_t fat12_lfn_char_off[13] =
+    {1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30};
+
+#define FAT12_LFN_MAX_CHARS VFS_NAME_MAX
+
+static uint8_t fat12_lfn_checksum(const uint8_t *short11)
+{
+        uint8_t sum = 0;
+        int i;
+
+        for (i = 0; i < 11; i++)
+                sum = (uint8_t)(((sum & 1) << 7) | (sum >> 1)) + short11[i];
+        return sum;
+}
+
+/* UCS-2 长名转 ASCII；非可打印 ASCII 字符用 '?' 代替。返回名字长度。 */
+static int fat12_lfn_to_ascii(const uint16_t *ucs, char *dst)
+{
+        int j = 0;
+        int i;
+
+        for (i = 0; i < FAT12_LFN_MAX_CHARS && ucs[i] != 0; i++)
+        {
+                uint16_t c = ucs[i];
+                if (j < VFS_NAME_MAX)
+                        dst[j++] = (c >= 0x20 && c < 0x7f) ? (char)c : '?';
+        }
+        dst[j] = '\0';
+        return j;
+}
+
+/*
+ * getdents 的 FAT12 实现。
+ * cookie = 目录流字节偏移（0 开始，每次推进一个 32 字节目录项槽位）。
+ * 已删除项(0xE5)、卷标项(attr bit3) 在这里过滤；attr=0x0F 的 LFN 片段
+ * 聚合成长名（校验和与短名匹配时优先使用）。
+ * "." / ".." 是盘上真实目录项，照常返回，由用户程序决定是否显示。
+ * 命中返回 1，目录结束返回 0，参数错误返回 -1。
+ */
+int fat12_readdir(void *node, uint64_t *cookie, struct vfs_dirent *out)
+{
+        struct fat12_node *dir = (struct fat12_node *)node;
+        struct fat12_priv *fs;
+        uint32_t dir_size;
+        uint32_t off;
+        uint32_t sector;
+        struct fat12_dirent e;
+        /* 正在聚合的 LFN 链（UCS-2 直写按片序号定位，物理逆序无所谓） */
+        uint16_t lfn[FAT12_LFN_MAX_CHARS];
+        uint8_t lfn_cksum = 0;
+        int have_lfn = 0;
+
+        if (!dir || !cookie || !out || !dir->fs_priv)
+                return -1;
+
+        fs = dir->fs_priv;
+        dir_size = fat12_dir_logical_size(fs, dir);
+        off = (uint32_t)*cookie;
+
+        memset(lfn, 0, sizeof(lfn));
+
+        while (off + FAT12_DIRENT_SIZE <= dir_size)
+        {
+                if (fat12_dir_read_slot(fs, dir, off, &e, &sector) < 0)
+                        break; /* 簇链结束或读错误：按目录结束处理 */
+                off += FAT12_DIRENT_SIZE;
+
+                /* 0x00 表示该槽及之后全部为空，目录到此结束。
+                   cookie 直接推到目录末尾，下次调用立刻返回 0。 */
+                if (e.dir_name[0] == 0x00)
+                {
+                        *cookie = dir_size;
+                        return 0;
+                }
+                if (e.dir_name[0] == 0xE5)
+                {
+                        have_lfn = 0;
+                        continue; /* 已删除（被删的 LFN 片段首字节也是 0xE5） */
+                }
+                if (e.dir_attr == 0x0F)
+                {
+                        const uint8_t *raw = (const uint8_t *)&e;
+                        int ord = raw[0] & 0x1f;
+                        int i;
+
+                        if (raw[0] & 0x40)
+                        {
+                                /* 物理第一片：开始一条新链 */
+                                memset(lfn, 0, sizeof(lfn));
+                                have_lfn = 1;
+                        }
+                        if (have_lfn && ord >= 1)
+                        {
+                                for (i = 0; i < 13; i++)
+                                {
+                                        int pos = (ord - 1) * 13 + i;
+                                        if (pos < FAT12_LFN_MAX_CHARS)
+                                                lfn[pos] =
+                                                    raw[fat12_lfn_char_off[i]] |
+                                                    ((uint16_t)raw[fat12_lfn_char_off[i] + 1] << 8);
+                                }
+                                lfn_cksum = raw[13]; /* 各片校验和相同 */
+                        }
+                        continue;
+                }
+                if (e.dir_attr & FAT12_ATTR_VOLUME_ID)
+                {
+                        have_lfn = 0;
+                        continue; /* 卷标不是文件 */
+                }
+
+                memset(out, 0, sizeof(*out));
+                /* 校验和对得上才用长名；对不上只是已删链的残留，回退 8.3 */
+                if (have_lfn &&
+                    fat12_lfn_checksum((const uint8_t *)&e) == lfn_cksum &&
+                    fat12_lfn_to_ascii(lfn, out->name) > 0)
+                {
+                        /* 名字已由 LFN 填好 */
+                }
+                else
+                        fat12_dirent_decode_name(&e, out->name);
+                have_lfn = 0;
+
+                /* ino 规则与 fat12_getattr 一致：(扇区号 << 32) | 槽内偏移 */
+                out->ino = ((uint64_t)sector << 32) |
+                           (uint16_t)((off - FAT12_DIRENT_SIZE) % fs->bytes_per_sector);
+                out->off = off;
+                out->type = (e.dir_attr & FAT12_ATTR_DIRECTORY) ? DT_DIR : DT_REG;
+
+                *cookie = off;
+                return 1;
+        }
+
+        *cookie = off;
+        return 0;
+}
+
 int fat12_write(struct file *file, const void *buf, uint64_t count, uint64_t *out_len)
 {
         if (!file || !buf || !out_len)
@@ -849,10 +1252,14 @@ int fat12_lookup(void *fs_priv, const char *rel_path, void **out_node)
                 node = (struct fat12_node *)alloc_page();
                 if (!node)
                         return -1;
+                memset(node, 0, sizeof(*node));
                 node->is_root = 1;
                 node->fs_priv = fs_p;
+                node->attr = FAT12_ATTR_DIRECTORY;
+                node->file_size = fs_p->root_dir_sectors * fs_p->bytes_per_sector;
+                node->start_cluster = 0;
                 *out_node = node;
-                return 0;
+                return (int)node->file_size;
         }
 
         // 从根目录开始查找
@@ -874,7 +1281,10 @@ int fat12_lookup(void *fs_priv, const char *rel_path, void **out_node)
                 filename[i] = '\0';
 
                 // 在当前目录查找
-                ret = find_in_dir(fs_priv, current_sector, current_size, filename, &entry);
+                uint32_t dent_sec = 0;
+                uint16_t dent_off = 0;
+                ret = find_in_dir(fs_priv, current_sector, current_size, filename, &entry,
+                                  &dent_sec, &dent_off);
                 if (ret < 0)
                 {
                         // printk("fat12_lookup: NOT FOUND '%s' sector=%d size=%d\n",
@@ -909,11 +1319,20 @@ int fat12_lookup(void *fs_priv, const char *rel_path, void **out_node)
                         return -1;
                 }
 
+                memset(node, 0, sizeof(*node));
                 node->is_root = 0;
                 node->fs_priv = fs_priv;
                 node->start_cluster = entry.dir_first_cluster_low;
                 node->file_size = entry.dir_file_size;
                 node->attr = entry.dir_attr;
+                memcpy(node->name, entry.dir_name, 11);
+                node->dirent_sector = dent_sec;
+                node->dirent_off = dent_off;
+                node->create_time = entry.dir_create_time;
+                node->create_date = entry.dir_create_date;
+                node->write_time = entry.dir_write_time;
+                node->write_date = entry.dir_write_date;
+                node->access_date = entry.dir_last_access_date;
                 *out_node = node;
                 return node->file_size;
         }
@@ -993,7 +1412,8 @@ void *fat12_mount(struct block_device *bdev)
 }
 
 static int find_in_dir(struct fat12_priv *fs, uint32_t start_sector, uint32_t dir_size,
-                       const char *filename, struct fat12_dirent *out)
+                       const char *filename, struct fat12_dirent *out,
+                       uint32_t *out_sector, uint16_t *out_off)
 {
         uint8_t *buf = alloc_page();
         if (!buf)
@@ -1003,12 +1423,8 @@ static int find_in_dir(struct fat12_priv *fs, uint32_t start_sector, uint32_t di
         if (dir_size % 512)
                 sector_count++;
 
-        // printk("find_in_dir: looking for '%s' start_sector=%d sectors=%d\n",
-        //        filename, start_sector, sector_count);
-
         for (int s = 0; s < sector_count; s++)
         {
-                // 读扇区
                 fs->bdev->driver.read(fs->bdev->private_data, start_sector + s, buf);
 
                 for (int i = 0; i < 16; i++)
@@ -1017,35 +1433,23 @@ static int find_in_dir(struct fat12_priv *fs, uint32_t start_sector, uint32_t di
 
                         if (e->dir_name[0] == 0x00)
                         {
-                                // printk("find_in_dir: end of dir at sector+%d entry+%d\n", s, i);
                                 free_page(buf);
                                 return -1;
                         }
                         if (e->dir_name[0] == 0xE5)
                                 continue;
                         if (e->dir_attr == 0x0F)
-                                continue; // 长文件名
+                                continue;
                         if (e->dir_attr == 0x08)
-                                continue; // 卷标
-
-                        // 打印当前条目名用于调试
-                        char dbg[13];
-                        int k = 0;
-                        for (int j = 0; j < 8 && e->dir_name[j] != ' '; j++)
-                                dbg[k++] = e->dir_name[j];
-                        for (int j = 0; j < 3 && e->dir_ext[j] != ' '; j++)
-                        {
-                                if (j == 0)
-                                        dbg[k++] = '.';
-                                dbg[k++] = e->dir_ext[j];
-                        }
-                        dbg[k] = '\0';
-                        // printk("find_in_dir: entry[%d:%d] name='%s' attr=0x%02x cluster=%d\n",
-                        //        s, i, dbg, e->dir_attr, e->dir_first_cluster_low);
+                                continue;
 
                         if (match_dos_name(e, filename))
                         {
                                 *out = *e;
+                                if (out_sector)
+                                        *out_sector = start_sector + s;
+                                if (out_off)
+                                        *out_off = (uint16_t)(i * FAT12_DIRENT_SIZE);
                                 free_page(buf);
                                 return 0;
                         }
