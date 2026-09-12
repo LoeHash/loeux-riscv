@@ -116,6 +116,68 @@ uint64_t sys_open()
         }
 }
 
+uint64_t sys_fstat()
+{
+        int fd;
+        uint64_t ubuf;
+        struct stat st;
+
+        get_arg_int(0, &fd);
+        get_arg_addr(1, &ubuf);
+
+        if (ubuf == 0)
+                return -1;
+
+        if (vfs_fstat(fd, &st) < 0)
+                return -1;
+
+        if (copy_data_str_out(ubuf, (char *)&st, sizeof(st)) < 0)
+                return -1;
+
+        return 0;
+}
+
+/*
+ * getdents(fd, dirp, count)：读目录项，返回填入的字节数，目录结束返回 0。
+ * 与 sys_read 一样走单页内核 bounce buffer，再一次性 copyout：
+ * 底层 FS 只操作内核地址，不直接碰用户页表。
+ */
+uint64_t sys_getdents()
+{
+        int fd;
+        uint64_t ubuf;
+        uint64_t count;
+
+        get_arg_int(0, &fd);
+        get_arg_addr(1, &ubuf);
+        get_arg_addr(2, &count);
+
+        if (ubuf == 0)
+                return -1;
+
+        uint64_t max = count > PG_4K_SIZE ? PG_4K_SIZE : count;
+
+        char *kbuf = (char *)kalloc();
+        if (kbuf == NULL)
+                return -1;
+
+        int64_t ret = vfs_getdents(fd, kbuf, max);
+        if (ret < 0)
+        {
+                kfree(kbuf);
+                return -1;
+        }
+
+        if (ret > 0 && copy_data_str_out(ubuf, kbuf, ret) < 0)
+        {
+                kfree(kbuf);
+                return -1;
+        }
+
+        kfree(kbuf);
+        return (uint64_t)ret;
+}
+
 uint64_t sys_write()
 {
         int fd;

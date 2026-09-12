@@ -3,6 +3,41 @@
 #include <type.h>
 #include <block_device.h>
 #include <sleeplock.h>
+#include <stat.h>
+#include <dirent.h>
+
+/*
+ * 文件系统向 VFS 报告的通用元数据。各 FS 填自己能提供的字段，
+ * 缺失项置 0。VFS 再补 st_dev 并转换成用户可见的 struct stat。
+ */
+struct vfs_kstat
+{
+        uint64_t ino;
+        uint32_t mode;
+        uint32_t nlink;
+        uint32_t uid;
+        uint32_t gid;
+        uint64_t rdev;
+        uint64_t size;
+        uint64_t blksize;
+        uint64_t blocks;
+        int64_t atime;
+        int64_t mtime;
+        int64_t ctime;
+};
+
+/*
+ * 文件系统向 VFS 报告的一条通用目录项。
+ * 名字解码、隐藏项（已删除/LFN/卷标）过滤都由具体 FS 完成，
+ * VFS 只负责翻译成用户 ABI struct dirent。
+ */
+struct vfs_dirent
+{
+        uint64_t ino;                /* inode 号（同 vfs_kstat.ino 规则） */
+        uint64_t off;                /* 下一条目的 cookie，FS 私有语义 */
+        uint8_t type;                /* DT_* 类型 */
+        char name[VFS_NAME_MAX + 1]; /* 解码后的文件名 */
+};
 
 // 文件打开标志
 #define FS_O_READ 0x01   // bit 0
@@ -198,6 +233,12 @@ struct file_operation
         int (*fs_create)(void *fs_priv, const char *rel_path, file_attr_t attr);
         /// @brief 判断节点是否为目录
         int (*fs_is_dir)(void *node);
+        /// @brief 读取节点元数据（POSIX fstat/stat 的 FS 侧实现）
+        int (*fs_getattr)(void *node, struct vfs_kstat *out);
+        /// @brief 读取一个目录项（getdents 的 FS 侧实现）
+        /// *cookie 是 FS 私有迭代位置（FAT12 为目录流字节偏移），
+        /// 命中时填 out、推进 *cookie 并返回 1；目录结束返回 0；出错返回 -1。
+        int (*fs_readdir)(void *node, uint64_t *cookie, struct vfs_dirent *out);
 };
 
 typedef enum
@@ -217,6 +258,8 @@ int64_t vfs_write(int fd, const void *buf, uint64_t count);
 int64_t vfs_read(int fd, void *buf, uint64_t count);
 int vfs_open(const char *path, int flags);
 int vfs_seek(int fd, uint64_t offset);
+int vfs_fstat(int fd, struct stat *st);
+int64_t vfs_getdents(int fd, void *buf, uint64_t count);
 struct vfs_node *vfs_lookup(const char *path);
 int vfs_mount(char *mount_path, struct block_device *bdev, FSTYPE type);
 void print_mount_table(void);

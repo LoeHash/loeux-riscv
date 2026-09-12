@@ -20,22 +20,26 @@ extern uint64_t sys_waitpid();
 extern uint64_t sys_exit();
 extern uint64_t sys_chdir();
 extern uint64_t sys_mkdir();
+extern uint64_t sys_fstat();
+extern uint64_t sys_getdents();
 
 static syscall_func_t syscalls[] = {
-    [0] 0,                         // syscall id = 0,
-    [SYSCALL_WRITE] sys_write,     // []
-    [SYSCALL_FORK] sys_fork,       // []
-    [SYSCALL_EXEC] sys_exec,       // []
-    [SYSCALL_GETPID] sys_getpid,   // []
-    [SYSCALL_GETPPID] sys_getppid, // []
-    [SYSCALL_WAIT] sys_wait,       // []
-    [SYSCALL_EXIT] sys_exit,       // []
-    [SYSCALL_READ] sys_read,       // []
-    [SYSCALL_CHDIR] sys_chdir,     // []
-    [SYSCALL_WAITPID] sys_waitpid, // []
-    [SYSCALL_MKDIR] sys_mkdir,     // []
-    [SYSCALL_OPEN] sys_open,       // []
-    [SYSCALL_CLOSE] sys_close,     // []
+    [0] 0,                           // syscall id = 0,
+    [SYSCALL_WRITE] sys_write,       // []
+    [SYSCALL_FORK] sys_fork,         // []
+    [SYSCALL_EXEC] sys_exec,         // []
+    [SYSCALL_GETPID] sys_getpid,     // []
+    [SYSCALL_GETPPID] sys_getppid,   // []
+    [SYSCALL_WAIT] sys_wait,         // []
+    [SYSCALL_EXIT] sys_exit,         // []
+    [SYSCALL_READ] sys_read,         // []
+    [SYSCALL_CHDIR] sys_chdir,       // []
+    [SYSCALL_WAITPID] sys_waitpid,   // []
+    [SYSCALL_MKDIR] sys_mkdir,       // []
+    [SYSCALL_OPEN] sys_open,         // []
+    [SYSCALL_CLOSE] sys_close,       // []
+    [SYSCALL_FSTAT] sys_fstat,       // []
+    [SYSCALL_GETDENTS] sys_getdents, // []
 };
 
 static uint64_t get_arg_reg(int n)

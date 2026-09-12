@@ -20,6 +20,8 @@
 #define SYSCALL_MKDIR 11
 #define SYSCALL_OPEN 12
 #define SYSCALL_CLOSE 13
+#define SYSCALL_FSTAT 14
+#define SYSCALL_GETDENTS 15
 
 typedef uint64_t (*syscall_func_t)(void);
 
