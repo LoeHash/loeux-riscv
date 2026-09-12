@@ -29,7 +29,7 @@ MOUNT_POINT := /media/loe
 # 用户库
 # ============================================================
 
-LIB_SRCS ?= ulib.c
+LIB_SRCS ?= ulib.c stdio.c
 LIB_OBJS := $(LIB_SRCS:.c=.o)
 USER_LIBS ?= $(LIB_OBJS)
 
