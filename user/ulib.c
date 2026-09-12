@@ -22,6 +22,41 @@ int getchar(void)
 
 ////////////////////////////////////////////////////////////
 
+int fstat(int fd, struct stat *buf)
+{
+        int ret;
+        __asm__ volatile(
+            "mv a0, %1\n"
+            "mv a1, %2\n"
+            "li a7, %3\n"
+            "ecall\n"
+            "mv %0, a0\n"
+            : "=r"(ret)
+            : "r"(fd), "r"(buf), "i"(SYSCALL_FSTAT)
+            : "a0", "a1", "a7", "memory");
+        return ret;
+}
+
+// getdents：从目录 fd 读取若干定长 struct dirent。
+// 返回填入 buf 的字节数；目录读完返回 0；出错返回 -1。
+int getdents(int fd, struct dirent *buf, uint32_t count)
+{
+        int ret;
+        // 显式 mv 到 a0/a1/a2：不能依赖 "r" 约束自动分配
+        // （read/write/exec 都踩过参数落到 a3/a4/a5 的坑）。
+        __asm__ volatile(
+            "mv a0, %1\n"
+            "mv a1, %2\n"
+            "mv a2, %3\n"
+            "li a7, %4\n"
+            "ecall\n"
+            "mv %0, a0\n"
+            : "=r"(ret)
+            : "r"(fd), "r"(buf), "r"(count), "i"(SYSCALL_GETDENTS)
+            : "a0", "a1", "a2", "a7", "memory");
+        return ret;
+}
+
 int close(int fd)
 {
         int ret;
@@ -342,6 +377,39 @@ static void buf_append_char(char *out, int *pos, int cap, char c)
                 out[(*pos)++] = c;
 }
 
+// 数值已格式化为 src[0..len)，按 width / 0 填充 / 左对齐标志放入 out。
+// prefix 用于 %x/%o 的 "#" 备选形式（如 0x）。
+// 注意：0 填充不处理负数符号位（本内核 printf 场景里宽度只用于非负数）。
+static void buf_append_num(char *out, int *pos, int cap,
+                           const char *prefix, int prefix_len,
+                           const char *src, int len,
+                           int width, int zero_pad, int left_justify)
+{
+        int total = prefix_len + len;
+        int i;
+
+        if (!left_justify && width > total)
+        {
+                // 0 填充时前缀（0x）要在 0 的前面：前缀 → 0 → 数字；
+                // 普通空格填充：空格 → 前缀 → 数字。
+                if (zero_pad)
+                {
+                        buf_append(out, pos, cap, prefix, prefix_len);
+                        prefix_len = 0;
+                }
+                char pad = zero_pad ? '0' : ' ';
+                for (i = total; i < width; i++)
+                        buf_append_char(out, pos, cap, pad);
+        }
+        buf_append(out, pos, cap, prefix, prefix_len);
+        buf_append(out, pos, cap, src, len);
+        if (left_justify && width > total)
+        {
+                for (i = total; i < width; i++)
+                        buf_append_char(out, pos, cap, ' ');
+        }
+}
+
 int printf(const char *fmt, ...)
 {
         va_list args;
@@ -440,7 +508,8 @@ int printf(const char *fmt, ...)
                                         val = va_arg(args, int);
                                 }
                                 int len = int_to_str(val, buf);
-                                buf_append(out, &pos, PRINTF_BUF_SZ, buf, len);
+                                buf_append_num(out, &pos, PRINTF_BUF_SZ, "", 0,
+                                               buf, len, width, zero_pad, left_justify);
                                 break;
                         }
 
@@ -460,7 +529,8 @@ int printf(const char *fmt, ...)
                                         val = va_arg(args, unsigned int);
                                 }
                                 int len = uint_to_str(val, buf, 10, 0);
-                                buf_append(out, &pos, PRINTF_BUF_SZ, buf, len);
+                                buf_append_num(out, &pos, PRINTF_BUF_SZ, "", 0,
+                                               buf, len, width, zero_pad, left_justify);
                                 break;
                         }
 
@@ -479,12 +549,11 @@ int printf(const char *fmt, ...)
                                 {
                                         val = va_arg(args, unsigned int);
                                 }
-                                if (alt_form && val != 0)
-                                {
-                                        buf_append(out, &pos, PRINTF_BUF_SZ, "0x", 2);
-                                }
                                 int len = uint_to_str(val, buf, 16, uppercase);
-                                buf_append(out, &pos, PRINTF_BUF_SZ, buf, len);
+                                buf_append_num(out, &pos, PRINTF_BUF_SZ,
+                                               (alt_form && val != 0) ? "0x" : "",
+                                               (alt_form && val != 0) ? 2 : 0,
+                                               buf, len, width, zero_pad, left_justify);
                                 break;
                         }
 
@@ -504,12 +573,11 @@ int printf(const char *fmt, ...)
                                 {
                                         val = va_arg(args, unsigned int);
                                 }
-                                if (alt_form && val != 0)
-                                {
-                                        buf_append(out, &pos, PRINTF_BUF_SZ, "0X", 2);
-                                }
                                 int len = uint_to_str(val, buf, 16, 1);
-                                buf_append(out, &pos, PRINTF_BUF_SZ, buf, len);
+                                buf_append_num(out, &pos, PRINTF_BUF_SZ,
+                                               (alt_form && val != 0) ? "0X" : "",
+                                               (alt_form && val != 0) ? 2 : 0,
+                                               buf, len, width, zero_pad, left_justify);
                                 break;
                         }
 
@@ -528,12 +596,11 @@ int printf(const char *fmt, ...)
                                 {
                                         val = va_arg(args, unsigned int);
                                 }
-                                if (alt_form && val != 0)
-                                {
-                                        buf_append_char(out, &pos, PRINTF_BUF_SZ, '0');
-                                }
                                 int len = uint_to_str(val, buf, 8, 0);
-                                buf_append(out, &pos, PRINTF_BUF_SZ, buf, len);
+                                buf_append_num(out, &pos, PRINTF_BUF_SZ,
+                                               (alt_form && val != 0) ? "0" : "",
+                                               (alt_form && val != 0) ? 1 : 0,
+                                               buf, len, width, zero_pad, left_justify);
                                 break;
                         }
 

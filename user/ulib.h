@@ -30,6 +30,8 @@
 #define SYSCALL_MKDIR 11
 #define SYSCALL_OPEN 12
 #define SYSCALL_CLOSE 13
+#define SYSCALL_FSTAT 14
+#define SYSCALL_GETDENTS 15
 ///////////////////////////////SYSCALLS END///////////////////////////////
 
 ///////////////////////////////TYPE DEFINITIONS///////////////////////////////
@@ -379,6 +381,9 @@ static inline int strcasecmp(const char *s1, const char *s2)
 #endif
 ///////////////////////////////LIBRARY FUNCTIONS END///////////////////////////////
 
+#include <stat.h>
+#include <dirent.h>
+
 int write(int fd, void *buf, uint64_t count);
 int fork();
 int exec(const char *path, char **argv);
@@ -394,4 +399,6 @@ int chdir(const char *path);
 int mkdir(const char *path);
 int open(const char *path, int flags);
 int close(int fd);
+int fstat(int fd, struct stat *buf);
+int getdents(int fd, struct dirent *buf, uint32_t count);
 #endif
