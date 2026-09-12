@@ -192,4 +192,25 @@ struct cpu
         int intena; // 第一次push_off 的中断状态
 };
 
+/// @brief slab
+struct slab
+{
+        struct spinlock lock;
+
+        void *freelist;    // 当前 slab 第一个空闲 object (这个object内存空间上前8个字节是下一个object的地址)
+        struct slab *next; // 同一 size class 下的下一个 slab
+
+        uint64_t object_size; // object 大小
+        uint64_t total;       // 当前 slab 总 object 数
+        uint64_t free;        // 当前剩余空闲 object 数，free == 0 为FULL, free == total 为EMPTY， 0 < free < total 为PARTIAL
+};
+
+/// 全局slab缓存器
+/// 保存最初的9个父亲slab
+struct slab_globe_cache
+{
+        struct spinlock lock;
+
+        struct slab *slabs[9];
+};
 #endif

@@ -1,6 +1,8 @@
 #ifndef _INC_MM_SLAB_H
 #define _INC_MM_SLAB_H
 #include <memory.h>
+#include <type.h>
+
 #define SLAB_SIZE_8_SHIFT 3
 #define SLAB_SIZE_16_SHIFT 4
 #define SLAB_SIZE_32_SHIFT 5
@@ -22,7 +24,6 @@
 #define SLAB_LEVEL_1024_SIZE (1 << SLAB_SIZE_1024_SHIFT)
 #define SLAB_LEVEL_2048_SIZE (1 << SLAB_SIZE_2048_SHIFT)
 #define SLAB_LEVEL_4096_SIZE (1 << SLAB_SIZE_4096_SHIFT)
-
 #define SLAB_SIZE(level) (1 << SLAB_SIZE_##level##_SHIFT)
 
 #endif

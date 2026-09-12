@@ -1,6 +1,17 @@
 #include <slab.h>
 #include <panic.h>
+/*
+Cache
+ │
+ │ 管理很多
+ ▼
+Slab
+ │
+ │ 包含很多
+ ▼
+Object
 
+*/
 /// @brief slab 对齐大小
 /// @param size 大小
 /// @return 对齐后的大小
