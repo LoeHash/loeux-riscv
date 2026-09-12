@@ -183,6 +183,30 @@ test2:
         }
         printk("  ✓ File opened successfully, fd=%d\n", fd);
 
+        printk("\n[Test 2b] fstat(/hello.txt)\n");
+        {
+                struct stat st;
+                if (vfs_fstat(fd, &st) < 0)
+                {
+                        printk("  ✗ vfs_fstat failed\n");
+                }
+                else
+                {
+                        printk("  st_dev=%lu st_ino=%lu st_mode=0%o st_nlink=%u\n",
+                               (unsigned long)st.st_dev, (unsigned long)st.st_ino,
+                               (unsigned)st.st_mode, (unsigned)st.st_nlink);
+                        printk("  st_uid=%u st_gid=%u st_size=%ld st_blksize=%ld st_blocks=%ld\n",
+                               (unsigned)st.st_uid, (unsigned)st.st_gid,
+                               (long)st.st_size, (long)st.st_blksize, (long)st.st_blocks);
+                        printk("  st_atime=%ld st_mtime=%ld st_ctime=%ld\n",
+                               (long)st.st_atime, (long)st.st_mtime, (long)st.st_ctime);
+                        if (S_ISREG(st.st_mode))
+                                printk("  ✓ S_ISREG\n");
+                        else
+                                printk("  ✗ expected regular file\n");
+                }
+        }
+
         printk("\n[Test 3] Reading from /hello.txt (first 16 bytes)\n");
         memset(read_buf, 0, sizeof(read_buf));
         bytes = vfs_read(fd, read_buf, 16);
