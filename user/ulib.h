@@ -23,8 +23,10 @@
 #define SYSCALL_CLOSE 13
 #define SYSCALL_FSTAT 14
 #define SYSCALL_GETDENTS 15
+#define SYSCALL_PWD 16
 ///////////////////////////////SYSCALLS END///////////////////////////////
 
+int pwd(char *buf, int max);
 int write(int fd, void *buf, uint64_t count);
 int fork();
 int exec(const char *path, char **argv);

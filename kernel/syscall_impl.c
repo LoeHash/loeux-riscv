@@ -8,6 +8,29 @@
 #include <panic.h>
 #include <memory.h>
 
+uint64_t sys_pwd()
+{
+        uint64_t buf_addr;
+        int max;
+
+        get_arg_addr(0, &buf_addr);
+        get_arg_int(1, &max);
+
+        if (max <= 0)
+        {
+                return -1;
+        }
+
+        struct task_struct *ts = get_task();
+        acquire(&ts->lk);
+
+        copy_data_str_out(buf_addr, ts->cwd, max < MAX_PATH_LEN ? max : MAX_PATH_LEN);
+
+        release(&ts->lk);
+
+        return 0;
+}
+
 uint64_t sys_chdir()
 {
         struct task_struct *ts = get_task();

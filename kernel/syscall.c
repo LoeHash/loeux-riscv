@@ -22,6 +22,7 @@ extern uint64_t sys_chdir();
 extern uint64_t sys_mkdir();
 extern uint64_t sys_fstat();
 extern uint64_t sys_getdents();
+extern uint64_t sys_pwd();
 
 static syscall_func_t syscalls[] = {
     [0] 0,                           // syscall id = 0,
@@ -40,6 +41,7 @@ static syscall_func_t syscalls[] = {
     [SYSCALL_CLOSE] sys_close,       // []
     [SYSCALL_FSTAT] sys_fstat,       // []
     [SYSCALL_GETDENTS] sys_getdents, // []
+    [SYSCALL_PWD] sys_pwd,           // []
 };
 
 static uint64_t get_arg_reg(int n)

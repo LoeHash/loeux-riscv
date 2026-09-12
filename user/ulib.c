@@ -230,3 +230,18 @@ int exit(int exit_code)
             : "a0", "a7", "memory");
         return 0;
 }
+
+int pwd(char *buf, int max)
+{
+        int ret;
+        __asm__ volatile(
+            "mv a0, %1\n"
+            "mv a1, %2\n"
+            "li a7, %3\n"
+            "ecall\n"
+            "mv %0, a0\n"
+            : "=r"(ret)
+            : "r"(buf), "r"(max), "i"(SYSCALL_PWD)
+            : "a0", "a1", "a7", "memory");
+        return ret;
+}

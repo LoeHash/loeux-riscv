@@ -22,6 +22,7 @@
 #define SYSCALL_CLOSE 13
 #define SYSCALL_FSTAT 14
 #define SYSCALL_GETDENTS 15
+#define SYSCALL_PWD 16
 
 typedef uint64_t (*syscall_func_t)(void);
 
