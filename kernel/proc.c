@@ -10,6 +10,7 @@
 #include <trap.h>
 #include <lib.h>
 #include <vm.h>
+#include <slab.h>
 
 /*
 我们现在规定，所有的用户态程序，全部在0x0 处加载运行
@@ -80,7 +81,7 @@ int set_cwd(struct task_struct *ts, const char *path)
         if (!node->is_dir)
         {
                 node->mount->fs_ops->fs_free_node(node->private);
-                free_page(node);
+                slab_free(node);
                 return -1;
         }
 
@@ -88,7 +89,7 @@ int set_cwd(struct task_struct *ts, const char *path)
         if (ts->cwd_node != NULL)
         {
                 ts->cwd_node->mount->fs_ops->fs_free_node(ts->cwd_node->private);
-                free_page(ts->cwd_node);
+                slab_free(ts->cwd_node);
         }
 
         ts->cwd_node = node;
@@ -506,7 +507,7 @@ static void exit_fs(struct task_struct *ts)
         if (ts->cwd_node)
         {
                 ts->cwd_node->mount->fs_ops->fs_free_node(ts->cwd_node->private);
-                free_page(ts->cwd_node);
+                slab_free(ts->cwd_node);
                 ts->cwd_node = NULL;
         }
 }

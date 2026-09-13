@@ -6,6 +6,7 @@
 #include <vfs.h>
 #include <lib.h>
 #include <timer.h>
+#include <slab.h>
 
 struct file_operation fat12_ops = {
     .fs_close = fat12_close,
@@ -331,7 +332,7 @@ static void fat12_set_dirent_timestamps(struct fat12_dirent *e)
 /// 即将过时，目前仅用于测试！
 static void fat12_init_new_dir(struct fat12_priv *fs, uint16_t cluster, uint16_t parent_cluster)
 {
-        uint8_t *buf = alloc_page();
+        uint8_t *buf = slab_alloc(512);
         if (!buf)
                 return;
 
@@ -371,14 +372,14 @@ static void fat12_init_new_dir(struct fat12_priv *fs, uint16_t cluster, uint16_t
 
         // 写回第一扇区（包含 . 和 ..）
         fs->bdev->driver.write(fs->bdev->private_data, first_sector, buf);
-        free_page(buf);
+        slab_free(buf);
 }
 
 static int fat12_create_dirent(struct fat12_priv *fs, uint32_t *start_sector, uint32_t *dir_size,
                                const char *filename, uint16_t cluster, int fat12_attr,
                                uint16_t parent_start_cluster)
 {
-        uint8_t *buf = alloc_page();
+        uint8_t *buf = slab_alloc(512);
         if (!buf)
                 return -1;
 
@@ -410,7 +411,7 @@ static int fat12_create_dirent(struct fat12_priv *fs, uint32_t *start_sector, ui
 
                                 // 写回扇区
                                 fs->bdev->driver.write(fs->bdev->private_data, *start_sector + s, buf);
-                                free_page(buf);
+                                slab_free(buf);
                                 return 0;
                         }
                 }
@@ -420,7 +421,7 @@ static int fat12_create_dirent(struct fat12_priv *fs, uint32_t *start_sector, ui
         // 根目录不能扩展（固定大小）
         if (parent_start_cluster == 0)
         {
-                free_page(buf);
+                slab_free(buf);
                 return -1; // 根目录已满
         }
 
@@ -428,7 +429,7 @@ static int fat12_create_dirent(struct fat12_priv *fs, uint32_t *start_sector, ui
         uint16_t new_cluster = fat12_alloc_cluster(fs);
         if (new_cluster == 0)
         {
-                free_page(buf);
+                slab_free(buf);
                 return -1; // 磁盘已满
         }
 
@@ -472,12 +473,12 @@ static int fat12_create_dirent(struct fat12_priv *fs, uint32_t *start_sector, ui
                         e->dir_file_size = 0;
 
                         fs->bdev->driver.write(fs->bdev->private_data, new_sector, buf);
-                        free_page(buf);
+                        slab_free(buf);
                         return 0;
                 }
         }
 
-        free_page(buf);
+        slab_free(buf);
         return -1;
 }
 
@@ -493,7 +494,7 @@ int fat12_close(struct file *file)
 
 void fat12_free_node(void *out_node)
 {
-        free_page(out_node);
+        slab_free(out_node);
 }
 
 int fat12_is_dir(void *node)
@@ -701,20 +702,20 @@ static int fat12_dir_read_slot(struct fat12_priv *fs, struct fat12_node *dir,
                 sector = fat12_cluster_to_sector(fs, cluster) + sector_idx;
         }
 
-        buf = alloc_page();
+        buf = slab_alloc(512);
         if (!buf)
                 return -1;
 
         if (fs->bdev->driver.read(fs->bdev->private_data, sector, buf) < 0)
         {
-                free_page(buf);
+                slab_free(buf);
                 return -1;
         }
 
         *out = *(struct fat12_dirent *)(buf + slot * FAT12_DIRENT_SIZE);
         if (out_sector)
                 *out_sector = sector;
-        free_page(buf);
+        slab_free(buf);
         return 0;
 }
 
@@ -915,19 +916,19 @@ int fat12_write(struct file *file, const void *buf, uint64_t count, uint64_t *ou
         uint64_t bytes_written = 0;
         uint32_t offset = file->pos;
         // uint8_t sector_buf[512];
-        uint8_t *sector_buf = alloc_page();
+        uint8_t *sector_buf = slab_alloc(512);
 
         // 只读文件不能写
         if (fnode->attr & FAT12_ATTR_READ_ONLY)
         {
-                free_page(sector_buf);
+                slab_free(sector_buf);
                 return -1;
         }
 
         // 目录不能写
         if (fnode->attr & FAT12_ATTR_DIRECTORY)
         {
-                free_page(sector_buf);
+                slab_free(sector_buf);
                 return -1;
         }
 
@@ -939,7 +940,7 @@ int fat12_write(struct file *file, const void *buf, uint64_t count, uint64_t *ou
                 if (ret < 0)
                 {
                         *out_len = 0;
-                        free_page(sector_buf);
+                        slab_free(sector_buf);
                         return -1; // 磁盘已满或其他错误
                 }
         }
@@ -962,7 +963,7 @@ int fat12_write(struct file *file, const void *buf, uint64_t count, uint64_t *ou
                         {
                                 *out_len = i;
                                 file->pos += i;
-                                free_page(sector_buf);
+                                slab_free(sector_buf);
                                 return 0;
                         }
                 }
@@ -977,7 +978,7 @@ int fat12_write(struct file *file, const void *buf, uint64_t count, uint64_t *ou
                 {
                         *out_len = i;
                         file->pos += i;
-                        free_page(sector_buf);
+                        slab_free(sector_buf);
                         return -1;
                 }
 
@@ -989,7 +990,7 @@ int fat12_write(struct file *file, const void *buf, uint64_t count, uint64_t *ou
                 {
                         *out_len = i;
                         file->pos += i;
-                        free_page(sector_buf);
+                        slab_free(sector_buf);
                         return -1;
                 }
 
@@ -999,7 +1000,7 @@ int fat12_write(struct file *file, const void *buf, uint64_t count, uint64_t *ou
 
         // file->pos += bytes_written;
         *out_len = bytes_written;
-        free_page(sector_buf);
+        slab_free(sector_buf);
         return 0;
 }
 
@@ -1076,7 +1077,7 @@ int fat12_read(struct file *file, void *buf, uint64_t count, uint64_t *out_len)
         struct fat12_node *fnode = (struct fat12_node *)file->private;
         struct fat12_priv *fs = fnode->fs_priv;
         // uint8_t sector_buf[512];
-        uint8_t *sector_buf = alloc_page();
+        uint8_t *sector_buf = slab_alloc(512);
         uint64_t bytes_read = 0;
         uint32_t offset = file->pos;
 
@@ -1084,7 +1085,7 @@ int fat12_read(struct file *file, void *buf, uint64_t count, uint64_t *out_len)
         if (offset >= fnode->file_size)
         {
                 *out_len = 0;
-                free_page(sector_buf);
+                slab_free(sector_buf);
                 return 0;
         }
 
@@ -1105,7 +1106,7 @@ int fat12_read(struct file *file, void *buf, uint64_t count, uint64_t *out_len)
                 if (cluster >= 0xFF8)
                 {
                         *out_len = bytes_read;
-                        free_page(sector_buf);
+                        slab_free(sector_buf);
                         return 0;
                 }
         }
@@ -1123,7 +1124,7 @@ int fat12_read(struct file *file, void *buf, uint64_t count, uint64_t *out_len)
                 if (fs->bdev->driver.read(fs->bdev->private_data, sector, sector_buf) < 0)
                 {
                         *out_len = bytes_read;
-                        free_page(sector_buf);
+                        slab_free(sector_buf);
                         return -1;
                 }
 
@@ -1162,7 +1163,7 @@ int fat12_read(struct file *file, void *buf, uint64_t count, uint64_t *out_len)
         // 3. seeking...
         // file->pos += bytes_read;
         *out_len = bytes_read;
-        free_page(sector_buf);
+        slab_free(sector_buf);
         return 0;
 }
 
@@ -1249,7 +1250,7 @@ int fat12_lookup(void *fs_priv, const char *rel_path, void **out_node)
         // 如果是根目录 "/"
         if (*path == '\0')
         {
-                node = (struct fat12_node *)alloc_page();
+                node = (struct fat12_node *)slab_alloc(sizeof(struct fat12_node));
                 if (!node)
                         return -1;
                 memset(node, 0, sizeof(*node));
@@ -1313,7 +1314,7 @@ int fat12_lookup(void *fs_priv, const char *rel_path, void **out_node)
                 }
 
                 // 找到了
-                node = (struct fat12_node *)alloc_page();
+                node = (struct fat12_node *)slab_alloc(sizeof(struct fat12_node));
                 if (!node)
                 {
                         return -1;
@@ -1342,14 +1343,14 @@ int fat12_lookup(void *fs_priv, const char *rel_path, void **out_node)
 
 void *fat12_mount(struct block_device *bdev)
 {
-        struct fat12_priv *f12_priv = alloc_page();
+        struct fat12_priv *f12_priv = slab_alloc(sizeof(struct fat12_priv));
         if (!f12_priv)
                 return NULL;
 
-        uint8_t *buffer = alloc_page();
+        uint8_t *buffer = slab_alloc(512);
         if (!buffer)
         {
-                free_page(f12_priv);
+                slab_free(f12_priv);
                 return NULL;
         }
 
@@ -1359,8 +1360,8 @@ void *fat12_mount(struct block_device *bdev)
         // 校验签名
         if (buffer[510] != 0x55 || buffer[511] != 0xAA)
         {
-                free_page(buffer);
-                free_page(f12_priv);
+                slab_free(buffer);
+                slab_free(f12_priv);
                 return NULL;
         }
 
@@ -1376,8 +1377,8 @@ void *fat12_mount(struct block_device *bdev)
         // 校验关键字段
         if (f12_priv->bytes_per_sector != 512)
         {
-                free_page(buffer);
-                free_page(f12_priv);
+                slab_free(buffer);
+                slab_free(f12_priv);
                 return NULL;
         }
 
@@ -1390,11 +1391,11 @@ void *fat12_mount(struct block_device *bdev)
 
         // 读 FAT 表到内存
         uint32_t fat_table_size = f12_priv->sectors_per_fat * f12_priv->bytes_per_sector;
-        f12_priv->fat_table = alloc_page();
+        f12_priv->fat_table = alloc_page(); // FAT 表可能超过 2048 字节，不能用 slab
         if (!f12_priv->fat_table)
         {
-                free_page(buffer);
-                free_page(f12_priv);
+                slab_free(buffer);
+                slab_free(f12_priv);
                 return NULL;
         }
 
@@ -1407,7 +1408,7 @@ void *fat12_mount(struct block_device *bdev)
         // 存 bdev
         f12_priv->bdev = bdev;
 
-        free_page(buffer);
+        slab_free(buffer);
         return (void *)f12_priv;
 }
 
@@ -1415,7 +1416,7 @@ static int find_in_dir(struct fat12_priv *fs, uint32_t start_sector, uint32_t di
                        const char *filename, struct fat12_dirent *out,
                        uint32_t *out_sector, uint16_t *out_off)
 {
-        uint8_t *buf = alloc_page();
+        uint8_t *buf = slab_alloc(512);
         if (!buf)
                 return -1;
 
@@ -1433,7 +1434,7 @@ static int find_in_dir(struct fat12_priv *fs, uint32_t start_sector, uint32_t di
 
                         if (e->dir_name[0] == 0x00)
                         {
-                                free_page(buf);
+                                slab_free(buf);
                                 return -1;
                         }
                         if (e->dir_name[0] == 0xE5)
@@ -1450,12 +1451,12 @@ static int find_in_dir(struct fat12_priv *fs, uint32_t start_sector, uint32_t di
                                         *out_sector = start_sector + s;
                                 if (out_off)
                                         *out_off = (uint16_t)(i * FAT12_DIRENT_SIZE);
-                                free_page(buf);
+                                slab_free(buf);
                                 return 0;
                         }
                 }
         }
-        free_page(buf);
+        slab_free(buf);
         return -1;
 }
 
@@ -1523,7 +1524,7 @@ static void fat12_write_fat_entry(struct fat12_priv *fs, uint16_t cluster, uint1
 
 static void fat12_update_dirent_size(struct fat12_priv *fs, struct fat12_node *fnode)
 {
-        uint8_t *buf = alloc_page();
+        uint8_t *buf = slab_alloc(512);
         if (!buf)
                 return;
 
@@ -1541,7 +1542,7 @@ static void fat12_update_dirent_size(struct fat12_priv *fs, struct fat12_node *f
 
                         if (e->dir_name[0] == 0x00)
                         {
-                                free_page(buf);
+                                slab_free(buf);
                                 return;
                         }
                         if (e->dir_name[0] == 0xE5)
@@ -1558,12 +1559,12 @@ static void fat12_update_dirent_size(struct fat12_priv *fs, struct fat12_node *f
                                 // 更新文件大小
                                 e->dir_file_size = fnode->file_size;
                                 fs->bdev->driver.write(fs->bdev->private_data, sector + s, buf);
-                                free_page(buf);
+                                slab_free(buf);
                                 return;
                         }
                 }
         }
-        free_page(buf);
+        slab_free(buf);
 }
 
 static void fat12_parse_filename(const char *filename, uint8_t *name, uint8_t *ext)

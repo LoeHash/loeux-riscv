@@ -7,6 +7,7 @@
 #include <lib.h>
 #include <panic.h>
 #include <memory.h>
+#include <slab.h>
 
 uint64_t sys_pwd()
 {
@@ -34,8 +35,8 @@ uint64_t sys_pwd()
 uint64_t sys_chdir()
 {
         struct task_struct *ts = get_task();
-        char *path = kalloc();
-        char *u_path = kalloc();
+        char *path = slab_alloc(MAX_PATH_LEN);
+        char *u_path = slab_alloc(MAX_PATH_LEN);
         uint64_t path_addr;
         uint32_t flags;
         int ret;
@@ -53,8 +54,8 @@ uint64_t sys_chdir()
         acquire(&t->lk);
         ret = set_cwd(t, path);
         release(&t->lk);
-        kfree(path);
-        kfree(u_path);
+        slab_free(path);
+        slab_free(u_path);
 
         return ret;
 }
@@ -119,7 +120,7 @@ uint64_t sys_fork()
 /// kexec 是普通 C 函数，在内核空间正常返回。
 /// 与 kexit 不同（kexit 调 sched() 切走永不返回），
 /// kexec 只替换用户页表和 trapframe，内核调用链继续执行。
-/// 因此 kexec 返回后可以安全地 kfree 所有内核侧分配的字符串副本。
+/// 因此 kexec 返回后可以安全地 slab_free 所有内核侧分配的字符串副本。
 uint64_t sys_exec()
 {
         struct task_struct *ts = get_task();
@@ -143,7 +144,7 @@ uint64_t sys_exec()
         // 2. 逐个读取用户空间 argv 数组，把每个字符串拷到内核
         //    argv_addr 指向用户空间的 char*[]（8 字节指针数组）
         int argc = 0;
-        int alloc_count = 0; // 已 kalloc 的数量，用于失败回滚
+        int alloc_count = 0; // 已 slab_alloc 的数量，用于失败回滚
 
         while (argc < MAX_ARGS - 1)
         {
@@ -159,8 +160,8 @@ uint64_t sys_exec()
                 if (str_addr == 0)
                         break; // argv 结束
 
-                // kalloc 一页内核内存存放这个字符串
-                argv[argc] = kalloc();
+                // slab_alloc 一块内核内存存放这个字符串
+                argv[argc] = slab_alloc(MAX_PATH_LEN);
                 if (argv[argc] == NULL)
                 {
                         goto fail;
@@ -168,7 +169,7 @@ uint64_t sys_exec()
                 alloc_count++;
 
                 // 从用户空间拷贝字符串到内核
-                if (copyinstr(ts->pg, argv[argc], str_addr, PG_4K_SIZE) < 0)
+                if (copyinstr(ts->pg, argv[argc], str_addr, MAX_PATH_LEN) < 0)
                 {
                         goto fail;
                 }
@@ -189,7 +190,7 @@ uint64_t sys_exec()
         //    - 失败：kexec 自己恢复了旧页表，直接释放
         for (int i = 0; i < alloc_count; i++)
         {
-                kfree(argv[i]);
+                slab_free(argv[i]);
         }
 
         return ret;
@@ -197,7 +198,7 @@ uint64_t sys_exec()
 fail:
         for (int i = 0; i < alloc_count; i++)
         {
-                kfree(argv[i]);
+                slab_free(argv[i]);
         }
         return -1;
 }

@@ -7,6 +7,7 @@
 #include <char_dev.h>
 #include <printk.h>
 #include <proc.h>
+#include <slab.h>
 
 static struct mount_entry *vfs_find_mount(const char *path);
 static int fd_check(int fd);
@@ -269,7 +270,7 @@ int vfs_close(int fd)
 }
 
 // 释放对 struct file 的一次引用。
-// refcount 归 0 时才真正调用底层 fs_close / cdev close 并 free_page。
+// refcount 归 0 时才真正调用底层 fs_close / cdev close 并 slab_free。
 // 多个进程通过 fork 共享同一 struct file 时，各自 close 只 decref，
 // 最后一个 close 才回收底层资源（Unix 经典语义）。
 void file_close(struct file *file)
@@ -301,7 +302,7 @@ void file_close(struct file *file)
                 file->mnt->fs_ops->fs_free_node(file->private);
         }
 
-        free_page(file);
+        slab_free(file);
 }
 
 int64_t vfs_write(int fd, const void *buf, uint64_t count)
@@ -429,7 +430,7 @@ int vfs_open(const char *path, int flags)
                         return -1;
                 }
 
-                struct file *file = alloc_page();
+                struct file *file = slab_alloc(sizeof(struct file));
                 if (!file)
                 {
                         return -1;
@@ -445,14 +446,14 @@ int vfs_open(const char *path, int flags)
 
                 if (cdev->ops->open && cdev->ops->open(cdev->priv, flags) < 0)
                 {
-                        free_page(file);
+                        slab_free(file);
                         return -1;
                 }
 
                 int fd = alloc_fd(file);
                 if (fd < 0)
                 {
-                        free_page(file);
+                        slab_free(file);
                         return -1;
                 }
                 return fd;
@@ -466,11 +467,11 @@ int vfs_open(const char *path, int flags)
                 return -2;
         }
 
-        struct file *file = alloc_page();
+        struct file *file = slab_alloc(sizeof(struct file));
         if (!file)
         {
                 vnode->mount->fs_ops->fs_free_node(vnode->private);
-                free_page(vnode);
+                slab_free(vnode);
                 return -1;
         }
 
@@ -489,8 +490,8 @@ int vfs_open(const char *path, int flags)
         if (ret == -1)
         {
                 vnode->mount->fs_ops->fs_free_node(vnode->private);
-                free_page(vnode);
-                free_page(file);
+                slab_free(vnode);
+                slab_free(file);
                 return -1;
         }
 
@@ -499,12 +500,12 @@ int vfs_open(const char *path, int flags)
         {
                 vnode->mount->fs_ops->fs_close(file);
                 vnode->mount->fs_ops->fs_free_node(vnode->private);
-                free_page(vnode);
-                free_page(file);
+                slab_free(vnode);
+                slab_free(file);
                 return -1;
         }
 
-        free_page(vnode);
+        slab_free(vnode);
 
         return fd;
 }
@@ -534,7 +535,7 @@ struct vfs_node *vfs_lookup(const char *path)
                 return NULL;
         }
 
-        struct vfs_node *vnode = alloc_page();
+        struct vfs_node *vnode = slab_alloc(sizeof(struct vfs_node));
 
         if (!vnode)
         {

@@ -208,7 +208,8 @@ void init_memory()
 }
 
 // kalloc 与 kfree
-// 是为未来的 slab分配器做准备
+// 整页分配器（4KB），用于页表、内核栈、用户物理页、DMA 缓冲区等需要整页的场景。
+// 小块内存（< 4KB）请使用 slab_alloc / slab_free。
 void *kalloc()
 {
         return alloc_page();

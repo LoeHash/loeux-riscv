@@ -3,6 +3,7 @@
 #include <vfs.h>
 #include <lib.h>
 #include <proc.h>
+#include <slab.h>
 
 uint64_t sys_mkdir()
 {
@@ -65,8 +66,8 @@ uint64_t sys_close()
 uint64_t sys_open()
 {
         struct task_struct *ts = get_task();
-        char *path = kalloc();
-        char *u_path = kalloc();
+        char *path = slab_alloc(MAX_PATH_LEN);
+        char *u_path = slab_alloc(MAX_PATH_LEN);
         uint64_t path_addr;
         uint32_t flags;
         int ret;
@@ -100,18 +101,18 @@ uint64_t sys_open()
                                 attr.writable = 1;
                         }
                         ret = vfs_create(path, attr);
-                        kfree(path);
-                        kfree(u_path);
+                        slab_free(path);
+                        slab_free(u_path);
                         return ret;
                 }
-                kfree(path);
-                kfree(u_path);
+                slab_free(path);
+                slab_free(u_path);
                 return -1;
         }
         else
         {
-                kfree(path);
-                kfree(u_path);
+                slab_free(path);
+                slab_free(u_path);
                 return ret;
         }
 }
