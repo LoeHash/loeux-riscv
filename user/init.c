@@ -1,173 +1,98 @@
-#include <ulib.h>
+// init.c
 #include <stdio.h>
+#include <ustring.h>
+#include <ulib.h>
+#include <ufile.h>
 
-#define LSH_MAX_LINE 1024 // 命令行最大长度
-#define LSH_MAX_ARGS 64   // 最大参数个数
-
-int lsh_cd(char **args);
-int lsh_help(char **args);
-int lsh_exit(char **args);
-
-char *builtin_str[] = {"cd", "help", "exit"};
-int (*builtin_func[])(char **) = {&lsh_cd, &lsh_help, &lsh_exit};
-
-int lsh_num_builtins()
+// 构造 argv 并 exec 指定的程序
+// path: 要执行的程序路径
+// 返回: -1 表示失败（exec 失败），成功则不返回
+static int run_program(const char *path)
 {
-        return sizeof(builtin_str) / sizeof(char *);
+        // argv[0] 通常是程序名，argv 必须以 NULL 结尾
+        char *argv[2];
+        argv[0] = (char *)path;
+        argv[1] = NULL;
+
+        return exec(path, argv);
 }
 
-// ========== 内建命令实现 ==========
-int lsh_cd(char **args)
+// 尝试执行 lsh（在几个可能的路径里找）
+// 返回: -1 表示全部失败
+static int try_exec_lsh(void)
 {
-        if (args[1] == NULL)
+        // 显式地尝试几个常见路径。
+        const char *paths[] = {
+            "/bin/lsh",
+            "/usr/bin/lsh",
+            "/lsh",
+            "lsh",
+            NULL};
+
+        for (int i = 0; paths[i] != NULL; i++)
         {
-                printf("lsh: expected argument to \"cd\"\n");
-        }
-        else
-        {
-                if (chdir(args[1]) != 0)
+                if (run_program(paths[i]) == 0)
                 {
-                        printf("lsh: cd failed\n");
+                        // 按约定 exec 成功不应返回；
+                        // 但为了保险，若返回 0 也认为要退出重试。
+                        return 0;
                 }
         }
-        return 1;
+        return -1;
 }
 
-int lsh_help(char **args)
+int main(int argc, char *argv[])
 {
-        int i;
-        printf("Stephen Brennan's LSH\n");
-        printf("Type program names and arguments, and hit enter.\n");
-        printf("The following are built in:\n");
-        for (i = 0; i < lsh_num_builtins(); i++)
+        printf("[init] init started, pid=%d, ppid=%d\n",
+               get_pid(), get_ppid());
+
+        // PID 1 的 init 必须持续运行，不能退出。
+        // 用 fork + exec 来跑 lsh，父进程负责 wait 和重启。
+        for (;;)
         {
-                printf("  %s\n", builtin_str[i]);
-        }
-        printf("Use the man command for information on other programs.\n");
-        return 1;
-}
+                int pid = fork();
 
-int lsh_exit(char **args)
-{
-        return 0;
-}
-
-// ========== 程序启动（fork + exec）==========
-int lsh_launch(char **args)
-{
-        pid_t pid;
-        int status;
-
-        pid = fork();
-        if (pid == 0)
-        {
-                // 子进程
-                if (exec(args[0], args) == -1)
+                if (pid < 0)
                 {
-                        printf("lsh: command \"%s\" not found\n", args[0]);
+                        printf("[init] fork failed\n");
+                        // 简单退避，避免疯狂刷屏
+                        for (volatile int i = 0; i < 10000000; i++)
+                                ;
+                        continue;
                 }
-                exit(1);
-        }
-        else if (pid < 0)
-        {
-                printf("lsh: fork failed\n");
-        }
-        else
-        {
-                // 父进程等待指定子进程退出
-                waitpid(pid, &status);
-        }
-        return 1;
-}
 
-// ========== 命令执行 ==========
-int lsh_execute(char **args)
-{
-        int i;
-
-        if (args[0] == NULL)
-        {
-                return 1;
-        }
-
-        for (i = 0; i < lsh_num_builtins(); i++)
-        {
-                if (strcmp(args[0], builtin_str[i]) == 0)
+                if (pid == 0)
                 {
-                        return (*builtin_func[i])(args);
-                }
-        }
+                        // 子进程：尝试 exec lsh
+                        printf("[init] child pid=%d trying to exec lsh...\n", get_pid());
 
-        return lsh_launch(args);
-}
+                        if (try_exec_lsh() < 0)
+                        {
+                                printf("[init] exec lsh failed, child exiting\n");
+                                exit(EXIT_FAILURE);
+                        }
 
-char *lsh_read_line(void)
-{
-        static char buffer[LSH_MAX_LINE];
-        int position = 0;
-        int c;
-
-        while (1)
-        {
-                c = getchar();
-                if (c == EOF)
-                {
+                        // exec 成功不会到达这里
                         exit(EXIT_SUCCESS);
                 }
-                else if (c == '\n')
+
+                // 父进程：等待子进程退出
+                int status = 0;
+                int w = waitpid(pid, &status);
+                if (w < 0)
                 {
-                        buffer[position] = '\0';
-                        return buffer;
-                }
-                else if (position < LSH_MAX_LINE - 1)
-                {
-                        buffer[position++] = c;
+                        printf("[init] waitpid failed\n");
                 }
                 else
                 {
-                        // 命令太长，截断
-                        buffer[position] = '\0';
-                        printf("lsh: command too long\n");
-                        while ((c = getchar()) != '\n' && c != EOF)
-                                ;
-                        return buffer;
+                        printf("[init] lsh (pid=%d) exited, status=%d\n", pid, status);
                 }
+
+                // 稍作延时再重启，避免 lsh 立刻退出导致死循环刷屏
+                for (volatile int i = 0; i < 50000000; i++)
+                        ;
+                printf("[init] restarting lsh...\n");
         }
-}
 
-char **lsh_split_line(char *line)
-{
-        static char *args[LSH_MAX_ARGS];
-        int position = 0;
-        char *token;
-
-        token = strtok(line, " \t\r\n\a");
-        while (token != NULL && position < LSH_MAX_ARGS - 1)
-        {
-                args[position++] = token;
-                token = strtok(NULL, " \t\r\n\a");
-        }
-        args[position] = NULL;
-        return args;
-}
-
-void lsh_loop(void)
-{
-        char *line;
-        char **args;
-        int status;
-
-        do
-        {
-                printf("# ");
-                line = lsh_read_line();
-                args = lsh_split_line(line);
-                status = lsh_execute(args);
-        } while (status);
-}
-
-int main(int argc, char **argv)
-{
-        lsh_loop();
         return 0;
 }
