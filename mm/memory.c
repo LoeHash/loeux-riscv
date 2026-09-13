@@ -323,6 +323,7 @@ void *alloc_page()
         // 这里自增后变为 1，与 free_page 中的 refcount-- 配对，
         // 减到 0 时页才会被挂回空闲链表回收。
         pg->refcount++;
+        pg->slab = NULL; // 默认分配时所属的slab为NULL
 
         release(&memory_lock);
 
