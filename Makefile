@@ -43,6 +43,7 @@ OBJS := asm/kernel_trap_vec.o\
 	kernel/syscall_file.o\
 	mm/memory.o\
 	mm/vm.o\
+	mm/slab.o\
 	drivers/virtio_disk.o\
 	drivers/uart.o\
 	fs/fat12.o\
@@ -54,6 +55,7 @@ OBJS := asm/kernel_trap_vec.o\
 	test/vfs_test.o\
 	test/virtio_disk_test.o\
 	test/vm_test.o\
+	test/slab_test.o\
 
 
 
@@ -123,6 +125,7 @@ kernel/syscall_file.o: kernel/syscall_file.c
 kernel/syscall.o: kernel/syscall.c
 mm/memory.o: mm/memory.c 
 mm/vm.o: mm/vm.c 
+mm/slab.o: mm/slab.c 
 drivers/virtio_disk.o: drivers/virtio_disk.c 
 drivers/uart.o: drivers/uart.c 
 fs/fat12.o: fs/fat12.c 
@@ -134,6 +137,7 @@ test/uart_test.o: test/uart_test.c
 test/vfs_test.o: test/vfs_test.c 
 test/virtio_disk_test.o: test/virtio_disk_test.c 
 test/vm_test.o: test/vm_test.c 
+test/slab_test.o: test/slab_test.c 
 
 
 clean:
