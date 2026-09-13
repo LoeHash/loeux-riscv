@@ -5,6 +5,8 @@
 #define NULL ((void *)0)
 #define NOFILE 64
 
+typedef char padding_t;
+
 struct spinlock
 {
         uint64_t val;
@@ -21,6 +23,9 @@ struct page
         phys_addr_t paddr;
         int32_t refcount;
         uint64_t flags;
+
+        struct slab *slab; // 所属的slab, 可能为NULL
+
         struct page *prev;
         struct page *next;
 };
@@ -200,17 +205,34 @@ struct slab
         void *freelist;    // 当前 slab 第一个空闲 object (这个object内存空间上前8个字节是下一个object的地址)
         struct slab *next; // 同一 size class 下的下一个 slab
 
-        uint64_t object_size; // object 大小
-        uint64_t total;       // 当前 slab 总 object 数
-        uint64_t free;        // 当前剩余空闲 object 数，free == 0 为FULL, free == total 为EMPTY， 0 < free < total 为PARTIAL
-};
+        uint64_t object_size;   // object 大小
+        uint64_t total;         // 当前 slab 总 object 数
+        uint64_t free;          // 当前剩余空闲 object 数，free == 0 为FULL, free == total 为EMPTY， 0 < free < total 为PARTIAL
+} __attribute__((aligned(64))); // 对齐cpu缓存行(对齐后一个slab大小为64字节)
+
+typedef struct slab slab_t;
 
 /// 全局slab缓存器
 /// 保存最初的9个父亲slab
-struct slab_globe_cache
+struct slab_global_cache
 {
         struct spinlock lock;
+        padding_t __pad0[64 - sizeof(struct spinlock)];
+        slab_t *slabs[9];
+} __attribute__((aligned(64)));
+typedef struct slab_global_cache slab_global_cache_t;
 
-        struct slab *slabs[9];
+// slab元数据内存池
+struct slab_meta_pool
+{
+        struct spinlock lock;
+        padding_t __pad0[64 - sizeof(struct spinlock)];
+        void *freelist;
+        slab_t *end; // 指向当前最后一个空闲slab
+        uint64_t total;
+        uint64_t free;
 };
+
+typedef struct slab_meta_pool slab_meta_pool_t;
+
 #endif
