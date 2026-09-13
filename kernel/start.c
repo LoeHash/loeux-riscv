@@ -14,6 +14,7 @@
 #include <uart.h>
 #include <virtio.h>
 #include <test.h>
+#include <slab.h>
 
 extern char _sec_entry64[];
 
@@ -40,7 +41,8 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         init_memory();
         // 构建内核页表 同時啓動mmu
         init_kvmmap();
-
+        // 初始化slab分配器
+        init_slab();
         // 初始化计时器
         init_timer();
         // 开启内核中断异常处理
@@ -94,7 +96,6 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         }
 
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
-
         scheduler();
 }
 
@@ -117,6 +118,5 @@ void secondary_start(uint64_t hart_id, uint64_t data_addr)
         enable_timer_interrupt();
         // 设置一次定时器
         sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
-
         scheduler();
 }
