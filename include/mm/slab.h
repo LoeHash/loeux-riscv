@@ -3,6 +3,8 @@
 #include <memory.h>
 #include <type.h>
 
+#define SLAB_META_POOL_INIT_PAGE_SIZE 3
+
 #define SLAB_SIZE_8_SHIFT 3
 #define SLAB_SIZE_16_SHIFT 4
 #define SLAB_SIZE_32_SHIFT 5
@@ -26,4 +28,12 @@
 #define SLAB_LEVEL_4096_SIZE (1 << SLAB_SIZE_4096_SHIFT)
 #define SLAB_SIZE(level) (1 << SLAB_SIZE_##level##_SHIFT)
 
+#define SLAB_IS_EMPTY(slab) (slab->free == slab->total)
+#define SLAB_IS_FULL(slab) (slab->free == 0)
+#define SLAB_IS_PARTIAL(slab) (slab->free < slab->total && slab->free > 0)
+
+void init_slab();
+void *slab_alloc(uint32_t size);
+void slab_free(void *ptr);
+void slab_dump(void); // for test...
 #endif
