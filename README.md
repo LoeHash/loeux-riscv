@@ -90,8 +90,8 @@ Builds the kernel and launches it in QEMU with a 64 MB FAT12 disk image.
 - [x] `stdin` / `stdout` / `stderr`
 - [x] User programs
 - [x] Shell
+- [x] Slab allocator
 - [ ] Copy-on-Write
-- [ ] Slab allocator
 - [ ] More system calls
 
 ---
