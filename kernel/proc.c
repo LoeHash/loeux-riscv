@@ -801,8 +801,15 @@ int kexec(char *path, char **argv)
         page_table new_page = 0, old_page = t->pg;
         uint64_t user_argv_ptr[MAX_ARG_NUM];
 
-        int fd;
-        char *buf;
+        // 这两个尺寸在统一清理路径(out)里要用，
+        // 因此提到最前面声明，保证任何 goto out 都可见。
+        uint64_t old_size = t->size, new_size = 0;
+
+        // ret 默认 -1（失败）；仅在真正提交（替换页表）时改写为 argc。
+        // fd/buf 初始化为“未持有”，out 里据此安全释放。
+        int ret = -1;
+        int fd = -1;
+        char *buf = NULL;
 
         fd = vfs_open(path, FS_O_READ);
         if (fd == -1)
@@ -813,38 +820,40 @@ int kexec(char *path, char **argv)
         buf = alloc_page();
         if (buf == NULL)
         {
-                // buf 本来就是 NULL，不能再 free_page（会触发 NULL 指针 panic）
+                // OOM 属于不可恢复错误，保留 panic
                 panic(PANIC_ERROR, "kexec: oom!\n");
         }
 
         // 先读取64字节
         if (vfs_read(fd, buf, 64) == -1)
         {
-                free_page(buf);
-                return -1;
+                goto out;
         }
 
         int errcod;
         memcpy(&ehdr, buf, 64);
         if ((errcod = check_elf_header(&ehdr)) != 0)
         {
-                panic(PANIC_ERROR, "kexec: not a efl! ");
-                printk("error code: %d\n", errcod);
-                return -1;
+                // PATH 搜索会逐个尝试候选文件，其中可能夹着目录或非 ELF 文件；
+                // 这里必须优雅失败（返回 -1），调用者才能继续尝试下一个候选，
+                // 否则一个坏文件就能把整个内核带崩。
+                printk("kexec: %s not a valid elf (err %d)\n", path, errcod);
+                goto out;
         }
 
         // 创建一个新的pagetable
         // 同时映射蹦床和trapframe
         new_page = create_task_pgtable(t);
+        if (new_page == 0)
+        {
+                goto out;
+        }
 
-        // 释放旧的pagetable
-        // 旧的用户页表会被丢弃
-        // 栈也会被丢弃
-        // 包括蹦床页和trapframe 但只是取消映射
-        // 原本的trapframe物理页并不会被free
-        uint64_t old_size = t->size, new_size = 0;
-
-        // 老的页表全部释放
+        // 从此刻起，任何失败都必须释放 new_page（见 out）。
+        // 旧页表 old_page 只在最后的提交点才释放：
+        // 失败路径绝不能动它，否则当前进程直接崩。
+        //
+        // 老的页表全部保留
         // 接下来创建新的
         // 走到这里
         // elf头部检查完毕
@@ -854,7 +863,11 @@ int kexec(char *path, char **argv)
         int seg_size_tmp;
         for (int i = 0; i < ehdr.e_phnum; i++)
         {
-                read_phdr(fd, ehdr.e_phoff + i * ehdr.e_phentsize, &phdr);
+                // 以前漏检了 read_phdr 的返回值，段表读失败会带着脏 phdr 继续跑
+                if (read_phdr(fd, ehdr.e_phoff + i * ehdr.e_phentsize, &phdr) < 0)
+                {
+                        goto out;
+                }
                 if (phdr.p_type == PT_LOAD)
                 {
                         // 加载这个段
@@ -863,8 +876,7 @@ int kexec(char *path, char **argv)
                         seg_size_tmp = load_segment(fd, new_page, &phdr);
                         if (seg_size_tmp < 0)
                         {
-                                free_task_pgtable(new_page, new_size);
-                                return -1;
+                                goto out;
                         }
                         new_size += seg_size_tmp;
                 }
@@ -883,8 +895,7 @@ int kexec(char *path, char **argv)
         {
                 if (argc >= MAX_ARG_NUM)
                 {
-                        free_task_pgtable(new_page, new_size);
-                        return -1;
+                        goto out;
                 }
 
                 new_sp -= strlen(argv[argc]) + 1;
@@ -894,15 +905,13 @@ int kexec(char *path, char **argv)
                 {
                         // VERY FUCKING BAD!
                         // BUT ALMOST NEVER HAPPENS.
-                        free_task_pgtable(new_page, new_size);
-                        return -1;
+                        goto out;
                 }
 
                 // 将当前数据拷贝出去
                 if (copyout(new_page, new_sp, argv[argc], strlen(argv[argc]) + 1) < 0)
                 {
-                        free_task_pgtable(new_page, new_size);
-                        return -1;
+                        goto out;
                 }
 
                 user_argv_ptr[argc] = new_sp;
@@ -914,13 +923,11 @@ int kexec(char *path, char **argv)
         new_sp -= (argc + 1) * sizeof(uint64_t);
         if (new_sp < USER_STACK_BASE)
         {
-                free_task_pgtable(new_page, new_size);
-                return -1;
+                goto out;
         }
         if (copyout(new_page, new_sp, (char *)user_argv_ptr, (argc + 1) * sizeof(uint64_t)) < 0)
         {
-                free_task_pgtable(new_page, new_size);
-                return -1;
+                goto out;
         }
 
         t->utf->a1 = new_sp;
@@ -935,16 +942,36 @@ int kexec(char *path, char **argv)
         }
         strcpy_with_terminate(t->name, last, sizeof(t->name));
 
+        // 只有走到这里，用户可见状态才被替换。
+        // 在此之前的任何失败都不会破坏当前进程（页表尚未切换）。
         t->pg = new_page;
         t->size = new_size;
         t->utf->sp = new_sp;
         t->utf->a0 = argc; // crt0 的 _start 直接 call main，main 从 a0 读 argc
         t->utf->sepc = ehdr.e_entry;
 
-        free_task_pgtable(old_page, old_size);
-        free_page(buf);
+        // 页表所有权已转移给 t->pg，out 不能再释放 new_page
+        new_page = 0;
 
-        return argc;
+        free_task_pgtable(old_page, old_size);
+        ret = argc;
+
+out:
+        // 统一清理：失败不 panic，且不泄漏 fd / buf / 半成品页表。
+        // 旧页表 old_page 不在此释放（成功路径已在提交后单独释放）。
+        if (buf)
+        {
+                free_page(buf);
+        }
+        if (fd >= 0)
+        {
+                vfs_close(fd);
+        }
+        if (new_page)
+        {
+                free_task_pgtable(new_page, new_size);
+        }
+        return ret;
 }
 
 // 加载
