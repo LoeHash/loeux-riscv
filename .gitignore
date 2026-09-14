@@ -16,6 +16,7 @@ report
 .vscode
 .vscode/*
 .gdb_history
+.continue
 commit_history.txt
 kernel.dump
 user.dump
