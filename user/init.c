@@ -4,41 +4,16 @@
 #include <ulib.h>
 #include <ufile.h>
 
-// 构造 argv 并 exec 指定的程序
-// path: 要执行的程序路径
-// 返回: -1 表示失败（exec 失败），成功则不返回
-static int run_program(const char *path)
-{
-        // argv[0] 通常是程序名，argv 必须以 NULL 结尾
-        char *argv[2];
-        argv[0] = (char *)path;
-        argv[1] = NULL;
-
-        return exec(path, argv);
-}
-
-// 尝试执行 lsh（在几个可能的路径里找）
-// 返回: -1 表示全部失败
+// 尝试执行 lsh：交给 ulib 的 execvp 在 PATH 里搜索。
+// 返回: -1 表示所有候选目录都没找到（exec 成功不返回）
 static int try_exec_lsh(void)
 {
-        // 显式地尝试几个常见路径。
-        const char *paths[] = {
-            "/bin/lsh",
-            "/usr/bin/lsh",
-            "/lsh",
-            "lsh",
-            NULL};
+        // argv[0] 是程序名，argv 必须以 NULL 结尾
+        char *argv[2];
+        argv[0] = "lsh";
+        argv[1] = NULL;
 
-        for (int i = 0; paths[i] != NULL; i++)
-        {
-                if (run_program(paths[i]) == 0)
-                {
-                        // 按约定 exec 成功不应返回；
-                        // 但为了保险，若返回 0 也认为要退出重试。
-                        return 0;
-                }
-        }
-        return -1;
+        return execvp("lsh", argv);
 }
 
 int main(int argc, char *argv[])

@@ -61,8 +61,9 @@ int lsh_launch(char **args)
         pid = fork();
         if (pid == 0)
         {
-                // 子进程
-                if (exec(args[0], args) == -1)
+                // 子进程：交给 execvp 在 PATH 里搜索命令。
+                // exec 成功不返回；返回即表示所有候选目录都没找到。
+                if (execvp(args[0], args) == -1)
                 {
                         printf("lsh: command \"%s\" not found\n", args[0]);
                 }

@@ -30,6 +30,9 @@ int pwd(char *buf, int max);
 int write(int fd, void *buf, uint64_t count);
 int fork();
 int exec(const char *path, char **argv);
+int execvp(const char *file, char **argv); // 在 PATH 中搜索后 exec
+const char *get_path(void);                // 读取当前搜索路径
+void set_path(const char *path);           // 设置搜索路径 "dir1:dir2:..."
 int get_pid();
 int get_ppid();
 int wait(int *status);

@@ -245,3 +245,106 @@ int pwd(char *buf, int max)
             : "a0", "a1", "a7", "memory");
         return ret;
 }
+
+// ============================ PATH 搜索 ============================
+// 分层说明：内核的 exec() 只负责“给定一个路径 → 加载”，相对路径按 cwd 解析；
+// “去哪些目录找命令”属于策略，放用户态（类 POSIX：execve 不搜 PATH，
+// execvp 才搜）。这样内核 syscall 接口保持最小、稳定，PATH 也能按进程定制。
+
+#define EXEC_PATH_MAX 128 // 与内核 MAX_PATH_LEN 对齐
+
+// 默认搜索路径，程序可用 set_path() 覆盖。
+// 结尾的 '/' 覆盖“用户程序被放在根目录”的当前布局。
+static const char *default_path = "/bin:/usr/bin:/";
+
+const char *get_path(void)
+{
+        return default_path;
+}
+
+void set_path(const char *path)
+{
+        if (path != NULL)
+        {
+                default_path = path;
+        }
+}
+
+static int has_slash(const char *s)
+{
+        for (; *s; s++)
+        {
+                if (*s == '/')
+                {
+                        return 1;
+                }
+        }
+        return 0;
+}
+
+// 在 PATH 的每个目录里尝试 exec "dir/file"。
+// exec 成功不会返回（进程已被替换）；只有当所有候选都失败时才返回 -1。
+int execvp(const char *file, char **argv)
+{
+        const char *path;
+
+        if (file == NULL || file[0] == '\0')
+        {
+                return -1;
+        }
+
+        // 含 '/' 视为显式路径，不搜索（POSIX 语义）
+        if (has_slash(file))
+        {
+                return exec(file, argv);
+        }
+
+        path = default_path;
+        for (;;)
+        {
+                const char *seg = path;
+                const char *sep = path;
+                size_t dirlen;
+                size_t filelen;
+
+                // 取下一个 ':'（或字符串结尾）
+                while (*sep && *sep != ':')
+                {
+                        sep++;
+                }
+                dirlen = (size_t)(sep - seg);
+                filelen = strlen(file);
+
+                int ret = -1;
+                if (dirlen == 0)
+                {
+                        // 空段（如 ":/bin" 或 "a::b"）按 POSIX 表示当前目录：
+                        // 直接用裸文件名，由内核按 cwd 解析。
+                        ret = exec(file, argv);
+                }
+                else if (dirlen + 1 + filelen + 1 <= EXEC_PATH_MAX)
+                {
+                        // 目录 + '/' + 文件名 + '\0' 必须放得下，否则跳过该候选。
+                        char candidate[EXEC_PATH_MAX];
+
+                        memcpy(candidate, seg, dirlen);
+                        candidate[dirlen] = '/';
+                        memcpy(candidate + dirlen + 1, file, filelen + 1);
+
+                        ret = exec(candidate, argv);
+                }
+                // 成功不会走到这里；能到这只能是失败，继续下一个候选
+                if (ret != -1)
+                {
+                        return ret;
+                }
+
+                if (*sep == '\0')
+                {
+                        break;
+                }
+                path = sep + 1;
+        }
+
+        return -1;
+}
