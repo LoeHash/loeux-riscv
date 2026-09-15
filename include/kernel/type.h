@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #define NULL ((void *)0)
 #define NOFILE 64
-
+#define NGROUPS_MAX 32
 typedef char padding_t;
 
 struct spinlock
@@ -147,6 +147,15 @@ struct wait_node
 
 typedef struct wait_node wait_node_t;
 
+struct credentials
+{
+        uint32_t uid;
+        uint32_t gid;
+
+        uint32_t groups[NGROUPS_MAX];
+        uint32_t ngroups;
+};
+
 /// 现在的 task_struct 十分不安全
 /// 尤其是关于 cwd 相关
 /// 未来cwd必须改为inode并引入refcnt等多种特性
@@ -175,9 +184,10 @@ struct task_struct
         void *sleep_chan; // 睡眠通道，见 SLEEP_CHAN_CHILD
         bool in_syscall;
         char cwd[256];             // 工作目录路径字符串
-        struct vfs_node *cwd_node; // 工作目录的 VFS 节点，与 cwd 同步
+        struct vfs_node *cwd_node; // 工作目录的 VFstruct fd_tableS 节点，与 cwd 同步
 
         struct file *ofile[NOFILE]; // Open files
+        // struct fd_table ofile;
 
         uint64_t stvec;         // 当前 task 逻辑上的 stvec
         uint64_t trap_sepc;     // kernel trap 被打断时的 sepc
@@ -185,6 +195,8 @@ struct task_struct
         uint8_t trap_ctx_valid; // 当前 task 是否存在未完成的 kernel trap
 
         wait_node_t sleep_node; // 睡眠等待队列
+
+        struct credentials cred; // 权限
 };
 
 struct cpu

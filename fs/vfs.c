@@ -1,663 +1,868 @@
-#include <type.h>
-#include <lib.h>
 #include <vfs.h>
-#include <spinlock.h>
 #include <panic.h>
-#include <fat12.h>
-#include <char_dev.h>
-#include <printk.h>
-#include <proc.h>
+#include <sleeplock.h>
 #include <slab.h>
+#include <spinlock.h>
+#include <proc.h>
+#include <memory.h>
+#include <fat12.h>
+#include <block_device.h>
+#include <lib.h>
 
-static struct mount_entry *vfs_find_mount(const char *path);
-static int fd_check(int fd);
-static int alloc_fd(struct file *file);
-
-// 注意：fd 现在是 per-process 的，存放在 get_task()->ofile[NOFILE] 中。
-// 全局 fd_table 已移除。alloc_fd/free_fd/fd_check 操作当前 task 的 ofile[]，
-// 用 ts->lk 保护，避免与 fork 复制、scheduler 等路径的竞态。
-struct mount_entry mount_points[MAX_MOUNT_NUM];
-spinlock_t mount_lock;
-spinlock_t fd_lock;
-volatile uint32_t mount_idx = 0;
+static spinlock_t inum_lk = {0};
+static volatile uint64_t _vfs_inum_counter = 0;
+static mount_table_t mount_table = {0};
+static filesystem_registry_t fs_registry = {0};
+static uint64_t vfs_alloc_inum();
+static void vfs_filesystem_init(void);
 
 void init_vfs()
 {
-        init_spinlock(&mount_lock);
-        init_spinlock(&fd_lock);
+        init_spinlock(&inum_lk);
+        inin_spinlock(&mount_table.lock);
+        vfs_filesystem_init();
 }
 
-// 初始化标准输入输出：在当前 task 的 ofile[] 中分配 fd 0/1/2。
-// 必须在 task 上下文调用（依赖 get_task()），典型调用点为 first_ret()。
-// boot 阶段没有 current task，故不能在 kstart 里直接调用。
-void init_vfs_std()
+int vfs_mount(struct block_device *dev,
+              const char *target,
+              const char *fs_type)
 {
-        // alloc_fd 从 0 开始分配
-        vfs_open("/dev/ttyS0", FS_O_READ);  // fd = 0
-        vfs_open("/dev/ttyS0", FS_O_WRITE); // fd = 1
-        vfs_open("/dev/ttyS0", FS_O_WRITE); // fd = 2
+        struct filesystem *fs = NULL;
+        struct super_block *sb = NULL;
+        struct mount *mnt = NULL;
+        struct mount *parent = NULL;
 
-        printk("stdin=0, stdout=1, stderr=2 -> /dev/ttyS0\n");
-}
-
-// 设置文件偏移
-int vfs_seek(int fd, uint64_t offset)
-{
-        if (fd_check(fd) == -1)
+        if (dev == NULL || target == NULL || fs_type == NULL)
         {
                 return -1;
         }
 
-        struct file *f = get_task()->ofile[fd];
+        struct mount *existing = vfs_find_mount(target);
 
-        if (!f || offset > f->size)
-                return -1;
-
-        f->pos = offset;
-        return 0;
-}
-
-static void vfs_kstat_to_stat(const struct vfs_kstat *ks, dev_t dev, struct stat *st)
-{
-        memset(st, 0, sizeof(*st));
-        st->st_dev = dev;
-        st->st_ino = ks->ino;
-        st->st_mode = ks->mode;
-        st->st_nlink = ks->nlink;
-        st->st_uid = ks->uid;
-        st->st_gid = ks->gid;
-        st->st_rdev = ks->rdev;
-        st->st_size = (off_t)ks->size;
-        st->st_blksize = (blksize_t)ks->blksize;
-        st->st_blocks = (blkcnt_t)ks->blocks;
-        st->st_atime = ks->atime;
-        st->st_mtime = ks->mtime;
-        st->st_ctime = ks->ctime;
-}
-
-static int vfs_getattr_fallback(struct file *file, struct vfs_kstat *ks)
-{
-        int is_dir = 0;
-
-        memset(ks, 0, sizeof(*ks));
-        ks->size = file->size;
-        ks->nlink = 1;
-        ks->uid = 0;
-        ks->gid = 0;
-        ks->blksize = 512;
-        ks->blocks = (ks->size + 511) / 512;
-        ks->ino = (uint64_t)file->private;
-
-        if (file->mnt && file->mnt->fs_ops->fs_is_dir)
-                is_dir = file->mnt->fs_ops->fs_is_dir(file->private);
-
-        if (is_dir)
-                ks->mode = S_IFDIR | 0755;
-        else
-                ks->mode = S_IFREG | 0644;
-
-        return 0;
-}
-
-int vfs_fstat(int fd, struct stat *st)
-{
-        struct file *file;
-        struct vfs_kstat ks;
-        int ret;
-
-        if (!st || fd_check(fd) == -1)
-                return -1;
-
-        file = get_task()->ofile[fd];
-        if (!file)
-                return -1;
-
-        memset(st, 0, sizeof(*st));
-        memset(&ks, 0, sizeof(ks));
-
-        acquire_sleep(&file->flk);
-
-        if (file->type == 1)
+        if (existing != NULL &&
+            strcmp(existing->path, target) == 0)
         {
-                struct char_device *cdev = (struct char_device *)file->private;
-                int minor = (int)(cdev - char_devices);
+                goto went_error;
+        }
 
-                release_sleep(&file->flk);
+        // 得到fs实例
+        fs = vfs_get_filesystem(fs_type);
 
-                st->st_dev = 0;
-                st->st_rdev = ((uint64_t)1 << 8) | (uint64_t)(minor & 0xFF);
-                st->st_ino = (ino_t)(minor + 1);
-                st->st_mode = S_IFCHR | 0666;
-                st->st_nlink = 1;
-                st->st_uid = 0;
-                st->st_gid = 0;
-                st->st_size = 0;
-                st->st_blksize = 4096;
-                st->st_blocks = 0;
+        if (fs == NULL)
+        {
+                goto went_error;
+        }
+
+        // 从fs中构建好superblock
+        if (fs->get_super(fs, dev, &sb) < 0)
+        {
+                goto went_error;
+        }
+
+        if (sb == NULL)
+        {
+                goto went_error;
+        }
+
+        mnt = slab_alloc(sizeof(*mnt));
+        if (mnt == NULL)
+        {
+                goto went_error;
+        }
+
+        memset(mnt, 0, sizeof(*mnt));
+
+        // 设置挂载点
+        strcpy(mnt->path, target);
+
+        // 设置此挂载点的sb
+        mnt->sb = sb;
+
+        // 分流root
+        if (strcmp(target, "/") == 0)
+        {
+                acquire(&mount_table.lock);
+
+                if (mount_table.root != NULL)
+                {
+                        release(&mount_table.lock);
+                        goto went_error;
+                }
+
+                mnt->parent = NULL;
+                mount_table.root = mnt;
+
+                release(&mount_table.lock);
+
                 return 0;
         }
 
-        if (file->type != 0 || !file->mnt || !file->mnt->fs_ops)
+        parent = vfs_find_mount(target);
+        if (parent == NULL)
         {
-                release_sleep(&file->flk);
+                goto went_error;
+        }
+
+        mnt->parent = parent;
+
+        // 加入 mount tree
+        acquire(&mount_table.lock);
+
+        mnt->next = parent->child;
+        parent->child = mnt;
+
+        release(&mount_table.lock);
+
+        return 0;
+
+went_error:
+        if (mnt != NULL)
+        {
+                slab_free(mnt);
+        }
+
+        if (sb != NULL && fs != NULL)
+        {
+                fs->kill_sb(sb);
+        }
+
+        return -1;
+}
+
+/// @brief 在 path 指定的位置创建普通文件，并返回新文件 inode。
+/// @param path
+/// @param mode         创建模式
+/// @param inode        inode 指针
+/// @return 成功 0
+int vfs_create(const char *path,
+               uint32_t mode,
+               struct inode **inode)
+{
+        if (path == NULL || inode == NULL)
+                return -1;
+
+        struct inode *parent = NULL;
+
+        char *name = slab_alloc(VFS_MAX_PATH_LEN);
+
+        if (name == NULL)
+                return -1;
+
+        if (vfs_lookup_parent(path, &parent, name) < 0)
+        {
+                slab_free(name);
                 return -1;
         }
 
-        if (file->mnt->fs_ops->fs_getattr)
-                ret = file->mnt->fs_ops->fs_getattr(file->private, &ks);
+        if (parent == NULL ||
+            parent->iops == NULL ||
+            parent->iops->create == NULL)
+        {
+                slab_free(name);
+                return -1;
+        }
+
+        if ((parent->mode & S_IFMT) != S_IFDIR)
+        {
+                slab_free(name);
+                return -1;
+        }
+
+        /*
+         * 创建目录项要求父目录具有：
+         *
+         * MAY_WRITE : 修改目录内容
+         * MAY_EXEC  : 搜索/访问目录
+         */
+        if (vfs_permission(parent,
+                           &get_task()->cred,
+                           MAY_WRITE | MAY_EXEC) < 0)
+        {
+                slab_free(name);
+                return -1;
+        }
+
+        /*
+         * VFS 对外统一只接受权限位。
+         * 普通文件类型由 VFS 负责补上。
+         */
+        mode &= 0777;
+
+        int ret = parent->iops->create(parent,
+                                       name,
+                                       S_IFREG | mode,
+                                       inode);
+
+        slab_free(name);
+
+        return ret;
+}
+
+int vfs_lookup(const char *path, struct inode **inode)
+{
+        if (path == NULL || inode == NULL || path[0] != '/')
+        {
+
+                return -1;
+        }
+
+        struct mount *mnt = vfs_find_mount(path);
+
+        if (mnt == NULL || mnt->sb == NULL || mnt->sb->root == NULL)
+        {
+                return -1;
+        }
+
+        struct inode *current = mnt->sb->root;
+
+        // 计算相对于 mount root 的路径
+        const char *relative = path + strlen(mnt->path);
+
+        if (*relative == '\0')
+        {
+                *inode = current;
+                return 0;
+        }
+
+        if (*relative != '/')
+                return -1;
+
+        relative++;
+
+        char *name = slab_alloc(VFS_MAX_PATH_LEN);
+        if (name == NULL)
+        {
+                return -1;
+        }
+
+        uint64_t len;
+        struct task_struct *task = get_task();
+
+        while (*relative != '\0')
+        {
+                const char *slash = strchr(relative, '/');
+
+                if (slash != NULL)
+                        len = slash - relative;
+                else
+                        len = strlen(relative);
+
+                if (len == 0)
+                {
+                        relative++;
+                        continue;
+                }
+
+                if (len >= VFS_MAX_PATH_LEN)
+                {
+                        slab_free(name);
+                        return -1;
+                }
+
+                memcpy(name, relative, len);
+                name[len] = '\0';
+
+                if (vfs_permission(current,
+                                   &task->cred,
+                                   MAY_EXEC) < 0)
+                {
+                        slab_free(name);
+                        return -1;
+                }
+                if (current->iops == NULL ||
+                    current->iops->lookup == NULL)
+                {
+                        slab_free(name);
+                        return -1;
+                }
+
+                struct inode *next = NULL;
+
+                if (current->iops->lookup(current,
+                                          name,
+                                          &next) < 0)
+                {
+                        slab_free(name);
+                        return -1;
+                }
+
+                if (next == NULL)
+                {
+                        slab_free(name);
+                        return -1;
+                }
+
+                current = next;
+
+                relative += len;
+
+                if (*relative == '/')
+                        relative++;
+        }
+
+        slab_free(name);
+        *inode = current;
+
+        return 0;
+}
+
+struct filesystem *vfs_get_filesystem(const char *name)
+{
+        if (name == NULL)
+                return NULL;
+
+        acquire(&fs_registry.lock);
+
+        struct filesystem *fs = fs_registry.head;
+
+        while (fs != NULL)
+        {
+                if (strcmp(fs->name, name) == 0)
+                        break;
+
+                fs = fs->next;
+        }
+
+        release(&fs_registry.lock);
+
+        return fs;
+}
+
+/// @brief 给定一个绝对路径 path，找到 覆盖该路径的最深层 mount。
+struct mount *vfs_find_mount(const char *path)
+{
+        if (path == NULL || path[0] != '/')
+                return NULL;
+
+        struct mount *mnt = mount_table.root;
+
+        if (mnt == NULL)
+                return NULL;
+
+        while (1)
+        {
+                struct mount *child = mnt->child;
+
+                while (child != NULL)
+                {
+                        if (mount_path_match(child->path, path))
+                                break;
+
+                        child = child->next;
+                }
+
+                if (child == NULL)
+                        return mnt;
+
+                mnt = child;
+        }
+}
+
+/// @brief  解析 path，找到其直接父目录 inode
+///         并将最后一个路径组件写入 name。父目录不存在或路径非法则失败。
+/// @return 失败返回非0值
+int vfs_lookup_parent(const char *path,
+                      struct inode **parent,
+                      char *name)
+{
+        if (path == NULL || parent == NULL || name == NULL)
+                return -1;
+
+        if (path[0] != '/')
+                return -1;
+
+        size_t path_len = strlen(path);
+
+        if (path_len <= 1)
+                return -1;
+
+        /*
+         * 找最后一个 '/'
+         */
+        const char *slash = strrchr(path, '/');
+
+        if (slash == NULL)
+                return -1;
+
+        // 最后一个 component
+
+        const char *last = slash + 1;
+
+        if (*last == '\0')
+                return -1;
+
+        size_t name_len = strlen(last);
+
+        if (name_len >= VFS_MAX_PATH_LEN)
+                return -1;
+
+        memcpy(name, last, name_len);
+        name[name_len] = '\0';
+
+        // 构造父路径
+        char *parent_path = slab_alloc(VFS_MAX_PATH_LEN);
+
+        if (parent_path == NULL)
+                return -1;
+
+        size_t parent_len = slash - path;
+
+        if (parent_len >= VFS_MAX_PATH_LEN)
+        {
+                slab_free(parent_path);
+                return -1;
+        }
+
+        memcpy(parent_path, path, parent_len);
+        parent_path[parent_len] = '\0';
+
+        // 父路径为根目录
+
+        if (parent_len == 0)
+        {
+                parent_path[0] = '/';
+                parent_path[1] = '\0';
+        }
+
+        int ret = vfs_lookup(parent_path, parent);
+
+        slab_free(parent_path);
+
+        return ret;
+}
+
+// fs对象的生命周期在运行期间是不会被销毁的
+/// @brief 注册fs到fs注册表中
+/// 0成功，其他错误
+int vfs_register_filesystem(struct filesystem *fs)
+{
+        if (fs == NULL)
+                return -1;
+
+        acquire(&fs_registry.lock);
+
+        // 检查同名 filesystem
+        struct filesystem *p = fs_registry.head;
+
+        while (p != NULL)
+        {
+                if (strcmp(p->name, fs->name) == 0)
+                {
+                        release(&fs_registry.lock);
+                        return -1;
+                }
+
+                p = p->next;
+        }
+
+        fs->next = fs_registry.head;
+        fs_registry.head = fs;
+
+        release(&fs_registry.lock);
+
+        return 0;
+}
+
+/// @brief 分配inode号
+/// @return inode号(理论上不会失败)
+static uint64_t vfs_alloc_inum()
+{
+        uint64_t inum;
+
+        acquire(&inum_lk);
+        inum = _vfs_inum_counter++;
+        release(&inum_lk);
+
+        return inum;
+}
+
+static void vfs_filesystem_init(void)
+{
+        fs_registry.head = NULL;
+        initlock(&fs_registry.lock, "vfs_fs");
+}
+
+static bool vfs_in_group(const struct credentials *cred,
+                         uint32_t gid)
+{
+        if (cred->gid == gid)
+                return true;
+
+        for (uint32_t i = 0; i < cred->ngroups; i++)
+        {
+                if (cred->groups[i] == gid)
+                        return true;
+        }
+
+        return false;
+}
+
+/// @brief 检查当前凭据是否具有访问 inode 所需的权限。
+/// @param inode       被访问的 inode
+/// @param cred        当前进程权限凭据
+/// @param mask        所需权限，例如 MAY_READ | MAY_WRITE
+/// @return 具有所需权限返回 0，否则返回 -1
+int vfs_permission(const struct inode *inode,
+                   const struct credentials *cred,
+                   uint32_t mask)
+{
+        if (inode == NULL || cred == NULL)
+                return -1;
+
+        /*
+         * root 暂时视为拥有全部权限。
+         */
+        if (cred->uid == 0)
+                return 0;
+
+        uint32_t perm;
+
+        if (cred->uid == inode->uid)
+        {
+                perm = (inode->mode >> 6) & 07;
+        }
+        else if (vfs_in_group(cred, inode->gid))
+        {
+                perm = (inode->mode >> 3) & 07;
+        }
         else
-                ret = vfs_getattr_fallback(file, &ks);
-
-        if (ret < 0)
         {
-                release_sleep(&file->flk);
-                return -1;
+                perm = inode->mode & 07;
         }
 
-        vfs_kstat_to_stat(&ks, (dev_t)((file->mnt - mount_points) + 1), st);
-        release_sleep(&file->flk);
+        if ((mask & MAY_READ) && !(perm & 04))
+                return -1;
+
+        if ((mask & MAY_WRITE) && !(perm & 02))
+                return -1;
+
+        if ((mask & MAY_EXEC) && !(perm & 01))
+                return -1;
+
         return 0;
 }
 
-/*
- * getdents：从目录 fd 的当前位置读取若干定长 struct dirent 到 kbuf。
- * 迭代位置就是 file->pos（作为 FS 私有的 cookie，FAT12 里是目录流字节偏移），
- * 全程持 flk：fork 后父子共享同一 file 时，目录迭代不会交错。
- * 返回填入的字节数；目录结束返回 0；错误返回 -1。
- */
-int64_t vfs_getdents(int fd, void *kbuf, uint64_t count)
+/// @brief 在 path 指定的位置创建目录。
+///
+/// @param path 目录路径，例如 "/a/b"
+/// @param mode 创建权限，例如 0755
+///
+/// @return 成功 0，失败 -1
+int vfs_mkdir(const char *path,
+              uint32_t mode)
 {
-        struct file *file;
-        struct vfs_dirent vde;
-        uint64_t total = 0;
-        int ret;
-
-        if (!kbuf || fd_check(fd) == -1)
+        if (path == NULL)
                 return -1;
 
-        file = get_task()->ofile[fd];
-        if (!file)
+        struct inode *parent = NULL;
+
+        char *name = slab_alloc(VFS_MAX_PATH_LEN);
+
+        if (name == NULL)
                 return -1;
 
-        if (!(file->flags & FS_O_READ) && !(file->flags & FS_O_RW))
-                return -1;
-
-        /* 字符设备不是目录；块文件且 FS 实现了 readdir 才支持 */
-        if (file->type != 0 || !file->mnt || !file->mnt->fs_ops ||
-            !file->mnt->fs_ops->fs_readdir)
-                return -1;
-
-        /* 缓冲区小到连一条都放不下：直接报错，避免误返回 0 被当成 EOF */
-        if (count < sizeof(struct dirent))
-                return -1;
-
-        acquire_sleep(&file->flk);
-
-        if (file->mnt->fs_ops->fs_is_dir &&
-            !file->mnt->fs_ops->fs_is_dir(file->private))
+        if (vfs_lookup_parent(path, &parent, name) < 0)
         {
-                release_sleep(&file->flk);
+                slab_free(name);
                 return -1;
         }
 
-        while (total + sizeof(struct dirent) <= count)
+        if (parent == NULL ||
+            parent->iops == NULL ||
+            parent->iops->mkdir == NULL)
         {
-                ret = file->mnt->fs_ops->fs_readdir(file->private, &file->pos, &vde);
-                if (ret < 0)
-                {
-                        if (total > 0)
-                                break; /* 已读到的条目先交付，下次再报错 */
-                        release_sleep(&file->flk);
-                        return -1;
-                }
-                if (ret == 0)
-                        break; /* 目录结束 */
-
-                struct dirent *de = (struct dirent *)((char *)kbuf + total);
-                memset(de, 0, sizeof(*de));
-                de->d_ino = vde.ino;
-                de->d_off = (int64_t)vde.off;
-                de->d_reclen = (uint16_t)sizeof(struct dirent);
-                de->d_type = vde.type;
-                /* 两端 name 都是 VFS_NAME_MAX+1，FS 侧已保证长度 */
-                strcpy(de->d_name, vde.name);
-
-                total += sizeof(struct dirent);
+                slab_free(name);
+                return -1;
         }
 
-        release_sleep(&file->flk);
-        return (int64_t)total;
+        if ((parent->mode & S_IFMT) != S_IFDIR)
+        {
+                slab_free(name);
+                return -1;
+        }
+
+        struct task_struct *task = get_task();
+
+        /*
+         * 创建目录项需要父目录具有：
+         *
+         * MAY_WRITE : 修改目录内容
+         * MAY_EXEC  : 搜索/访问目录
+         */
+        if (vfs_permission(parent,
+                           &task->cred,
+                           MAY_WRITE | MAY_EXEC) < 0)
+        {
+                slab_free(name);
+                return -1;
+        }
+
+        /*
+         * VFS 对外只接受权限位。
+         * 目录类型由 VFS 负责补上。
+         */
+        mode &= 0777;
+
+        int ret = parent->iops->mkdir(parent,
+                                      name,
+                                      S_IFDIR | mode);
+
+        slab_free(name);
+
+        return ret;
 }
 
-int vfs_create(const char *path, file_attr_t attr)
+/// @brief 删除 path 指定的目录项。
+///
+/// @param path 要删除的文件或目录路径
+///
+/// @return 成功 0，失败 -1
+int vfs_unlink(const char *path)
 {
-        struct mount_entry *mp = vfs_find_mount(path);
-        if (!mp)
+        if (path == NULL)
                 return -1;
 
-        const char *rel_path = path + strlen(mp->mount_point);
-        if (*rel_path == '/')
-                rel_path++;
-        if (*rel_path == '\0')
+        struct inode *parent = NULL;
+
+        char *name = slab_alloc(VFS_MAX_PATH_LEN);
+
+        if (name == NULL)
                 return -1;
 
-        return mp->fs_ops->fs_create(mp->fs_priv, rel_path, attr);
+        if (vfs_lookup_parent(path, &parent, name) < 0)
+        {
+                slab_free(name);
+                return -1;
+        }
+
+        if (parent == NULL ||
+            parent->iops == NULL ||
+            parent->iops->unlink == NULL)
+        {
+                slab_free(name);
+                return -1;
+        }
+
+        if ((parent->mode & S_IFMT) != S_IFDIR)
+        {
+                slab_free(name);
+                return -1;
+        }
+
+        struct task_struct *task = get_task();
+
+        /*
+         * 删除目录项需要父目录具有：
+         *
+         * MAY_WRITE : 修改目录内容
+         * MAY_EXEC  : 搜索/访问目录
+         */
+        if (vfs_permission(parent,
+                           &task->cred,
+                           MAY_WRITE | MAY_EXEC) < 0)
+        {
+                slab_free(name);
+                return -1;
+        }
+
+        int ret = parent->iops->unlink(parent, name);
+
+        slab_free(name);
+
+        return ret;
 }
 
-int vfs_close(int fd)
+int vfs_rmdir(const char *path)
 {
-        if (fd_check(fd))
+        if (path == NULL)
+                return -1;
+
+        struct inode *parent = NULL;
+
+        char *name = slab_alloc(VFS_MAX_PATH_LEN);
+
+        if (name == NULL)
+                return -1;
+
+        if (vfs_lookup_parent(path, &parent, name) < 0)
         {
+                slab_free(name);
                 return -1;
         }
 
-        struct task_struct *ts = get_task();
-        struct file *file;
-        acquire(&ts->lk);
-        file = ts->ofile[fd];
-        if (!file)
+        if (parent == NULL ||
+            parent->iops == NULL ||
+            parent->iops->rmdir == NULL)
         {
-                release(&ts->lk);
+                slab_free(name);
                 return -1;
         }
-        // 先摘除 ofile 槽位，再释放引用，
-        // 避免 file_close 在持锁时阻塞过久，也避免重复 close。
-        ts->ofile[fd] = NULL;
-        release(&ts->lk);
 
-        file_close(file);
-        return 0;
+        if ((parent->mode & S_IFMT) != S_IFDIR)
+        {
+                slab_free(name);
+                return -1;
+        }
+
+        struct task_struct *task = get_task();
+
+        /*
+         * 删除目录项需要父目录具有：
+         *
+         * MAY_WRITE : 修改目录内容
+         * MAY_EXEC  : 搜索/访问目录
+         */
+        if (vfs_permission(parent,
+                           &task->cred,
+                           MAY_WRITE | MAY_EXEC) < 0)
+        {
+                slab_free(name);
+                return -1;
+        }
+
+        int ret = parent->iops->rmdir(parent, name);
+
+        slab_free(name);
+
+        return ret;
 }
 
-// 释放对 struct file 的一次引用。
-// refcount 归 0 时才真正调用底层 fs_close / cdev close 并 slab_free。
-// 多个进程通过 fork 共享同一 struct file 时，各自 close 只 decref，
-// 最后一个 close 才回收底层资源（Unix 经典语义）。
-void file_close(struct file *file)
+/// @brief 打开一个文件。
+///
+/// @param path 文件路径
+/// @param flags 打开标志
+/// @return 成功返回 fd，失败返回 -1
+int vfs_open(const char *path, uint32_t flags)
 {
-        if (!file)
-        {
-                return;
-        }
-        if (__atomic_sub_fetch(&file->refcount, 1, __ATOMIC_ACQ_REL) > 0)
-        {
-                return;
-        }
+        if (path == NULL)
+                return -1;
 
-        // 最后一个引用：回收底层资源
-        if (file->type == 1)
+        struct task_struct *task = get_task();
+
+        if (task == NULL)
+                return -1;
+
+        struct inode *inode = NULL;
+
+        /*
+         * O_CREAT：
+         * 文件不存在时创建。
+         */
+        if (flags & O_CREAT)
         {
-                struct char_device *cdev = (struct char_device *)file->private;
-                if (cdev->ops->close)
+                if (vfs_lookup(path, &inode) < 0)
                 {
-                        cdev->ops->close(cdev->priv);
+                        uint32_t mode = 0666;
+
+                        if (vfs_create(path, mode, &inode) < 0)
+                                return -1;
+                }
+                else if (flags & O_EXCL)
+                {
+                        return -1;
                 }
         }
-        else if (file->type == 0)
+        else
         {
-                if (file->mnt->fs_ops->fs_close(file) < 0)
-                {
-                        // 底层关闭失败仍要释放 file 结构，避免泄漏
-                }
-                file->mnt->fs_ops->fs_free_node(file->private);
+                if (vfs_lookup(path, &inode) < 0)
+                        return -1;
         }
 
-        slab_free(file);
-}
+        if (inode == NULL)
+                return -1;
 
-int64_t vfs_write(int fd, const void *buf, uint64_t count)
-{
+        /*
+         * O_DIRECTORY 要求目标必须是目录。
+         */
+        if (flags & O_DIRECTORY)
+        {
+                if ((inode->mode & S_IFMT) != S_IFDIR)
+                        return -1;
+        }
 
-        if (fd_check(fd) == -1)
+        /*
+         * 根据打开方式检查权限。
+         */
+        uint32_t access = flags & O_ACCMODE;
+
+        uint32_t permission = 0;
+
+        if (access == O_RDONLY)
+                permission |= MAY_READ;
+        else if (access == O_WRONLY)
+                permission |= MAY_WRITE;
+        else if (access == O_RDWR)
+                permission |= MAY_READ | MAY_WRITE;
+
+        if (vfs_permission(inode,
+                           &task->cred,
+                           permission) < 0)
         {
                 return -1;
         }
 
-        struct file *file = get_task()->ofile[fd];
-        if (!file)
+        /*
+         * O_TRUNC：
+         * 这里只负责语义检查。
+         *
+         * 真正截断文件需要 filesystem 提供对应操作，
+         * 目前 file_operations 还没有 truncate。
+         */
+        if (flags & O_TRUNC)
         {
+                /*
+                 * TODO: truncate
+                 */
+        }
+
+        struct file *file = slab_alloc(sizeof(*file));
+
+        if (file == NULL)
                 return -1;
-        }
 
-        if (!(file->flags & FS_O_WRITE) && !(file->flags & FS_O_RW))
-        {
-                return -1;
-        }
+        memset(file, 0, sizeof(*file));
 
-        // 串行化写：fork 后父子共享同一个 struct file（及同一个 flk），
-        // 并发写 stdout 时在此排队，保证一次 write 的内容不被打断。
-        acquire_sleep(&file->flk);
-
-        uint64_t out_len = 0;
-        int ret;
-        if (file->type == 1)
-        {
-                struct char_device *cdev = (struct char_device *)file->private;
-
-                ret = cdev->ops->write(cdev->priv, buf, count, &out_len);
-                if (ret < 0)
-                {
-                        release_sleep(&file->flk);
-                        return -1;
-                }
-                release_sleep(&file->flk);
-                return out_len;
-        }
-
-        if (file->type == 0)
-        {
-                ret = file->mnt->fs_ops->fs_write(file, buf, count, &out_len);
-                if (ret < 0)
-                {
-                        release_sleep(&file->flk);
-                        return -1;
-                }
-
-                file->pos += out_len;
-
-                release_sleep(&file->flk);
-                return out_len;
-        }
-
-        release_sleep(&file->flk);
-        return -1;
-}
-
-int64_t vfs_read(int fd, void *buf, uint64_t count)
-{
-        if (fd_check(fd) == -1)
-        {
-                return -1;
-        }
-
-        struct file *file = get_task()->ofile[fd];
-        if (!file)
-        {
-                return -1;
-        }
-
-        if (!(file->flags & FS_O_READ) && !(file->flags & FS_O_RW))
-        {
-                return -1;
-        }
-
-        // 串行化读, 保护 pos 的原子性
-        acquire_sleep(&file->flk);
-
-        uint64_t out_len = 0;
-        int ret;
-        if (file->type == 1)
-        {
-                struct char_device *cdev = (struct char_device *)file->private;
-                ret = cdev->ops->read(cdev->priv, buf, count, &out_len);
-                if (ret < 0)
-                {
-                        release_sleep(&file->flk);
-                        return -1;
-                }
-                release_sleep(&file->flk);
-                return out_len;
-        }
-
-        if (file->type == 0)
-        {
-                ret = file->mnt->fs_ops->fs_read(file, buf, count, &out_len);
-                if (ret < 0)
-                {
-                        release_sleep(&file->flk);
-                        return -1;
-                }
-
-                file->pos += out_len;
-
-                release_sleep(&file->flk);
-                return out_len;
-        }
-
-        release_sleep(&file->flk);
-        return -1;
-}
-
-int vfs_open(const char *path, int flags)
-{
-
-        if (strncmp(path, DEV_PATH_PREFIX, DEV_PATH_PREFIX_LEN) == 0)
-        {
-                const char *dev_name = path + DEV_PATH_PREFIX_LEN;
-                struct char_device *cdev = vfs_find_chardev(dev_name);
-                if (!cdev)
-                {
-                        return -1;
-                }
-
-                struct file *file = slab_alloc(sizeof(struct file));
-                if (!file)
-                {
-                        return -1;
-                }
-
-                file->mnt = NULL;
-                file->private = cdev;
-                file->flags = flags;
-                file->pos = 0;
-                file->type = 1;     // 字符设备
-                file->refcount = 1; // 首次打开，引用计数为 1
-                init_sleeplock(&file->flk);
-
-                if (cdev->ops->open && cdev->ops->open(cdev->priv, flags) < 0)
-                {
-                        slab_free(file);
-                        return -1;
-                }
-
-                int fd = alloc_fd(file);
-                if (fd < 0)
-                {
-                        slab_free(file);
-                        return -1;
-                }
-                return fd;
-        }
-
-        struct vfs_node *vnode = vfs_lookup(path);
-
-        if (!vnode)
-        {
-                // not exist.
-                return -2;
-        }
-
-        struct file *file = slab_alloc(sizeof(struct file));
-        if (!file)
-        {
-                vnode->mount->fs_ops->fs_free_node(vnode->private);
-                slab_free(vnode);
-                return -1;
-        }
-
-        file->mnt = vnode->mount;
-        file->private = vnode->private;
-        file->flags = flags;
+        file->inode = inode;
         file->pos = 0;
-        file->type = 0;
-        file->size = vnode->size;
-        file->refcount = 1; // 首次打开，引用计数为 1
-        init_sleeplock(&file->flk);
+        file->flags = flags;
+        file->refcount = 1;
 
-        // 调用文件系统的open
-        // 检查文件存在，权限等信息
-        int ret = vnode->mount->fs_ops->fs_open(vnode->private, file, flags);
-        if (ret == -1)
-        {
-                vnode->mount->fs_ops->fs_free_node(vnode->private);
-                slab_free(vnode);
-                slab_free(file);
-                return -1;
-        }
+        /*
+         * file_operations 来自具体 inode->sb->fs->fops
+         */
+        file->fops = inode->fops;
 
-        int fd = alloc_fd(file);
-        if (fd == -1)
-        {
-                vnode->mount->fs_ops->fs_close(file);
-                vnode->mount->fs_ops->fs_free_node(vnode->private);
-                slab_free(vnode);
-                slab_free(file);
-                return -1;
-        }
+        /*
+         * O_APPEND：
+         * 初始位置放到文件末尾。
+         */
+        if (flags & O_APPEND)
+                file->pos = inode->size;
 
-        slab_free(vnode);
-
-        return fd;
-}
-
-/// @brief 返回 vfs_node
-struct vfs_node *vfs_lookup(const char *path)
-{
-        struct mount_entry *mp = vfs_find_mount(path);
-
-        if (mp == NULL)
-        {
-                return NULL;
-        }
-
-        const char *rel_path = path + strlen(mp->mount_point);
-        if (*rel_path == '/')
-        {
-                rel_path++;
-        }
-
-        // rel_path 为空串时表示挂载点根目录，直接传给 fs_lookup，
-        // 文件系统自己判断空串为根目录（如 fat12_lookup 检查 *path == '\0'）
-        void *priv_node = NULL;
-        int ret = mp->fs_ops->fs_lookup(mp->fs_priv, rel_path, &priv_node);
-        if (ret < 0 || !priv_node)
-        {
-                return NULL;
-        }
-
-        struct vfs_node *vnode = slab_alloc(sizeof(struct vfs_node));
-
-        if (!vnode)
-        {
-                // 文件系统负责释放 priv_node
-                mp->fs_ops->fs_free_node(priv_node);
-                return NULL;
-        }
-
-        vnode->mount = mp;
-        vnode->private = priv_node;
-        vnode->size = ret;
-        vnode->is_dir = mp->fs_ops->fs_is_dir ? mp->fs_ops->fs_is_dir(priv_node) : 0;
-
-        return vnode;
-}
-
-int vfs_mount(char *mount_path, struct block_device *bdev, FSTYPE type)
-{
-        struct mount_entry *mnt;
-        void *fs_priv = NULL;
-        struct file_operation *ops = NULL;
-
-        switch (type)
-        {
-        case FAT12:
-                ops = &fat12_ops;
-                fs_priv = ops->fs_mount(bdev);
-                break;
-
-        default:
-                break;
-        }
-
-        if (fs_priv == NULL)
-        {
-                return -1;
-        }
-
-        acquire(&mount_lock);
-        if (mount_idx >= MAX_MOUNT_NUM)
-        {
-                release(&mount_lock);
-                return -1;
-        }
-        mnt = &mount_points[mount_idx++];
-        release(&mount_lock);
-
-        mnt->device = bdev;
-        mnt->fs_ops = ops;
-        mnt->fs_priv = fs_priv;
-        int tmp_len = strlen(mount_path) + 1;
-        memcpy(mnt->mount_point, mount_path, tmp_len > 32 ? 31 : tmp_len);
-        if (tmp_len > 32)
-        {
-                mnt->mount_point[31] = '\0';
-        }
-
-        return 0;
-}
-
-static struct mount_entry *vfs_find_mount(const char *path)
-{
-        struct mount_entry *the_best = NULL;
-        int best_len = 0;
-
-        for (int i = 0; i < mount_idx; i++)
-        {
-                struct mount_entry *mnt = &mount_points[i];
-                int len = strlen(mnt->mount_point);
-
-                // 如果路径以挂载点开头
-                if (strncmp(path, mnt->mount_point, len) == 0)
-                {
-
-                        if (len > 1)
-                        {
-                                char next = path[len];
-                                if (next != '/' && next != '\0')
-                                {
-                                        continue;
-                                }
-                        }
-
-                        // 最长的
-                        if (len > best_len)
-                        {
-                                best_len = len;
-                                the_best = mnt;
-                        }
-                }
-        }
-
-        return the_best;
-}
-
-// 在当前 task 的 ofile[] 中找一个空槽位存放 file。
-// 用 ts->lk 保护，与 fork 复制 ofile、scheduler 等路径互斥。
-static int alloc_fd(struct file *file)
-{
-        struct task_struct *ts = get_task();
+        /*
+         * 找一个空闲 fd。
+         */
         int fd = -1;
-        acquire(&ts->lk);
+
+        acquire(&task->lk);
+
         for (int i = 0; i < NOFILE; i++)
         {
-                if (ts->ofile[i] == NULL)
+                if (task->ofile[i] == NULL)
                 {
+                        task->ofile[i] = file;
                         fd = i;
-                        ts->ofile[i] = file;
                         break;
                 }
         }
-        release(&ts->lk);
-        return fd;
-}
 
-static int fd_check(int fd)
-{
-        // fd 是 per-process 的，范围 [0, NOFILE)
-        if (fd < 0 || fd >= NOFILE)
+        release(&task->lk);
+
+        if (fd < 0)
         {
+                slab_free(file);
                 return -1;
         }
 
-        return 0;
+        return fd;
 }

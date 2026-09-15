@@ -6,192 +6,275 @@
 #include <stat.h>
 #include <dirent.h>
 
+#define MAY_READ 0x01
+#define MAY_WRITE 0x02
+#define MAY_EXEC 0x04
+
 /*
- * 文件系统向 VFS 报告的通用元数据。各 FS 填自己能提供的字段，
- * 缺失项置 0。VFS 再补 st_dev 并转换成用户可见的 struct stat。
+ * inode mode
+ *
+ * 高位：文件类型
+ * 低位：文件权限
  */
-struct vfs_kstat
+
+/* file type */
+#define S_IFMT 0170000
+#define S_IFREG 0100000 /* regular file */
+#define S_IFDIR 0040000 /* directory */
+#define S_IFCHR 0020000 /* character device */
+#define S_IFBLK 0060000 /* block device */
+#define S_IFLNK 0120000 /* symbolic link */
+
+/* owner permission */
+#define S_IRUSR 0000400
+#define S_IWUSR 0000200
+#define S_IXUSR 0000100
+
+/* group permission */
+#define S_IRGRP 0000040
+#define S_IWGRP 0000020
+#define S_IXGRP 0000010
+
+/* other permission */
+#define S_IROTH 0000004
+#define S_IWOTH 0000002
+#define S_IXOTH 0000001
+
+#define S_IRWXU (S_IRUSR | S_IWUSR | S_IXUSR)
+#define S_IRWXG (S_IRGRP | S_IWGRP | S_IXGRP)
+#define S_IRWXO (S_IROTH | S_IWOTH | S_IXOTH)
+
+/* access mode */
+#define O_RDONLY 0x0000
+#define O_WRONLY 0x0001
+#define O_RDWR 0x0002
+
+#define O_ACCMODE 0x0003
+
+/* open behavior */
+#define O_CREAT 0x0004
+#define O_EXCL 0x0008
+#define O_TRUNC 0x0010
+#define O_APPEND 0x0020
+#define O_DIRECTORY 0x0040
+
+#define VFS_FS_NAME_MAX 64
+#define VFS_MAX_PATH_LEN 128 // 最长就是128的path描述
+#define VFS_MAX_FD_NUM 64
+
+struct filesystem;
+struct super_block;
+struct mount;
+struct inode;
+struct file;
+struct file_operations;
+
+struct filesystem_registry
 {
+        struct filesystem *head;
+
+        struct spinlock lock;
+};
+
+typedef struct filesystem_registry filesystem_registry_t;
+
+/// @note fs和sb的关系在于: 一个是描述数据的组织方式, 一个是描述该以什么样的方式读取
+/*
+ * 文件系统类型
+ */
+struct filesystem
+{
+        const char name[VFS_FS_NAME_MAX];
+
+        int (*get_super)(struct filesystem *fs,
+                         struct block_device *dev,
+                         struct super_block **sb);
+
+        void (*kill_sb)(struct super_block *sb);
+
+        struct file_operations *fops;
+        struct inode_operations *iops;
+
+        struct filesystem *next;
+};
+
+typedef struct filesystem filesystem_t;
+
+/*
+ * 一个具体的挂载点
+ * /media/loe -> 某个 FAT12 super_block
+ */
+struct mount
+{
+        char path[VFS_MAX_PATH_LEN];
+
+        struct super_block *sb;
+
+        struct mount *parent;
+        struct mount *child;
+        struct mount *next;
+};
+
+typedef struct mount mount_t;
+
+struct mount_table
+{
+        struct mount *root;
+
+        struct spinlock lock;
+};
+
+typedef struct mount_table mount_table_t;
+
+/*
+ * 一个具体的文件系统实例
+ *
+ * 如：loeux.img 被作为 FAT12 挂载到 /media/loe
+ */
+struct super_block
+{
+        struct filesystem *fs;
+        struct block_device *dev;
+
+        struct inode *root;
+
+        void *private;
+};
+
+typedef struct super_block super_block_t;
+
+struct inode
+{
+        struct super_block *sb;
+
         uint64_t ino;
+
         uint32_t mode;
-        uint32_t nlink;
+
         uint32_t uid;
         uint32_t gid;
-        uint64_t rdev;
+
         uint64_t size;
-        uint64_t blksize;
-        uint64_t blocks;
-        int64_t atime;
-        int64_t mtime;
-        int64_t ctime;
+
+        struct inode_operations *iops;
+        struct file_operations *fops;
+
+        void *private;
+
+        uint32_t refcount;
 };
 
+typedef struct inode inode_t;
+
 /*
- * 文件系统向 VFS 报告的一条通用目录项。
- * 名字解码、隐藏项（已删除/LFN/卷标）过滤都由具体 FS 完成，
- * VFS 只负责翻译成用户 ABI struct dirent。
+ * 一次 open 对应的 open file description
+ *
+ * fork / dup 后可以被多个 fd 共享。
  */
-struct vfs_dirent
-{
-        uint64_t ino;                /* inode 号（同 vfs_kstat.ino 规则） */
-        uint64_t off;                /* 下一条目的 cookie，FS 私有语义 */
-        uint8_t type;                /* DT_* 类型 */
-        char name[VFS_NAME_MAX + 1]; /* 解码后的文件名 */
-};
-
-// 文件打开标志
-#define FS_O_READ 0x01   // bit 0
-#define FS_O_WRITE 0x02  // bit 1
-#define FS_O_RW 0x03     // READ | WRITE
-#define FS_O_EXEC 0x04   // bit 2
-#define FS_O_CREAT 0x08  // bit 3
-#define FS_O_TRUNC 0x10  // bit 4
-#define FS_O_APPEND 0x20 // bit 5
-
-// 目录权限
-#define FS_MODE_READ 0400
-#define FS_MODE_WRITE 0200
-#define FS_MODE_EXEC 0100
-#define ROOT_FD 0
-
-#define MAX_MOUNT_NUM 16
-#define MAX_FD_NUM 256
-#define DEV_PATH_PREFIX "/dev/"
-#define DEV_PATH_PREFIX_LEN 5
-
-typedef int fd_t;
-typedef uint64_t fs_off_t;
-
-/// @brief 文件模式
-/*
-        从低位开始算
-                0x1: 表示可读
-                0x2: 表示可写
-                0x4: 表示可执行
-                0x8: 表示目录
-                0x10及以后的位: 表示其他
-*/
-typedef int file_mode_t;
-
-/// @brief 检查文件模式是否具有某权限
-#define HAS_PERM(fm, offset) (((fm) >> (offset)) & 1U)
-#define SETPERM(fm, offset) ((fm) |= (1U << (offset)))
-#define IRPERM 0
-#define IWPERM 1
-#define IXPERM 2
-#define ISDIR 3
-
-/// @brief 通用文件属性（跨文件系统）
-/// VFS 层使用此结构传递文件属性，各文件系统自行转换为内部属性格式。
-/// 例如 FAT12 通过 fat12_attr_from_generic() 转换为 FAT 属性字节。
-typedef struct
-{
-        int is_dir;   // 是否为目录
-        int readable; // 可读
-        int writable; // 可写
-} file_attr_t;
-
-struct mount_entry
-{
-        char mount_point[32];
-        struct block_device *device;
-        struct file_operation *fs_ops;
-        void *fs_priv;
-};
-
 struct file
 {
-        struct mount_entry *mnt; // 这个文件属于哪个挂载点
-        uint64_t pos;            // 文件位置信息
-        uint64_t offset;         // 当前读写位置 （已弃用）
-        uint64_t size;           // 当前读写位置
-        int flags;               // 打开时的标志
+        struct inode *inode;
+
+        uint64_t pos;
+        uint32_t flags;
+
+        struct file_operations *fops;
+
         void *private;
-        int type; // 0 块设备 1 字符设备
-        // 引用计数：fork 后父子进程共享同一个 struct file（共享读写位置），
-        // 每次共享 refcount++，每次 close refcount--，归 0 才真正释放底层资源。
-        // 使用原子操作修改，避免 SMP 下父子进程同时 close 时的竞态。
-        int refcount;
 
-        // 串行化对该 file 的访问：保护 pos（读写位置）以及底层 read/write 的原子性。
-        // fork 后父子共享同一个 struct file，因此也共享这把锁——父子并发写同一
-        // 文件（如 stdout）时会被这把锁排队，避免输出交错。
-        // 必须用 init_sleeplock 初始化（在 vfs_open 中完成），否则 wait_queue
-        // 未形成循环链表，release 时 wakeup 会解引用 NULL 触发缺页。
-        sleeplock_t flk;
+        uint32_t refcount;
+
+        struct sleeplock slk;
 };
 
-struct vfs_node
+typedef struct file file_t;
+
+/*
+ * 进程自己的 fd 表
+ */
+struct fd_table
 {
-        struct mount_entry *mount;
-        void *private;
-        uint64_t size;
-        uint8_t is_dir;
-        int refcount;
-        struct vfs_node *next; // 链表指针
+        struct file *files[VFS_MAX_FD_NUM];
+
+        struct spinlock lock;
 };
 
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-// 所有的文件系统都不应直接修改file的任何属性，原因如下:
-// 1. 语义不明
-// 2. 与vfs层逻辑混乱
-// 3. seeking...
-// file
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-// lookup 返回值语义
-// 返回值是文件大小
-struct file_operation
+/*
+ * inode 层操作
+ *
+ * 操作“文件 / 目录对象本身”
+ */
+struct inode_operations
 {
-        void *(*fs_mount)(struct block_device *bdev);
-        int (*fs_lookup)(void *fs_priv, const char *rel_path, void **out_node);
-        void (*fs_free_node)(void *out_node);
-        int (*fs_open)(void *node, struct file *file, int flags);
-        int (*fs_read)(struct file *file, void *buf, uint64_t count, uint64_t *out_len);
-        int (*fs_write)(struct file *file, const void *buf, uint64_t count, uint64_t *out_len);
-        int (*fs_close)(struct file *file);
-        int (*fs_create)(void *fs_priv, const char *rel_path, file_attr_t attr);
-        /// @brief 判断节点是否为目录
-        int (*fs_is_dir)(void *node);
-        /// @brief 读取节点元数据（POSIX fstat/stat 的 FS 侧实现）
-        int (*fs_getattr)(void *node, struct vfs_kstat *out);
-        /// @brief 读取一个目录项（getdents 的 FS 侧实现）
-        /// *cookie 是 FS 私有迭代位置（FAT12 为目录流字节偏移），
-        /// 命中时填 out、推进 *cookie 并返回 1；目录结束返回 0；出错返回 -1。
-        int (*fs_readdir)(void *node, uint64_t *cookie, struct vfs_dirent *out);
+        int (*lookup)(struct inode *dir,
+                      const char *name,
+                      struct inode **inode);
+
+        int (*create)(struct inode *dir,
+                      const char *name,
+                      uint32_t mode,
+                      struct inode **inode);
+
+        int (*mkdir)(struct inode *dir,
+                     const char *name,
+                     uint32_t mode);
+
+        int (*rmdir)(struct inode *dir,
+                     const char *name);
+
+        int (*unlink)(struct inode *dir,
+                      const char *name);
+
+        int (*readdir)(struct inode *dir,
+                       uint64_t *offset,
+                       struct vfs_dirent *dirent);
+
+        int (*getattr)(struct inode *inode,
+                       struct vfs_kstat *stat);
 };
 
-typedef enum
+/*
+ * file 层操作
+ *
+ * 操作“已经 open 的文件”
+ * 对于file 和 file_operations:
+ * process
+ * │
+ * └── fd_table[3]
+ *         │
+ *         ▼
+ *      file
+ *      ├── inode ─────► hello.txt
+ *      ├── pos = 0
+ *      ├── flags
+ *      └── fops ──────► fat12_file_ops
+ *                             │
+ *                             ├── read  → fat12_read
+ *                             ├── write → fat12_write
+ *                             ├── seek  → fat12_seek
+ *                             └── close → fat12_close
+ */
+struct file_operations
 {
+        int64_t (*read)(struct file *file,
+                        void *buf,
+                        uint64_t count);
 
-        FAT12,
-        FAT32,
-        FS_RAMFS
-} FSTYPE;
+        int64_t (*write)(struct file *file,
+                         const void *buf,
+                         uint64_t count);
 
-extern struct mount_entry mount_points[MAX_MOUNT_NUM];
-void init_vfs(void);
-void init_vfs_std();
-int vfs_create(const char *path, file_attr_t attr);
-int vfs_close(int fd);
-int64_t vfs_write(int fd, const void *buf, uint64_t count);
-int64_t vfs_read(int fd, void *buf, uint64_t count);
-int vfs_open(const char *path, int flags);
-int vfs_seek(int fd, uint64_t offset);
-int vfs_fstat(int fd, struct stat *st);
-int64_t vfs_getdents(int fd, void *buf, uint64_t count);
-struct vfs_node *vfs_lookup(const char *path);
-int vfs_mount(char *mount_path, struct block_device *bdev, FSTYPE type);
-void print_mount_table(void);
-void test_fat12_operations(void);
+        int64_t (*seek)(struct file *file,
+                        int64_t offset,
+                        int whence);
 
-// 释放对 struct file 的一次引用：refcount-- 归 0 时真正调用底层 fs_close
-// 并 free_page。供 vfs_close 与 task 退出清理路径使用。
-// 调用者必须已经把 file 从 ofile[] 摘除（避免 double close）。
-void file_close(struct file *file);
+        int (*close)(struct file *file);
+};
+
+typedef struct inode_operations inode_operations_t;
+typedef struct file_operations file_operations_t;
+
+int vfs_mount(struct block_device *dev,
+              const char *target,
+              const char *fs_type);
 #endif
