@@ -35,27 +35,32 @@ uint64_t sys_pwd()
 uint64_t sys_chdir()
 {
         struct task_struct *ts = get_task();
-        char *path = slab_alloc(MAX_PATH_LEN);
-        char *u_path = slab_alloc(MAX_PATH_LEN);
+
         uint64_t path_addr;
-        uint32_t flags;
-        int ret;
 
-        get_arg_addr(0, &path_addr); // a0 = path
+        get_arg_addr(0,
+                     &path_addr);
 
-        if (copyinstr(ts->pg, u_path, path_addr, MAX_PATH_LEN) < 0)
+        char *path =
+                slab_alloc(MAX_PATH_LEN);
+
+        if (path == NULL)
+                return -1;
+
+        if (copyinstr(ts->pg,
+                      path,
+                      path_addr,
+                      MAX_PATH_LEN) < 0)
         {
+                slab_free(path);
                 return -1;
         }
-        // 构建绝对路径
-        do_build_user_path(path, u_path, ts->cwd);
 
-        struct task_struct *t = get_task();
-        acquire(&t->lk);
-        ret = set_cwd(t, path);
-        release(&t->lk);
+        int ret =
+                set_cwd(ts,
+                        path);
+
         slab_free(path);
-        slab_free(u_path);
 
         return ret;
 }

@@ -61,40 +61,46 @@ void init_user()
         release(&ts->lk);
 }
 
-/// @brief 设置进程工作目录：通过 VFS 验证路径有效性
+/// @brief 设置进程工作目录。
 /// @param ts 目标进程
-/// @param path 绝对路径（必须以 / 开头）
-/// @return 0 成功, -1 路径不存在或不是目录
-int set_cwd(struct task_struct *ts, const char *path)
+/// @param path 路径
+/// @return 0 成功，-1 失败
+int set_cwd(struct task_struct *ts,
+            const char *path)
 {
-        if (!path || !ts)
+        if (ts == NULL ||
+            path == NULL)
                 return -1;
 
-        // 通过 VFS 解析路径，获取节点
-        struct vfs_node *node = vfs_lookup(path);
-        if (node == NULL)
-        {
-                return -1; // 路径不存在
-        }
+        struct inode *inode = NULL;
 
-        // 必须是目录
-        if (!node->is_dir)
+        if (vfs_lookup(path,
+                       &inode) < 0)
         {
-                node->mount->fs_ops->fs_free_node(node->private);
-                slab_free(node);
                 return -1;
         }
 
-        // 释放旧的工作目录节点
-        if (ts->cwd_node != NULL)
+        if (inode == NULL)
+                return -1;
+
+        if ((inode->mode & S_IFMT) != S_IFDIR)
         {
-                ts->cwd_node->mount->fs_ops->fs_free_node(ts->cwd_node->private);
-                slab_free(ts->cwd_node);
+                inode_put(inode);
+                return -1;
         }
 
-        ts->cwd_node = node;
-        strncpy(ts->cwd, path, 255);
-        ts->cwd[255] = '\0';
+        acquire(&ts->lk);
+
+        struct inode *old =
+                ts->cwd;
+
+        ts->cwd = inode;
+
+        release(&ts->lk);
+
+        if (old)
+                inode_put(old);
+
         return 0;
 }
 
@@ -490,25 +496,19 @@ page_table create_task_pgtable(struct task_struct *ts)
 }
 static void exit_fs(struct task_struct *ts)
 {
-        // 关闭该 task 所有打开的文件：
-        // fork 时共享出去的 file->refcount 会被 file_close 的原子减抵消，
-        // 最后一个引用者负责真正回收底层资源。
         for (int i = 0; i < NOFILE; i++)
         {
                 struct file *f = ts->ofile[i];
                 ts->ofile[i] = NULL;
+
                 if (f)
-                {
                         file_close(f);
-                }
         }
 
-        // 释放工作目录的 VFS 节点
-        if (ts->cwd_node)
+        if (ts->cwd)
         {
-                ts->cwd_node->mount->fs_ops->fs_free_node(ts->cwd_node->private);
-                slab_free(ts->cwd_node);
-                ts->cwd_node = NULL;
+                inode_put(ts->cwd);
+                ts->cwd = NULL;
         }
 }
 
@@ -748,11 +748,26 @@ int kfork()
 
         // 4. 复制name和cwd
         strcpy(new_ts->name, father_ts->name);
-        if (set_cwd(new_ts, father_ts->cwd) == -1)
+
+        /*
+        * cwd 是 inode 引用。
+        *
+        * fork 后：
+        *
+        * father_ts->cwd
+        *          |
+        *          inode
+        *          |
+        * new_ts->cwd
+        *
+        * 两个 task 各持有一个引用。
+        */
+
+        new_ts->cwd = father_ts->cwd;
+
+        if (new_ts->cwd)
         {
-                // cwd 设置失败（不应该发生，因为父进程的 cwd 是有效的）
-                // 退回到根目录
-                set_cwd(new_ts, "/");
+                inode_get(new_ts->cwd);
         }
 
         // 5. 设置子进程的trapframe
@@ -766,12 +781,14 @@ int kfork()
         //    但共享出的 file->refcount 必须原子自增
         //    因为后续父子任意一方 close 时会原子减
         //    避免与对方的 fork/close 竞争。
+
         for (int i = 0; i < NOFILE; i++)
         {
                 struct file *f = father_ts->ofile[i];
+
                 if (f)
                 {
-                        __atomic_add_fetch(&f->refcount, 1, __ATOMIC_RELAXED);
+                        file_get(f);
                         new_ts->ofile[i] = f;
                 }
                 else
@@ -811,7 +828,7 @@ int kexec(char *path, char **argv)
         int fd = -1;
         char *buf = NULL;
 
-        fd = vfs_open(path, FS_O_READ);
+        fd = vfs_open(path, O_RDONLY);
         if (fd == -1)
         {
                 return -1;
@@ -825,7 +842,7 @@ int kexec(char *path, char **argv)
         }
 
         // 先读取64字节
-        if (vfs_read(fd, buf, 64) == -1)
+        if (vfs_read(fd, buf, 64) != 64)
         {
                 goto out;
         }
@@ -1017,8 +1034,19 @@ static int load_segment(int fd, page_table pg, struct elf64_phdr *ph)
                         uint64_t len = page_end - page_start;
                         uint64_t pa_off = page_start - va;
 
-                        vfs_seek(fd, file_off);
-                        vfs_read(fd, pa + pa_off, len);
+                        if (vfs_seek_fd(fd, file_off, SEEK_SET) < 0)
+                        {
+                                free_page(pa);
+                                return -1;
+                        }
+
+                        if (vfs_read(fd,
+                                pa + pa_off,
+                                len) != len)
+                        {
+                                free_page(pa);
+                                return -1;
+                        }
                 }
 
                 // 确定页权限：
@@ -1041,7 +1069,7 @@ static int load_segment(int fd, page_table pg, struct elf64_phdr *ph)
 static int read_phdr(int fd, uint64_t off, struct elf64_phdr *ph)
 {
         // 跳到指定偏移
-        if (vfs_seek(fd, off) < 0)
+        if (vfs_seek_fd(fd, off, SEEK_SET) < 0)
                 return -1;
 
         // 读一个 Program Header（56 字节）

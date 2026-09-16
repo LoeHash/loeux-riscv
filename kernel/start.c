@@ -75,7 +75,7 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
 
         // 挂载硬盘
-        if (vfs_mount("/", &virtio_block_device, FAT12) == -1)
+        if (vfs_mount("/", &virtio_block_device, "fat12") == -1)
         {
                 panic(PANIC_ERROR, "kstart vfs_mount: error!\n");
         }

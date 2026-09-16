@@ -2,7 +2,15 @@
 
 CROSS_COMPILE ?= riscv64-linux-gnu-
 CC := $(CROSS_COMPILE)gcc
-INCLUDES := -I. -I../include -I../include/kernel -I../include/mm -I../mm -I../include/drivers -I../include/fs -I../include/test -I../include/utils
+INCLUDES := -I. \
+			-I../include\ 
+			-I../include/kernel \
+			-I../include/mm \
+			-I../mm \
+			-I../include/drivers \
+			-I../include/fs \
+			-I../include/test \
+			-I../include/utils \
 CFLAGS := -march=rv64gc -mabi=lp64 -nostdlib -ffreestanding $(INCLUDES) -g
 CFLAGS += -MMD -MP
 

@@ -24,7 +24,7 @@ void scheduler() __attribute__((noreturn));
 struct task_struct *get_task();
 void yield();
 void sched();
-void swtch();
+void swtch(void *p1, void *p2);
 void free_task(struct task_struct *);
 struct task_struct *alloc_task();
 void free_task_pgtable(page_table pagetable, uint64_t sz);

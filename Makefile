@@ -11,6 +11,7 @@ INCLUDES := -I. \
             -I./include/mm \
             -I./include/drivers \
             -I./include/fs \
+            -I./include/utils \
             -I./kernel \
             -I./mm \
             -I./boot \
@@ -46,7 +47,7 @@ OBJS := asm/kernel_trap_vec.o\
 	mm/slab.o\
 	drivers/virtio_disk.o\
 	drivers/uart.o\
-	fs/fat12.o\
+	fs/fat32.o\
 	fs/vfs.o\
 	fs/char_dev.o\
 	test/fdt_test.o\
@@ -56,6 +57,7 @@ OBJS := asm/kernel_trap_vec.o\
 	test/virtio_disk_test.o\
 	test/vm_test.o\
 	test/slab_test.o\
+	utils/hashmap.o\
 
 
 
@@ -128,7 +130,7 @@ mm/vm.o: mm/vm.c
 mm/slab.o: mm/slab.c 
 drivers/virtio_disk.o: drivers/virtio_disk.c 
 drivers/uart.o: drivers/uart.c 
-fs/fat12.o: fs/fat12.c 
+fs/fat32.o: fs/fat32.c 
 fs/vfs.o: fs/vfs.c 
 fs/char_dev.o: fs/char_dev.c 
 test/fdt_test.o: test/fdt_test.c 
@@ -138,6 +140,7 @@ test/vfs_test.o: test/vfs_test.c
 test/virtio_disk_test.o: test/virtio_disk_test.c 
 test/vm_test.o: test/vm_test.c 
 test/slab_test.o: test/slab_test.c 
+utils/hashmap.o: utils/hashmap.c 
 
 
 clean:
