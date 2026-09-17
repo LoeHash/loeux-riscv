@@ -40,6 +40,7 @@ static int flags_to_pte(uint32_t p_flags);
 static int load_segment(struct file *f, page_table pg, struct elf64_phdr *ph);
 static void exit_fs(struct task_struct *ts);
 static void wake_wait_parent(struct task_struct *p);
+static void do_free_task_heap(page_table pg, uint64_t heap_start, uint64_t heap_history_max);
 
 // 初始化用户第一个进程
 void init_user()
@@ -482,18 +483,29 @@ void free_task(struct task_struct *t)
         if (t->utf)
                 kfree((void *)t->utf);
         t->utf = 0;
-        if (t->pg)
+        if (t->pg){
                 free_task_pgtable(t->pg, t->size);
-        t->pg = 0;
+                // 选择性释放堆
+                if (t->heap_start && t->heap_history_max) {
+                        do_free_task_heap(t->pg, t->heap_start, t->heap_history_max);
+                }
+        }
+                t->pg = 0;
         t->size = 0;
         t->pid = 0;
         t->parent = 0;
         t->name[0] = 0;
         t->dead = 0;
+        t->heap_start = 0;
+        t->heap_brk = 0;
+        t->heap_history_max = 0;
         // t->xstate = 0;
         t->state = INITLIZED;
 }
 
+/// 此函数只会释放用户程序的代码段，trampoline，trapframe映射
+/// @param pagetable
+/// @param sz 进程内存大小从 0x1000 开始算的 用户映射长度
 void free_task_pgtable(page_table pagetable, uint64_t sz)
 {
         // TRAMPOLINE 取消映射
@@ -504,6 +516,13 @@ void free_task_pgtable(page_table pagetable, uint64_t sz)
 
         // 这里就不会取消映射了
         pg_user_vmfree(pagetable, sz);
+        vmprint(pagetable);
+}
+
+static void do_free_task_heap(page_table pg, uint64_t heap_start, uint64_t heap_history_max){
+        if (heap_start == 0)
+                return;
+        pg_unmap(pg, heap_start, heap_history_max - heap_start / PG_4K_SIZE, 1);
 }
 
 /// @brief 映射进程的页表, 基本映射：仅包含蹦床页和trapframe映射
@@ -694,10 +713,15 @@ int kexit(int exit_code)
         ts->return_val = exit_code;
 
         // 3. 释放所有页表内存和物理页, 以及用户栈
+        //    同时释放堆内存
         free_task_pgtable(ts->pg, ts->size);
+        do_free_task_heap(ts->pg, ts->heap_start, ts->heap_history_max);
+        
         ts->pg = 0;
         ts->size = 0;
-
+        ts->heap_start = 0;
+        ts->heap_history_max = 0;
+        
         // 4. 孤儿收容：所有子进程改投 init。
         //    必须先释放自身锁：否则这里"持 ts->lk 再取 child->lk"
         //    与父进程 wait() 扫描"持 child->lk 再取 ts->lk"会形成
@@ -768,7 +792,13 @@ int kfork()
 
         // 目前我们持有new_ts的锁
         // 1. 复制父进程页表的所有内容
-        if ((vm_pagetbl_copy_asign(father_ts->pg, new_ts->pg, USER_BASE_PROG_ADDR, father_ts->size)) == -1)
+        //    26-9-17 修复remap
+        if ((vm_pagetbl_copy_asign(
+                father_ts->pg,
+                new_ts->pg,
+                USER_BASE_PROG_ADDR,
+                father_ts->size - USER_BASE_PROG_ADDR
+        )) == -1)
         {
                 // 失败路径必须释放锁，否则 free_task 之后该槽位被复用，
                 // 后续 acquire 会触发 reacquire panic。
@@ -785,10 +815,21 @@ int kfork()
                 return -1;
         }
 
+        // 3.  映射堆内存
+        if ((vm_pagetbl_copy_asign(father_ts->pg, new_ts->pg, father_ts->heap_start, (father_ts->heap_history_max - father_ts->heap_start))) == -1)
+        {
+                release(&new_ts->lk);
+                free_task(new_ts);
+                return -1;
+        }
+
+
         // 3. 设置子进程的pid和parent
         new_ts->size = father_ts->size;
         new_ts->parent = father_ts;
-
+        new_ts->heap_start = father_ts->heap_start;
+        new_ts->heap_history_max = father_ts->heap_history_max;
+        
         // 4. 复制name和cwd
         strcpy(new_ts->name, father_ts->name);
         strcpy(new_ts->cwd_path, father_ts->cwd_path);
@@ -864,7 +905,7 @@ int kexec(char *path, char **argv)
 
         // 这两个尺寸在统一清理路径(out)里要用，
         // 因此提到最前面声明，保证任何 goto out 都可见。
-        uint64_t old_size = t->size, new_size = 0;
+        uint64_t old_size = t->size, new_size = 0, old_heap_start = t->heap_start, old_heap_history_max = t->heap_history_max;
 
         // ret 默认 -1（失败）；仅在真正提交（替换页表）时改写为 argc。
         // fd/buf/ef 初始化为“未持有”，out 里据此安全释放。
@@ -943,13 +984,17 @@ int kexec(char *path, char **argv)
                 {
                         // 加载这个段
                         // 同时记录大小
-
                         seg_size_tmp = load_segment(ef, new_page, &phdr);
                         if (seg_size_tmp < 0)
                         {
                                 goto out;
                         }
-                        new_size += seg_size_tmp;
+
+                        uint64_t seg_end = PGROUNDUP(phdr.p_vaddr + phdr.p_memsz);
+                        if (seg_end > new_size)
+                        {
+                                new_size = seg_end;
+                        }
                 }
         }
 
@@ -1021,12 +1066,18 @@ int kexec(char *path, char **argv)
         t->utf->a0 = argc; // crt0 的 _start 直接 call main，main 从 a0 读 argc
         t->utf->sepc = ehdr.e_entry;
 
+        t->heap_start = PGROUNDUP(new_size);
+        t->heap_brk = t->heap_start;
+        t->heap_history_max = t->heap_start;
+
         // 页表所有权已转移给 t->pg，out 不能再释放 new_page
         new_page = 0;
 
         free_task_pgtable(old_page, old_size);
+        
+        do_free_task_heap(old_page, old_heap_start, old_heap_history_max);
+        
         ret = argc;
-
 out:
         // 统一清理：失败不 panic，且不泄漏 fd / buf / 半成品页表。
         // 旧页表 old_page 不在此释放（成功路径已在提交后单独释放）。

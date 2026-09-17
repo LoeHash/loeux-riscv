@@ -9,6 +9,29 @@
 #include <memory.h>
 #include <slab.h>
 
+uint64_t sys_sbrk(){
+        
+        int delta;
+        
+        get_arg_int(0, &delta);
+        struct task_struct *ts = get_task();
+
+        if (ts->heap_brk + delta < ts->heap_start)
+        {
+                return -1;
+        }
+        uint64_t before_brk = ts->heap_brk;
+        ts->heap_brk += delta;
+
+        if (ts->heap_brk > ts->heap_history_max)
+        {
+                ts->heap_history_max = ts->heap_brk;
+        }
+
+        return before_brk;
+}
+
+
 uint64_t sys_pwd()
 {
         uint64_t buf_addr;

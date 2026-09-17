@@ -169,7 +169,11 @@ struct task_struct
 
         page_table pg; // 进程页表
 
-        uint64_t size; // 进程内存大小从 0x1000 开始算的 用户映射长度
+        /*
+        进程内存大小从 0x1000 开始算的 用户映射长度
+        不包含堆内存，只包含代码程序bss read only等区域
+        */
+        uint64_t size; 
 
         struct context ctx;         // 各个进程的内核态现场
         pid_t pid;                  // 进程id
@@ -202,6 +206,10 @@ struct task_struct
         wait_node_t sleep_node; // 睡眠等待队列
 
         struct credentials cred; // 权限
+
+        uint64_t heap_start;            // 堆起始
+        uint64_t heap_brk;              // 堆当前指针，可以做懒分配
+        uint64_t heap_history_max;      // 堆历史上到达的最大指针，在kexit中会使用
 };
 
 struct cpu
