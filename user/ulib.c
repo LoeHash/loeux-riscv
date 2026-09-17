@@ -3,6 +3,21 @@
 // STDIO //////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////
+// sbrk //////////////////////////////////////////////////////////
+void *sbrk(int64_t increment)
+{
+        void *ret;
+        __asm__ volatile(
+            "mv a0, %1\n"
+            "li a7, %2\n"
+            "ecall\n"
+            "mv %0, a0\n"
+            : "=r"(ret)
+            : "r"(increment), "i"(SYSCALL_SBRK)
+            : "a0", "a7", "memory");
+        return ret;
+}
+
 
 int fstat(int fd, struct stat *buf)
 {

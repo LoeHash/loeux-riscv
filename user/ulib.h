@@ -24,6 +24,7 @@
 #define SYSCALL_FSTAT 14
 #define SYSCALL_GETDENTS 15
 #define SYSCALL_PWD 16
+#define SYSCALL_SBRK 17
 ///////////////////////////////SYSCALLS END///////////////////////////////
 
 int pwd(char *buf, int max);
@@ -35,6 +36,7 @@ const char *get_path(void);                // 读取当前搜索路径
 void set_path(const char *path);           // 设置搜索路径 "dir1:dir2:..."
 int get_pid();
 int get_ppid();
+void * sbrk(int64_t delta);
 int wait(int *status);
 int waitpid(int pid, int *status);
 int exit(int exit_code);

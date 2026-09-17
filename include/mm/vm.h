@@ -1,7 +1,6 @@
 #ifndef _INC_VM_
 #define _INC_VM_
 #include <stdint.h>
-#include <mm/vm.h>
 #include <mm/memory.h>
 #include <type.h>
 

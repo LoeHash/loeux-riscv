@@ -23,6 +23,7 @@ extern uint64_t sys_mkdir();
 extern uint64_t sys_fstat();
 extern uint64_t sys_getdents();
 extern uint64_t sys_pwd();
+extern uint64_t sys_sbrk();
 
 static syscall_func_t syscalls[] = {
     [0] 0,                           // syscall id = 0,
@@ -42,6 +43,7 @@ static syscall_func_t syscalls[] = {
     [SYSCALL_FSTAT] sys_fstat,       // []
     [SYSCALL_GETDENTS] sys_getdents, // []
     [SYSCALL_PWD] sys_pwd,           // []
+    [SYSCALL_SBRK] sys_sbrk,       // []
 };
 
 static uint64_t get_arg_reg(int n)
@@ -108,9 +110,55 @@ void get_arg_addr(int n, uint64_t *buf)
         *buf = get_arg_reg(n);
 }
 
+// 先保留
 void get_arg_int(int n, int *buf)
 {
         *buf = (int)get_arg_reg(n);
+}
+
+/* 8 位 */
+void get_arg_i8(int n, int8_t *buf)
+{
+        *buf = (int8_t)get_arg_reg(n);
+}
+
+
+void get_arg_u8(int n, uint8_t *buf)
+{
+        *buf = (uint8_t)get_arg_reg(n);
+}
+
+/* 16 位 */
+void get_arg_i16(int n, int16_t *buf)
+{
+        *buf = (int16_t)get_arg_reg(n);
+}
+
+void get_arg_u16(int n, uint16_t *buf)
+{
+        *buf = (uint16_t)get_arg_reg(n);
+}
+
+/* 32 位 */
+void get_arg_i32(int n, int32_t *buf)
+{
+        *buf = (int32_t)get_arg_reg(n);
+}
+
+void get_arg_u32(int n, uint32_t *buf)
+{
+        *buf = (uint32_t)get_arg_reg(n);
+}
+
+/* 64 位 */
+void get_arg_i64(int n, int64_t *buf)
+{
+        *buf = (int64_t)get_arg_reg(n);
+}
+
+void get_arg_u64(int n, uint64_t *buf)
+{
+        *buf = (uint64_t)get_arg_reg(n);
 }
 
 void syscall()

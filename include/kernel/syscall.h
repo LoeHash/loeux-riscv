@@ -23,6 +23,7 @@
 #define SYSCALL_FSTAT 14
 #define SYSCALL_GETDENTS 15
 #define SYSCALL_PWD 16
+#define SYSCALL_SBRK 17
 
 typedef uint64_t (*syscall_func_t)(void);
 
@@ -33,4 +34,12 @@ void get_arg_addr(int n, uint64_t *buf);
 void get_arg_int(int n, int *buf);
 void syscall();
 void do_build_user_path(char *des_path, char *u_path, char *cwd);
+void get_arg_i8(int n, int8_t *buf);
+void get_arg_u8(int n, uint8_t *buf);
+void get_arg_i16(int n, int16_t *buf);
+void get_arg_u16(int n, uint16_t *buf);
+void get_arg_i32(int n, int32_t *buf);
+void get_arg_u32(int n, uint32_t *buf);
+void get_arg_i64(int n, int64_t *buf);
+void get_arg_u64(int n, uint64_t *buf);
 #endif
