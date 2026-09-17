@@ -8,11 +8,16 @@
 #include <sbi.h>
 #include <timer.h>
 #include <syscall.h>
+#include <spinlock.h>
+#include <lib.h>
 
 extern uint64_t main_core;
 extern char kernel_trap_vec[];
 extern char _trampoline_jump[];
 extern char _trampoline_ret[];
+
+static void do_page_fault(uint64_t fault_addr, enum page_fault_type type);
+static enum page_fault_type get_page_fault_type(uint64_t scause);
 
 /// @brief
 /// @param scause 保存异常发生时的 PC
@@ -168,9 +173,13 @@ uint64_t user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
                  * timer -> trap -> return -> timer -> trap -> ...
                  *
                  *
-                 * The CPU may be trapped in a continuous timer-interrupt loop. */
+                 * The CPU may be trapped in a continuous timer-interrupt loop. 
+                 *                      26-09-17        loehash
+                 */
                 sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
                 yield();
+        }else  if(scause == PAGE_FAULT_LOAD_SCAUSE || scause == PAGE_FAULT_STORE_SCAUSE){
+                do_page_fault(stval, get_page_fault_type(scause));
         }
         else // else.
         {
@@ -217,4 +226,67 @@ void setup_return_trapframe(struct task_struct *ts)
 void init_kernel_trap_vec()
 {
         w_stvec((uint64_t)kernel_trap_vec);
+}
+
+
+static void do_page_fault(uint64_t fault_addr, enum page_fault_type type)
+{
+        struct task_struct *ts = get_task();
+
+        if (type != PF_LOAD && type != PF_STORE)
+        {
+                to_kill(ts);
+                return;
+        }
+
+        if (fault_addr < ts->heap_start ||
+            fault_addr >= ts->heap_brk)
+        {
+                to_kill(ts);
+                return;
+        }
+
+        uint64_t va = PGROUNDDOWN(fault_addr);
+
+        char *pa = kalloc();
+        if (pa == NULL)
+        {
+                to_kill(ts);
+                return;
+        }
+
+        memset(pa, 0, PG_4K_SIZE);
+
+        acquire(&ts->lk);
+
+        if (mappages(ts->pg,
+                     va,
+                     PG_4K_SIZE,
+                     (uint64_t)pa,
+                     PTE_V | PTE_W | PTE_R | PTE_U) < 0)
+        {
+                release(&ts->lk);
+                free_page(pa);
+                to_kill(ts);
+                return;
+        }
+        printk("[pf] pid=%d addr=%p type=%s brk=%p start=%p -> %s\n",
+                ts->pid, (void *)fault_addr,
+                type == PF_LOAD ? "load" : "store",
+                (void *)ts->heap_brk, (void *)ts->heap_start,
+                (fault_addr < ts->heap_start || fault_addr >= ts->heap_brk)
+                        ? "kill" : "alloc");
+        release(&ts->lk);
+}
+
+static enum page_fault_type get_page_fault_type(uint64_t scause)
+{
+        if (scause == PAGE_FAULT_LOAD_SCAUSE)
+                return PF_LOAD;
+        else if (scause == PAGE_FAULT_STORE_SCAUSE)
+                return PF_STORE;
+        else if (scause == 12)
+                return PF_INSTRUCTION;
+        else
+                return PF_INSTRUCTION;
 }

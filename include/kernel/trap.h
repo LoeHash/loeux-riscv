@@ -43,6 +43,11 @@
 
 // 时钟中断scause
 #define CLINT_INTERRUPT_SCAUSE 0x8000000000000005
+// 缺页异常scause
+#define PAGE_FAULT_LOAD_SCAUSE 13
+#define PAGE_FAULT_STORE_SCAUSE 15
+
+
 
 // 异常处理需要使用到CSR寄存器
 //      CSR	        作用
@@ -59,4 +64,11 @@ void init_kernel_trap_vec();
 void kernel_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval);
 uint64_t user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval);
 void setup_return_trapframe(struct task_struct *ts);
+
+enum page_fault_type {
+    PF_LOAD,        // scause == 13
+    PF_STORE,       // scause == 15
+    PF_INSTRUCTION, // scause == 12 (未来扩展)
+};
+
 #endif
