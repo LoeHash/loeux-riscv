@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 /*
-        loeux 内核执行流
+                内核执行流
 
                 scheduler
                     │

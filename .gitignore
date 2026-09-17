@@ -20,3 +20,9 @@ report
 commit_history.txt
 kernel.dump
 user.dump
+compile_commands.json
+error.txt
+.clangd
+.clangd/*
+.cache/*
+.cache

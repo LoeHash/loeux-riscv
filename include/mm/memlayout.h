@@ -1,6 +1,5 @@
 #ifndef _INC_MEMLAYOUT_
 #define _INC_MEMLAYOUT_
-#include <stdint.h>
 // Sv39 虚拟地址空间 (64位)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 0x0000000000000000  ─┐

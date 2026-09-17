@@ -1,6 +1,7 @@
 #ifndef _INC_RISCV_
 #define _INC_RISCV_
 #include <stdint.h>
+#include <type.h>
 #define SATP_SV39 (8L << 60) // mode 8
 #define MAKE_SATP(pagetable) (SATP_SV39 | (((uint64_t)pagetable) >> 12))
 

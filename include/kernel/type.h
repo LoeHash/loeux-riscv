@@ -2,7 +2,9 @@
 #define _INC_TYPE
 #include <stdint.h>
 #include <stdbool.h>
+#ifndef NULL
 #define NULL ((void *)0)
+#endif
 #define NOFILE 64
 #define NGROUPS_MAX 32
 typedef char padding_t;
