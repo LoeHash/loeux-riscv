@@ -7,7 +7,21 @@
 #include <memory.h>
 #include <fat32.h>
 #include <block_device.h>
+#include <char_dev.h>
 #include <lib.h>
+#include <syscall.h>
+
+/*
+ * VFS 层开发范式：
+ *   1. 路径规范化与父目录解析
+ *   2. 权限校验——调用者必须对父目录具有 MAY_WRITE | MAY_EXEC
+ *   3. 并发保护——通过 vfs_meta_lock 序列化元数据修改
+ *   4. 权限位设置——文件系统层只负责填写文件类型（S_IFREG），
+ *      rwx 权限位由 VFS 层覆盖到 inode->mode
+ *   5. inode cache 维护
+ *
+ *   @author loehash 26-09-17
+ */
 
 /*
 inode.refcount
@@ -23,13 +37,27 @@ cwd引用
 其他内核对象引用
 */
 
-static spinlock_t inum_lk = {0};
-static volatile uint64_t _vfs_inum_counter = 0;
 static mount_table_t mount_table = {0};
 static filesystem_registry_t fs_registry = {0};
-static uint64_t vfs_alloc_inum();
 static void vfs_filesystem_init(void);
+static void vfs_inode_cache_init(void);
 static inode_cache_t icache = {0};
+
+/*
+ * 全局元数据操作锁
+ *
+ * 设计：
+ *   文件系统层(fat32等)只负责磁盘读写，认为自身是并发安全的，
+ *   不在文件系统层内部做并发互斥。所有多进程并发写防护统一在 VFS
+ *   层完成。此锁序列化所有元数据修改操作（create / mkdir / unlink /
+ *   rmdir / truncate），防止竞态导致目录项损坏或簇链断裂。
+ *
+ *   read / write / seek / readdir 不需要此锁——它们由 file->slk
+ *   保护同一 file 对象的并发访问。
+ */
+static struct sleeplock vfs_meta_lock;
+static int vfs_meta_lock_inited = 0;
+
 static uint32_t inode_cache_hash(const void *key, uint32_t key_len);
 static bool inode_cache_key_equal(const void *key1,
                                   const void *key2,
@@ -37,11 +65,13 @@ static bool inode_cache_key_equal(const void *key1,
 
 void init_vfs()
 {
-        init_spinlock(&inum_lk);
-        init_spinlock(&mount_table.lock);        
+        init_spinlock(&mount_table.lock);
 
         vfs_filesystem_init();
         vfs_inode_cache_init();
+
+        init_sleeplock(&vfs_meta_lock);
+        vfs_meta_lock_inited = 1;
 }
 
 int vfs_mount(struct block_device *dev,
@@ -61,19 +91,26 @@ int vfs_mount(struct block_device *dev,
         fs = vfs_get_filesystem(fs_type);
 
         if (fs == NULL)
-                goto error;
+                return -1;
 
         if (fs->get_super(fs,
                           dev,
                           &sb) < 0)
-                goto error;
+                return -1;
 
         if (sb == NULL ||
             sb->root == NULL)
-                goto error;
+        {
+                if (sb != NULL)
+                        fs->kill_sb(sb);
+                return -1;
+        }
 
         /*
          * 将super_block提供的root inode加入inode cache
+         *
+         * 根挂载：cache_key.parent = SPECIAL，cache 不持有父引用
+         * 非根挂载：cache_key.parent = 挂载点目录，cache 持有挂载点的引用
          */
         if (strcmp(target, "/") == 0)
         {
@@ -87,23 +124,40 @@ int vfs_mount(struct block_device *dev,
                 if (parent == NULL ||
                     parent->sb == NULL ||
                     parent->sb->root == NULL)
-                        goto error;
+                {
+                        fs->kill_sb(sb);
+                        return -1;
+                }
 
                 sb->root->cache_key.parent =
                         parent->sb->root;
+
+                /* cache 持有挂载点父目录引用 */
+                inode_get(parent->sb->root);
         }
 
         strcpy(sb->root->cache_key.name,
                "/");
 
         if (inode_cache_insert(sb->root) < 0)
-                goto error;
+        {
+                if (parent != NULL)
+                        inode_put(parent->sb->root);
 
+                fs->kill_sb(sb);
+                return -1;
+        }
 
         mnt = slab_alloc(sizeof(*mnt));
 
         if (mnt == NULL)
-                goto error;
+        {
+                /* 释放 cache 引用与挂载点父引用 */
+                inode_cache_remove(sb->root);
+
+                fs->kill_sb(sb);
+                return -1;
+        }
 
         memset(mnt,
                0,
@@ -114,15 +168,18 @@ int vfs_mount(struct block_device *dev,
 
         mnt->sb = sb;
 
+        acquire(&mount_table.lock);
 
         if (strcmp(target, "/") == 0)
         {
-                acquire(&mount_table.lock);
-
                 if (mount_table.root != NULL)
                 {
                         release(&mount_table.lock);
-                        goto error;
+
+                        inode_cache_remove(sb->root);
+                        fs->kill_sb(sb);
+                        slab_free(mnt);
+                        return -1;
                 }
 
                 mount_table.root = mnt;
@@ -132,16 +189,10 @@ int vfs_mount(struct block_device *dev,
                 return 0;
         }
 
-
-        parent = vfs_find_mount(target);
-
-        if (parent == NULL)
-                goto error;
-
-
+        /*
+         * 挂到父挂载点的孩子链表头部
+         */
         mnt->parent = parent;
-
-        acquire(&mount_table.lock);
 
         mnt->next = parent->child;
         parent->child = mnt;
@@ -149,17 +200,6 @@ int vfs_mount(struct block_device *dev,
         release(&mount_table.lock);
 
         return 0;
-
-
-error:
-
-        if (sb != NULL)
-                fs->kill_sb(sb);
-
-        if (mnt != NULL)
-                slab_free(mnt);
-
-        return -1;
 }
 
 /// @brief 在 path 指定的位置创建普通文件，并返回新文件 inode。
@@ -204,7 +244,44 @@ int vfs_create(const char *path,
                 return -1;
         }
 
+        struct task_struct *task = get_task();
+
+        /*
+         * 权限校验（VFS 层拦截）：
+         * 修改目录内容需要 MAY_WRITE，搜索目录需要 MAY_EXEC。
+         */
+        if (vfs_permission(parent,
+                           &task->cred,
+                           MAY_WRITE | MAY_EXEC) < 0)
+        {
+                inode_put(parent);
+                slab_free(name);
+                return -1;
+        }
+
         mode &= 0777;
+
+        /*
+         * 并发保护：序列化元数据修改，防止多进程同时
+         * 分配同一目录项或损坏簇链。
+         */
+        acquire_sleep(&vfs_meta_lock);
+
+        /*
+         * 二次检查缓存：防止 lookup_parent 后、获取锁前
+         * 其他进程已创建同名文件。
+         */
+        {
+                struct inode *exist = inode_cache_find(parent, name);
+                if (exist != NULL)
+                {
+                        inode_put(exist);
+                        release_sleep(&vfs_meta_lock);
+                        inode_put(parent);
+                        slab_free(name);
+                        return -1;
+                }
+        }
 
         struct inode *new_inode = NULL;
 
@@ -214,20 +291,38 @@ int vfs_create(const char *path,
                                  &new_inode) < 0 ||
             new_inode == NULL)
         {
+                release_sleep(&vfs_meta_lock);
                 inode_put(parent);
                 slab_free(name);
                 return -1;
         }
+
+        /*
+         * 权限位由 VFS 层统一设置（开发范式）：
+         * 文件系统层只填写 S_IFREG，rwx 权限由 VFS 覆盖。
+         */
+        new_inode->mode = (new_inode->mode & S_IFMT) | mode;
+        new_inode->uid = task->cred.uid;
+        new_inode->gid = task->cred.gid;
 
         new_inode->cache_key.parent = parent;
 
         strcpy(new_inode->cache_key.name,
                name);
 
+        /* cache 持有 parent 引用 */
+        inode_get(parent);
+
         if (inode_cache_insert(new_inode) < 0)
         {
-                inode_put(new_inode);
+                /* cache 未接管，释放刚取的 parent 引用 */
                 inode_put(parent);
+
+                inode_put(new_inode);
+
+                /* 释放 lookup_parent 返回的 caller 引用 */
+                inode_put(parent);
+                release_sleep(&vfs_meta_lock);
                 slab_free(name);
                 return -1;
         }
@@ -242,12 +337,49 @@ int vfs_create(const char *path,
 
         inode_put(parent);
 
+        release_sleep(&vfs_meta_lock);
+
         slab_free(name);
 
         return 0;
 }
 
-int vfs_lookup(const char *path,
+/// @brief 文本层路径规范化。
+///
+/// FAT 等 VFS 后端的目录里不存在 "." / ".." 目录项，
+/// 相对路径与 "." ".." "//" 必须在进入 inode walk 前消解。
+/// 复用 do_build_user_path：拼接 cwd、消解 "." ".." "//"、去尾 '/'。
+/// @param path 原始路径（相对或绝对）
+/// @param out  输出缓冲区，调用者负责分配 BUFSZ 字节
+/// @return 0 成功（out 为绝对路径），-1 失败（超长等得到空串）
+static int vfs_normalize(const char *path, char *out)
+{
+        struct task_struct *ts = get_task();
+        const char *cwd;
+
+        if (path == NULL || out == NULL)
+                return -1;
+
+        /*
+         * 无任务上下文（早期启动）或 cwd 尚未设置：
+         * 仅绝对路径可解析；cwd 传 "/" 仅为满足
+         * do_build_user_path 的前置检查。
+         */
+        if (ts == NULL || ts->cwd_path[0] == '\0')
+                cwd = "/";
+        else
+                cwd = ts->cwd_path;
+
+        do_build_user_path(out, (char *)path, (char *)cwd);
+
+        /* 结果必须能放进 VFS 各路径缓冲（VFS_MAX_PATH_LEN） */
+        if (out[0] == '\0' || strlen(out) >= VFS_MAX_PATH_LEN)
+                return -1;
+
+        return 0;
+}
+
+static int vfs_lookup_impl(const char *path,
                struct inode **inode)
 {
         if (path == NULL || inode == NULL)
@@ -400,6 +532,33 @@ int vfs_lookup(const char *path,
         return 0;
 }
 
+int vfs_lookup(const char *path,
+               struct inode **inode)
+{
+        char *nbuf;
+        int ret;
+
+        if (path == NULL || inode == NULL)
+                return -1;
+
+        nbuf = slab_alloc(BUFSZ);
+
+        if (nbuf == NULL)
+                return -1;
+
+        if (vfs_normalize(path, nbuf) < 0)
+        {
+                slab_free(nbuf);
+                return -1;
+        }
+
+        ret = vfs_lookup_impl(nbuf, inode);
+
+        slab_free(nbuf);
+
+        return ret;
+}
+
 struct filesystem *vfs_get_filesystem(const char *name)
 {
         if (name == NULL)
@@ -420,6 +579,22 @@ struct filesystem *vfs_get_filesystem(const char *name)
         release(&fs_registry.lock);
 
         return fs;
+}
+
+/// @brief 挂载点路径前缀匹配。
+///
+/// "/mnt" 匹配 "/mnt" 与 "/mnt/x"，但不匹配 "/mntx"。
+static int mount_path_match(const char *mnt_path, const char *path)
+{
+        size_t len = strlen(mnt_path);
+
+        if (strncmp(mnt_path, path, len) != 0)
+                return 0;
+
+        if (path[len] == '\0' || path[len] == '/')
+                return 1;
+
+        return 0;
 }
 
 /// @brief 给定一个绝对路径 path，找到 覆盖该路径的最深层 mount。
@@ -459,7 +634,7 @@ struct mount *vfs_find_mount(const char *path)
 /// @param parent 返回父目录 inode
 /// @param name 返回最后一级组件名称
 /// @return 成功返回0，失败返回-1
-int vfs_lookup_parent(const char *path,
+static int vfs_lookup_parent_impl(const char *path,
                       struct inode **parent,
                       char *name)
 {
@@ -611,6 +786,38 @@ int vfs_lookup_parent(const char *path,
         return ret;
 }
 
+int vfs_lookup_parent(const char *path,
+                      struct inode **parent,
+                      char *name)
+{
+        char *nbuf;
+        int ret;
+
+        if (path == NULL ||
+            parent == NULL ||
+            name == NULL)
+        {
+                return -1;
+        }
+
+        nbuf = slab_alloc(BUFSZ);
+
+        if (nbuf == NULL)
+                return -1;
+
+        if (vfs_normalize(path, nbuf) < 0)
+        {
+                slab_free(nbuf);
+                return -1;
+        }
+
+        ret = vfs_lookup_parent_impl(nbuf, parent, name);
+
+        slab_free(nbuf);
+
+        return ret;
+}
+
 // fs对象的生命周期在运行期间是不会被销毁的
 /// @brief 注册fs到fs注册表中
 /// 0成功，其他错误
@@ -641,19 +848,6 @@ int vfs_register_filesystem(struct filesystem *fs)
         release(&fs_registry.lock);
 
         return 0;
-}
-
-/// @brief 分配inode号
-/// @return inode号(理论上不会失败)
-static uint64_t vfs_alloc_inum()
-{
-        uint64_t inum;
-
-        acquire(&inum_lk);
-        inum = _vfs_inum_counter++;
-        release(&inum_lk);
-
-        return inum;
 }
 
 static void vfs_filesystem_init(void)
@@ -723,6 +917,15 @@ int vfs_permission(const struct inode *inode,
 }
 
 /// @brief 在 path 指定的位置创建目录。
+///
+/// VFS 层职责（开发范式）：
+///   1. 路径规范化与父目录解析
+///   2. 权限校验——调用者必须对父目录具有 MAY_WRITE | MAY_EXEC
+///   3. 并发保护——通过 vfs_meta_lock 序列化元数据修改
+///   4. 权限位设置——文件系统层只负责填写文件类型（S_IFDIR），
+///      rwx 权限位由 VFS 层覆盖到 inode->mode
+///   5. inode cache 维护
+///
 /// @param path 目录路径，例如 "/a/b"
 /// @param mode 创建权限，仅包含 rwx 权限位
 /// @return 成功返回0，失败返回-1
@@ -732,24 +935,12 @@ int vfs_mkdir(const char *path,
         if (path == NULL)
                 return -1;
 
-
         struct inode *parent = NULL;
-
-
-        char *name =
-                slab_alloc(VFS_MAX_PATH_LEN);
-
+        char *name = slab_alloc(VFS_MAX_PATH_LEN);
 
         if (name == NULL)
                 return -1;
 
-
-
-        /*
-         * 获取父目录 inode 和最后一级目录名
-         *
-         * parent 获得一个 caller 引用
-         */
         if (vfs_lookup_parent(path,
                               &parent,
                               name) < 0)
@@ -757,8 +948,6 @@ int vfs_mkdir(const char *path,
                 slab_free(name);
                 return -1;
         }
-
-
 
         if (parent == NULL ||
             parent->iops == NULL ||
@@ -771,79 +960,52 @@ int vfs_mkdir(const char *path,
                 return -1;
         }
 
-
-
-        /*
-         * 父节点必须是目录
-         */
         if ((parent->mode & S_IFMT) != S_IFDIR)
         {
                 inode_put(parent);
-
                 slab_free(name);
                 return -1;
         }
 
-
-
         struct task_struct *task = get_task();
 
-
         /*
-         * 修改目录需要：
-         *
-         * MAY_WRITE:
-         * 修改目录内容
-         *
-         * MAY_EXEC:
-         * 搜索目录
+         * 权限校验（VFS 层拦截）：
+         * 修改目录内容需要 MAY_WRITE，搜索目录需要 MAY_EXEC。
          */
         if (vfs_permission(parent,
                            &task->cred,
                            MAY_WRITE | MAY_EXEC) < 0)
         {
                 inode_put(parent);
-
                 slab_free(name);
                 return -1;
         }
 
-
-
-        /*
-         * 检查缓存
-         *
-         * 防止重复创建
-         */
-        struct inode *exist =
-                inode_cache_find(parent,
-                                 name);
-
-
-        if (exist != NULL)
-        {
-                inode_put(exist);
-                inode_put(parent);
-
-                slab_free(name);
-
-                return -1;
-        }
-
-
-
-        /*
-         * VFS只接受权限位
-         *
-         * 类型由VFS补充
-         */
         mode &= 0777;
 
+        /*
+         * 并发保护：序列化元数据修改。
+         */
+        acquire_sleep(&vfs_meta_lock);
 
+        /*
+         * 二次检查缓存：防止 lookup_parent 后、获取锁前
+         * 其他进程已创建同名目录。
+         */
+        {
+                struct inode *exist = inode_cache_find(parent, name);
+                if (exist != NULL)
+                {
+                        inode_put(exist);
+                        release_sleep(&vfs_meta_lock);
+                        inode_put(parent);
+                        slab_free(name);
+                        return -1;
+                }
+        }
 
         struct inode *new_inode = NULL;
-
-
 
         int ret =
                 parent->iops->mkdir(parent,
@@ -854,34 +1016,39 @@ int vfs_mkdir(const char *path,
         if (ret < 0 ||
             new_inode == NULL)
         {
+                release_sleep(&vfs_meta_lock);
                 inode_put(parent);
-
                 slab_free(name);
-
                 return -1;
         }
 
         /*
-         * 设置 VFS inode cache key
+         * 权限位由 VFS 层统一设置（开发范式）：
+         * 文件系统层只填写 S_IFDIR，rwx 权限由 VFS 覆盖。
          */
-        new_inode->cache_key.parent = parent;
+        new_inode->mode = (new_inode->mode & S_IFMT) | mode;
+        new_inode->uid = task->cred.uid;
+        new_inode->gid = task->cred.gid;
 
+        new_inode->cache_key.parent = parent;
 
         memcpy(new_inode->cache_key.name,
                name,
                strlen(name) + 1);
 
+        /* cache 持有 parent 引用 */
+        inode_get(parent);
 
-
-        /*
-         * 加入 inode cache
-         *
-         * cache 持有一个引用
-         */
         if (inode_cache_insert(new_inode) < 0)
         {
-                inode_put(new_inode);
+                /* cache 未接管，释放刚取的 parent 引用 */
                 inode_put(parent);
+
+                inode_put(new_inode);
+
+                /* 释放 lookup_parent 返回的 caller 引用 */
+                inode_put(parent);
+                release_sleep(&vfs_meta_lock);
                 slab_free(name);
                 return -1;
         }
@@ -889,6 +1056,8 @@ int vfs_mkdir(const char *path,
         inode_put(new_inode);
 
         inode_put(parent);
+
+        release_sleep(&vfs_meta_lock);
 
         slab_free(name);
 
@@ -951,12 +1120,18 @@ int vfs_unlink(const char *path)
                 return -1;
         }
 
+        /*
+         * 并发保护：序列化元数据修改。
+         */
+        acquire_sleep(&vfs_meta_lock);
+
         struct inode *inode =
                 inode_cache_find(parent,
                                  name);
 
         if (inode == NULL)
         {
+                release_sleep(&vfs_meta_lock);
                 inode_put(parent);
                 slab_free(name);
                 return -1;
@@ -965,6 +1140,7 @@ int vfs_unlink(const char *path)
         if ((inode->mode & S_IFMT) == S_IFDIR)
         {
                 inode_put(inode);
+                release_sleep(&vfs_meta_lock);
                 inode_put(parent);
                 slab_free(name);
                 return -1;
@@ -977,6 +1153,7 @@ int vfs_unlink(const char *path)
         if (ret < 0)
         {
                 inode_put(inode);
+                release_sleep(&vfs_meta_lock);
                 inode_put(parent);
                 slab_free(name);
                 return -1;
@@ -989,6 +1166,8 @@ int vfs_unlink(const char *path)
         inode_put(inode);
 
         inode_put(parent);
+
+        release_sleep(&vfs_meta_lock);
 
         slab_free(name);
 
@@ -1050,12 +1229,18 @@ int vfs_rmdir(const char *path)
                 return -1;
         }
 
+        /*
+         * 并发保护：序列化元数据修改。
+         */
+        acquire_sleep(&vfs_meta_lock);
+
         struct inode *inode =
                 inode_cache_find(parent,
                                  name);
 
         if (inode == NULL)
         {
+                release_sleep(&vfs_meta_lock);
                 inode_put(parent);
                 slab_free(name);
                 return -1;
@@ -1065,6 +1250,7 @@ int vfs_rmdir(const char *path)
         if ((inode->mode & S_IFMT) != S_IFDIR)
         {
                 inode_put(inode);
+                release_sleep(&vfs_meta_lock);
                 inode_put(parent);
                 slab_free(name);
                 return -1;
@@ -1078,6 +1264,7 @@ int vfs_rmdir(const char *path)
         if (ret < 0)
         {
                 inode_put(inode);
+                release_sleep(&vfs_meta_lock);
                 inode_put(parent);
                 slab_free(name);
                 return -1;
@@ -1091,10 +1278,84 @@ int vfs_rmdir(const char *path)
 
         inode_put(parent);
 
+        release_sleep(&vfs_meta_lock);
+
         slab_free(name);
 
         return 0;
 }
+
+/*
+ * 字符设备文件支持
+ * 字符设备（如 /dev/ttyS0）不在任何文件系统里，
+ * /dev/ 前缀的路径直接从字符设备表解析，
+ * file->inode 为 NULL，file->private 指向 char_device。
+ */
+static int64_t chardev_file_read(struct file *file,
+                                 void *buf,
+                                 uint64_t count)
+{
+        struct char_device *cdev = file->private;
+        uint64_t out_len = 0;
+
+        if (cdev == NULL ||
+            cdev->ops == NULL ||
+            cdev->ops->read == NULL)
+                return -1;
+
+        if (cdev->ops->read(cdev->priv, buf, count, &out_len) < 0)
+                return -1;
+
+        return (int64_t)out_len;
+}
+
+static int64_t chardev_file_write(struct file *file,
+                                  const void *buf,
+                                  uint64_t count)
+{
+        struct char_device *cdev = file->private;
+        uint64_t out_len = 0;
+
+        if (cdev == NULL ||
+            cdev->ops == NULL ||
+            cdev->ops->write == NULL)
+                return -1;
+
+        if (cdev->ops->write(cdev->priv, buf, count, &out_len) < 0)
+                return -1;
+
+        return (int64_t)out_len;
+}
+
+static int64_t chardev_file_seek(struct file *file,
+                                 int64_t offset,
+                                 int whence)
+{
+        (void)file;
+        (void)offset;
+        (void)whence;
+
+        return -1; /* 字符设备不支持 seek */
+}
+
+static int chardev_file_close(struct file *file)
+{
+        struct char_device *cdev = file->private;
+
+        if (cdev != NULL &&
+            cdev->ops != NULL &&
+            cdev->ops->close != NULL)
+                return cdev->ops->close(cdev->priv);
+
+        return 0;
+}
+
+static struct file_operations vfs_chardev_fops = {
+        .read = chardev_file_read,
+        .write = chardev_file_write,
+        .seek = chardev_file_seek,
+        .close = chardev_file_close,
+};
 
 /// @brief 打开一个文件。
 ///
@@ -1111,6 +1372,55 @@ int vfs_open(const char *path,
 
         if (task == NULL)
                 return -1;
+
+        /*
+         * /dev/ 前缀：字符设备
+         */
+        if (strncmp(path, "/dev/", 5) == 0)
+        {
+                struct char_device *cdev =
+                    vfs_find_chardev(path + 5);
+
+                if (cdev == NULL)
+                        return -1;
+
+                if (cdev->ops != NULL &&
+                    cdev->ops->open != NULL &&
+                    cdev->ops->open(cdev->priv, (int)flags) < 0)
+                        return -1;
+
+                struct file *file = slab_alloc(sizeof(*file));
+
+                if (file == NULL)
+                        return -1;
+
+                memset(file, 0, sizeof(*file));
+
+                /* 字符设备没有 inode */
+                file->inode = NULL;
+                file->pos = 0;
+                file->flags = flags;
+                file->fops = &vfs_chardev_fops;
+                file->private = cdev;
+
+                /*
+                 * 初始无持有者
+                 * fd_alloc负责增加引用
+                 */
+                file->refcount = 0;
+
+                init_sleeplock(&file->slk);
+
+                int fd = fd_alloc(file);
+
+                if (fd < 0)
+                {
+                        slab_free(file);
+                        return -1;
+                }
+
+                return fd;
+        }
 
         struct inode *inode = NULL;
 
@@ -1266,6 +1576,53 @@ static void vfs_inode_cache_init(){
 
 }
 
+/*
+ * inode cache 键哈希：
+ * 父目录指针与名字一起参与 FNV-1a。
+ */
+static uint32_t inode_cache_hash(const void *key, uint32_t key_len)
+{
+        const struct inode_cache_key *k = key;
+        const uint8_t *p;
+        uint32_t h = 2166136261u;
+
+        (void)key_len;
+
+        p = (const uint8_t *)&k->parent;
+
+        for (uint32_t i = 0; i < sizeof(k->parent); i++)
+        {
+                h ^= p[i];
+                h *= 16777619u;
+        }
+
+        p = (const uint8_t *)k->name;
+
+        for (uint32_t i = 0; i < VFS_MAX_PATH_LEN && p[i] != '\0'; i++)
+        {
+                h ^= p[i];
+                h *= 16777619u;
+        }
+
+        return h;
+}
+
+/* inode cache 键比较：父目录指针相同且名字相同 */
+static bool inode_cache_key_equal(const void *key1,
+                                  const void *key2,
+                                  uint32_t key_len)
+{
+        const struct inode_cache_key *a = key1;
+        const struct inode_cache_key *b = key2;
+
+        (void)key_len;
+
+        if (a->parent != b->parent)
+                return false;
+
+        return strncmp(a->name, b->name, VFS_MAX_PATH_LEN) == 0;
+}
+
 void inode_get(struct inode *inode)
 {
         if (inode == NULL)
@@ -1398,10 +1755,11 @@ int inode_cache_insert(struct inode *inode)
 /// @param inode 要删除的 inode
 void inode_cache_remove(struct inode *inode)
 {
+        struct inode *parent;
+        bool removed = false;
+
         if (inode == NULL)
                 return;
-
-        bool removed = false;
 
         acquire(&icache.lock);
 
@@ -1412,14 +1770,33 @@ void inode_cache_remove(struct inode *inode)
 
         release(&icache.lock);
 
-        if (removed)
-        {
-                // 释放cache持有的引用
-                inode_put(inode);
-        }
+        if (!removed)
+                return;
+
+        /*
+         * 必须在 inode_put 之前读出 parent：
+         * 若 inode 是最后一个引用，put 会触发 destroy，
+         * 之后 cache_key 内存不可再访问。
+         */
+        parent = inode->cache_key.parent;
+
+        // 释放cache持有的引用
+        inode_put(inode);
+
+        /*
+         * 释放 cache 代表该 inode 持有的父引用。
+         * 根 inode 的 parent 是 SPECIAL 哨兵值，不是真实指针。
+         */
+        if ((uint64_t)parent != VFS_ROOT_PARENT_SPECIAL)
+                inode_put(parent);
 }
 
 /// @brief 截断 inode 对应文件大小
+///
+/// VFS 层职责（开发范式）：
+///   1. 权限校验——调用者必须对 inode 具有 MAY_WRITE
+///   2. 并发保护——通过 vfs_meta_lock 序列化元数据修改
+///
 /// @param inode 目标 inode
 /// @param size 新文件大小
 /// @return 成功返回0，失败返回-1
@@ -1429,10 +1806,6 @@ int vfs_truncate(struct inode *inode,
         if (inode == NULL)
                 return -1;
 
-
-        /*
-         * 必须拥有写权限
-         */
         struct task_struct *task = get_task();
 
         if (vfs_permission(inode,
@@ -1442,15 +1815,19 @@ int vfs_truncate(struct inode *inode,
                 return -1;
         }
 
-
         if (inode->iops == NULL ||
             inode->iops->truncate == NULL)
         {
                 return -1;
         }
 
+        acquire_sleep(&vfs_meta_lock);
 
-        return inode->iops->truncate(inode, size);
+        int ret = inode->iops->truncate(inode, size);
+
+        release_sleep(&vfs_meta_lock);
+
+        return ret;
 }
 
 void file_get(struct file *file)
@@ -1458,11 +1835,11 @@ void file_get(struct file *file)
         if (file == NULL)
                 return;
 
-        acquire(&file->slk);
+        acquire_sleep(&file->slk);
 
         file->refcount++;
 
-        release(&file->slk);
+        release_sleep(&file->slk);
 }
 
 void file_put(struct file *file)
@@ -1472,7 +1849,7 @@ void file_put(struct file *file)
 
         int destroy = 0;
 
-        acquire(&file->slk);
+        acquire_sleep(&file->slk);
 
         if (file->refcount > 0)
                 file->refcount--;
@@ -1480,7 +1857,7 @@ void file_put(struct file *file)
         if (file->refcount == 0)
                 destroy = 1;
 
-        release(&file->slk);
+        release_sleep(&file->slk);
 
         if (!destroy)
                 return;
@@ -1509,7 +1886,7 @@ int64_t vfs_read(struct file *file,
             file->fops->read == NULL)
                 return -1;
 
-        acquire(&file->slk);
+        acquire_sleep(&file->slk);
 
         int64_t ret =
             file->fops->read(file,
@@ -1517,7 +1894,7 @@ int64_t vfs_read(struct file *file,
                              count);
         if (ret > 0)
                 file->pos += ret;
-        release(&file->slk);
+        release_sleep(&file->slk);
 
         return ret;
 }
@@ -1534,7 +1911,7 @@ int64_t vfs_write(struct file *file,
             file->fops->write == NULL)
                 return -1;
 
-        acquire(&file->slk);
+        acquire_sleep(&file->slk);
 
         int64_t ret =
             file->fops->write(file,
@@ -1544,7 +1921,7 @@ int64_t vfs_write(struct file *file,
         if (ret > 0)
                 file->pos += ret;
 
-        release(&file->slk);
+        release_sleep(&file->slk);
 
         return ret;
 }
@@ -1690,7 +2067,7 @@ int64_t vfs_seek(struct file *file,
                 return -1;
 
 
-        acquire(&file->slk);
+        acquire_sleep(&file->slk);
 
         int64_t ret =
                 file->fops->seek(file,
@@ -1705,7 +2082,7 @@ int64_t vfs_seek(struct file *file,
         if (ret >= 0)
                 file->pos = ret;
 
-        release(&file->slk);
+        release_sleep(&file->slk);
 
         return ret;
 }
@@ -1772,7 +2149,7 @@ int vfs_readdir(struct file *file,
 
 
 
-        acquire(&file->slk);
+        acquire_sleep(&file->slk);
 
 
         int ret =
@@ -1781,7 +2158,7 @@ int vfs_readdir(struct file *file,
                                  dirent);
 
 
-        release(&file->slk);
+        release_sleep(&file->slk);
 
 
         return ret;
@@ -1803,4 +2180,238 @@ int64_t vfs_seek_fd(int fd,
         file_put(file);
 
         return ret;
+}
+
+/// @brief 为当前进程建立标准输入/输出/错误（fd 0/1/2）。
+///
+/// 三个 fd 都指向控制台字符设备 /dev/ttyS0。
+/// 必须在 ofile[] 全空的进程上调用，fd 依次占用 0、1、2。
+void init_vfs_std(void)
+{
+        for (int i = 0; i < 3; i++)
+        {
+                if (vfs_open("/dev/ttyS0", O_RDWR) < 0)
+                        panic_error("init_vfs_std: open /dev/ttyS0 failed");
+        }
+}
+
+/* 
+ * umount
+ */
+
+/// @brief 在挂载树中按路径精确查找挂载点。
+/// 与 vfs_find_mount 的"最深覆盖"语义不同，这里要求
+/// mount->path 与 target 完全一致。
+/// 调用者必须持有 mount_table.lock。
+static struct mount *vfs_find_mount_exact(struct mount *node,
+                                          const char *path)
+{
+        struct mount *c;
+
+        if (node == NULL)
+                return NULL;
+
+        c = node->child;
+
+        while (c != NULL)
+        {
+                struct mount *r;
+
+                if (strcmp(c->path, path) == 0)
+                        return c;
+
+                r = vfs_find_mount_exact(c, path);
+
+                if (r != NULL)
+                        return r;
+
+                c = c->next;
+        }
+
+        return NULL;
+}
+
+struct vfs_umount_collect_arg
+{
+        struct inode **victims;
+        uint32_t max;
+        uint32_t count;
+        struct super_block *sb;
+};
+
+/* 在 hash_table_foreach 持锁回调里收集该 sb 的缓存 inode */
+static void vfs_umount_collect_cb(const void *key,
+                                  uint32_t key_len,
+                                  void *value,
+                                  void *arg)
+{
+        struct vfs_umount_collect_arg *a = arg;
+        struct inode *ino = value;
+
+        (void)key;
+        (void)key_len;
+
+        if (a->count < a->max &&
+            ino != NULL &&
+            ino->sb == a->sb)
+                a->victims[a->count++] = ino;
+}
+
+struct mount *vfs_get_root_mount(void)
+{
+        return mount_table.root;
+}
+
+/// @brief 卸载挂载点 target。
+///
+/// 步骤：
+///   1. 拒绝卸载根文件系统 "/";
+///   2. 按路径精确找到挂载点，有子挂载点则拒绝；
+///   3. 扫描全部进程，任一 ofile 或 cwd 引用该 sb 则拒绝（busy）；
+///   4. 从父挂载点的孩子链表摘除；
+///   5. 清除该 sb 在 inode cache 的所有残留条目
+///      （每个条目持有 inode 自身与其父目录的引用）；
+///   6. kill_sb 释放 sb 持有的 root 引用并销毁 sb，最后释放 mount。
+///
+/// @param target 挂载点路径，例如 "/mnt"
+/// @return 成功返回 0，失败返回 -1
+int vfs_umount(const char *target)
+{
+        struct mount *mnt = NULL;
+        struct mount *parent = NULL;
+        struct super_block *sb;
+        struct filesystem *fs;
+        struct inode **victims;
+        struct vfs_umount_collect_arg carg;
+        uint32_t retry;
+
+        if (target == NULL ||
+            target[0] != '/' ||
+            strcmp(target, "/") == 0)
+                return -1;
+
+        acquire(&mount_table.lock);
+
+        mnt = vfs_find_mount_exact(mount_table.root, target);
+
+        if (mnt == NULL)
+        {
+                release(&mount_table.lock);
+                return -1;
+        }
+
+        /* 还有子挂载点时不能卸载 */
+        if (mnt->child != NULL)
+        {
+                release(&mount_table.lock);
+                return -1;
+        }
+
+        sb = mnt->sb;
+
+        if (sb == NULL || sb->fs == NULL)
+        {
+                release(&mount_table.lock);
+                return -1;
+        }
+
+        /*
+         * busy 检查：任何进程的 ofile / cwd 引用该 sb 都拒绝卸载。
+         * 字符设备文件 inode 为 NULL，天然跳过。
+         */
+        for (uint32_t i = 0; i < NTASKS; i++)
+        {
+                struct task_struct *t = &tasks[i];
+
+                if (t->cwd != NULL && t->cwd->sb == sb)
+                {
+                        release(&mount_table.lock);
+                        return -1;
+                }
+
+                for (int j = 0; j < NOFILE; j++)
+                {
+                        struct file *f = t->ofile[j];
+
+                        if (f != NULL &&
+                            f->inode != NULL &&
+                            f->inode->sb == sb)
+                        {
+                                release(&mount_table.lock);
+                                return -1;
+                        }
+                }
+        }
+
+        /*
+         * 从父挂载点的孩子链表中摘除
+         */
+        parent = mnt->parent;
+
+        if (parent != NULL)
+        {
+                struct mount **pp = &parent->child;
+
+                while (*pp != NULL && *pp != mnt)
+                        pp = &(*pp)->next;
+
+                if (*pp == mnt)
+                        *pp = mnt->next;
+        }
+
+        fs = sb->fs;
+
+        release(&mount_table.lock);
+
+        /*
+         * 清除该 sb 在 inode cache 中的所有残留。
+         * 不能在 foreach 回调里直接删除，先收集再逐个 remove。
+         * remove 会级联释放父子引用，一轮删不完就再来一轮。
+         */
+        victims = slab_alloc(sizeof(struct inode *) * VFS_INODE_CACHE_SIZE);
+
+        if (victims == NULL)
+        {
+                /* 摘链后分配失败：重新挂回去，保持挂载表一致 */
+                acquire(&mount_table.lock);
+
+                if (parent != NULL)
+                {
+                        mnt->next = parent->child;
+                        parent->child = mnt;
+                }
+
+                release(&mount_table.lock);
+                return -1;
+        }
+
+        for (retry = 0; retry < 8; retry++)
+        {
+                carg.victims = victims;
+                carg.max = VFS_INODE_CACHE_SIZE;
+                carg.count = 0;
+                carg.sb = sb;
+
+                hash_table_foreach(icache.table,
+                                   vfs_umount_collect_cb,
+                                   &carg);
+
+                if (carg.count == 0)
+                        break;
+
+                for (uint32_t i = 0; i < carg.count; i++)
+                        inode_cache_remove(victims[i]);
+        }
+
+        slab_free(victims);
+
+        /*
+         * root 的 cache 残留（含挂载点父引用）已在上面的循环中清除，
+         * 这里只需释放 sb 持有的 root 引用并销毁 sb。
+         */
+        fs->kill_sb(sb);
+
+        slab_free(mnt);
+
+        return 0;
 }

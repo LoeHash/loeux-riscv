@@ -224,8 +224,8 @@ void init_slab()
         // 初始化 slab meta pool
         init_slab_meta_pool();
 
-        // 8 ~ 2048
-        for (int i = 0; i < 9; i++)
+        // 8 ~ 4096
+        for (int i = 0; i < 10; i++)
         {
                 // 分配一个 slab 元数据
                 slab_global_cache.slabs[i] = slab_alloc_meta();
@@ -278,7 +278,7 @@ void *slab_alloc(uint32_t size)
         // 获取round_size对应的父亲slab索引
         // 需要-3，因为round_size是8的倍数
         int father_slab_idx = POW2_SHIFT_COUNT(round_size) - 3;
-        if (father_slab_idx < 0 || father_slab_idx > 8)
+        if (father_slab_idx < 0 || father_slab_idx > 9)
         {
                 return NULL;
         }
@@ -518,7 +518,7 @@ void slab_dump(void)
         printk("                     SLAB DUMP\n");
         printk("============================================================\n");
 
-        for (int i = 0; i < 9; i++)
+        for (int i = 0; i < 10; i++)
         {
                 slab_t *s = slab_global_cache.slabs[i];
 

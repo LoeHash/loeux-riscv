@@ -581,7 +581,7 @@ int vm_pagetbl_copy(page_table src_pg, page_table dst_pg, uint64_t sz, bool is_u
                         continue;
                 }
                 flag = PTE_FLAGS(*p);
-                chunk = kalloc(PG_4K_SIZE);
+                chunk = kalloc();
                 if (chunk == 0)
                 {
                         pg_unmap(dst_pg, va, 1, 1);
@@ -631,7 +631,7 @@ int vm_pagetbl_copy_asign(page_table src_pg, page_table dst_pg, uint64_t va_star
                         continue;
                 }
                 flag = PTE_FLAGS(*p);
-                chunk = kalloc(PG_4K_SIZE);
+                chunk = kalloc();
                 if (chunk == 0)
                 {
                         pg_unmap(dst_pg, va, 1, 1);

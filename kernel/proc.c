@@ -11,6 +11,7 @@
 #include <lib.h>
 #include <vm.h>
 #include <slab.h>
+#include <syscall.h>
 
 /*
 我们现在规定，所有的用户态程序，全部在0x0 处加载运行
@@ -34,9 +35,9 @@ static spinlock_t pid_lock = {0};
 static uint64_t alloc_pid();
 static int check_elf_header(struct elf64_ehdr *ehdr);
 static void _map_user_stack(page_table pg);
-static int read_phdr(int fd, uint64_t off, struct elf64_phdr *ph);
+static int read_phdr(struct file *f, uint64_t off, struct elf64_phdr *ph);
 static int flags_to_pte(uint32_t p_flags);
-static int load_segment(int fd, page_table pg, struct elf64_phdr *ph);
+static int load_segment(struct file *f, page_table pg, struct elf64_phdr *ph);
 static void exit_fs(struct task_struct *ts);
 static void wake_wait_parent(struct task_struct *p);
 
@@ -52,13 +53,19 @@ void init_user()
 
         initask = ts;
 
+        /*
+         * alloc_task 返回时持有 ts->lk。
+         * set_cwd 内部也会 acquire(ts->lk)，此时还没有其他调度者
+         * （kernel_inited 尚未置位），先放锁避免重入死锁。
+         */
+        release(&ts->lk);
+
         if (set_cwd(ts, "/") == -1)
         {
                 panic(PANIC_ERROR, "init_tasks: set_cwd failed!\n");
         }
 
         ts->state = RUNNABLE;
-        release(&ts->lk);
 }
 
 /// @brief 设置进程工作目录。
@@ -68,38 +75,72 @@ void init_user()
 int set_cwd(struct task_struct *ts,
             const char *path)
 {
+        char *normalized;
+        struct inode *inode = NULL;
+        struct inode *old;
+
         if (ts == NULL ||
             path == NULL)
                 return -1;
 
-        struct inode *inode = NULL;
+        /*
+         * 文本层规范化（处理 . / .. / //）：
+         * "." ".." 不是合法的 FAT 目录项，VFS lookup 无法解析它们，
+         * 必须在进入 VFS 前消解成规范路径。
+         * do_build_user_path 按 BUFSZ 上限写入，用 slab 缓冲避免栈溢出。
+         */
+        normalized = slab_alloc(BUFSZ);
 
-        if (vfs_lookup(path,
+        if (normalized == NULL)
+                return -1;
+
+        do_build_user_path(normalized,
+                           (char *)path,
+                           ts->cwd_path);
+
+        /* 规范化失败（超长等）会得到空串；结果还必须放得进 cwd_path */
+        if (normalized[0] == '\0' ||
+            strlen(normalized) >= sizeof(ts->cwd_path))
+        {
+                slab_free(normalized);
+                return -1;
+        }
+
+        if (vfs_lookup(normalized,
                        &inode) < 0)
         {
+                slab_free(normalized);
                 return -1;
         }
 
         if (inode == NULL)
+        {
+                slab_free(normalized);
                 return -1;
+        }
 
         if ((inode->mode & S_IFMT) != S_IFDIR)
         {
                 inode_put(inode);
+                slab_free(normalized);
                 return -1;
         }
 
         acquire(&ts->lk);
 
-        struct inode *old =
-                ts->cwd;
+        old = ts->cwd;
 
         ts->cwd = inode;
+        memcpy(ts->cwd_path,
+               normalized,
+               strlen(normalized) + 1);
 
         release(&ts->lk);
 
         if (old)
                 inode_put(old);
+
+        slab_free(normalized);
 
         return 0;
 }
@@ -502,7 +543,7 @@ static void exit_fs(struct task_struct *ts)
                 ts->ofile[i] = NULL;
 
                 if (f)
-                        file_close(f);
+                        file_put(f);
         }
 
         if (ts->cwd)
@@ -510,6 +551,8 @@ static void exit_fs(struct task_struct *ts)
                 inode_put(ts->cwd);
                 ts->cwd = NULL;
         }
+
+        ts->cwd_path[0] = '\0';
 }
 
 /// @brief 记录"有子进程退出"的 pending 标志，
@@ -748,6 +791,7 @@ int kfork()
 
         // 4. 复制name和cwd
         strcpy(new_ts->name, father_ts->name);
+        strcpy(new_ts->cwd_path, father_ts->cwd_path);
 
         /*
         * cwd 是 inode 引用。
@@ -823,14 +867,24 @@ int kexec(char *path, char **argv)
         uint64_t old_size = t->size, new_size = 0;
 
         // ret 默认 -1（失败）；仅在真正提交（替换页表）时改写为 argc。
-        // fd/buf 初始化为“未持有”，out 里据此安全释放。
+        // fd/buf/ef 初始化为“未持有”，out 里据此安全释放。
         int ret = -1;
         int fd = -1;
         char *buf = NULL;
+        struct file *ef = NULL;
 
         fd = vfs_open(path, O_RDONLY);
         if (fd == -1)
         {
+                return -1;
+        }
+
+        // 取一个临时 file 引用用于内核态读取，
+        // out 里统一释放（先 file_put 再 fd_close）。
+        ef = fd_get(fd);
+        if (ef == NULL)
+        {
+                fd_close(fd);
                 return -1;
         }
 
@@ -842,7 +896,7 @@ int kexec(char *path, char **argv)
         }
 
         // 先读取64字节
-        if (vfs_read(fd, buf, 64) != 64)
+        if (vfs_read(ef, buf, 64) != 64)
         {
                 goto out;
         }
@@ -881,7 +935,7 @@ int kexec(char *path, char **argv)
         for (int i = 0; i < ehdr.e_phnum; i++)
         {
                 // 以前漏检了 read_phdr 的返回值，段表读失败会带着脏 phdr 继续跑
-                if (read_phdr(fd, ehdr.e_phoff + i * ehdr.e_phentsize, &phdr) < 0)
+                if (read_phdr(ef, ehdr.e_phoff + i * ehdr.e_phentsize, &phdr) < 0)
                 {
                         goto out;
                 }
@@ -890,7 +944,7 @@ int kexec(char *path, char **argv)
                         // 加载这个段
                         // 同时记录大小
 
-                        seg_size_tmp = load_segment(fd, new_page, &phdr);
+                        seg_size_tmp = load_segment(ef, new_page, &phdr);
                         if (seg_size_tmp < 0)
                         {
                                 goto out;
@@ -980,9 +1034,14 @@ out:
         {
                 free_page(buf);
         }
+        if (ef)
+        {
+                // 先释放 fd_get 的临时引用，再关 fd（各自减一次引用）
+                file_put(ef);
+        }
         if (fd >= 0)
         {
-                vfs_close(fd);
+                fd_close(fd);
         }
         if (new_page)
         {
@@ -992,7 +1051,7 @@ out:
 }
 
 // 加载
-static int load_segment(int fd, page_table pg, struct elf64_phdr *ph)
+static int load_segment(struct file *f, page_table pg, struct elf64_phdr *ph)
 {
         // 无聊的检查..
         if (ph == NULL)
@@ -1034,13 +1093,13 @@ static int load_segment(int fd, page_table pg, struct elf64_phdr *ph)
                         uint64_t len = page_end - page_start;
                         uint64_t pa_off = page_start - va;
 
-                        if (vfs_seek_fd(fd, file_off, SEEK_SET) < 0)
+                        if (vfs_seek(f, file_off, SEEK_SET) < 0)
                         {
                                 free_page(pa);
                                 return -1;
                         }
 
-                        if (vfs_read(fd,
+                        if (vfs_read(f,
                                 pa + pa_off,
                                 len) != len)
                         {
@@ -1066,14 +1125,14 @@ static int load_segment(int fd, page_table pg, struct elf64_phdr *ph)
 
 // 从文件偏移 off 处读取一个 Program Header
 // 成功返回 0，失败返回 -1
-static int read_phdr(int fd, uint64_t off, struct elf64_phdr *ph)
+static int read_phdr(struct file *f, uint64_t off, struct elf64_phdr *ph)
 {
         // 跳到指定偏移
-        if (vfs_seek_fd(fd, off, SEEK_SET) < 0)
+        if (vfs_seek(f, off, SEEK_SET) < 0)
                 return -1;
 
         // 读一个 Program Header（56 字节）
-        if (vfs_read(fd, ph, sizeof(struct elf64_phdr)) != sizeof(struct elf64_phdr))
+        if (vfs_read(f, ph, sizeof(struct elf64_phdr)) != sizeof(struct elf64_phdr))
                 return -1;
 
         return 0;

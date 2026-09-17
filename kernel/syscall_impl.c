@@ -25,7 +25,7 @@ uint64_t sys_pwd()
         struct task_struct *ts = get_task();
         acquire(&ts->lk);
 
-        copy_data_str_out(buf_addr, ts->cwd, max < MAX_PATH_LEN ? max : MAX_PATH_LEN);
+        copy_data_str_out(buf_addr, ts->cwd_path, max < MAX_PATH_LEN ? max : MAX_PATH_LEN);
 
         release(&ts->lk);
 
@@ -129,8 +129,8 @@ uint64_t sys_fork()
 uint64_t sys_exec()
 {
         struct task_struct *ts = get_task();
-        char path[MAX_PATH_LEN];
         char u_path[MAX_PATH_LEN];
+        char *path;
         char *argv[MAX_ARGS];
         uint64_t path_addr, argv_addr;
 
@@ -144,7 +144,23 @@ uint64_t sys_exec()
                 return -1;
         }
 
-        do_build_user_path(path, u_path, ts->cwd);
+        /*
+         * do_build_user_path 按 BUFSZ 上限写入结果，
+         * 栈缓冲（MAX_PATH_LEN）放不下，用 slab 缓冲。
+         */
+        path = slab_alloc(BUFSZ);
+
+        if (path == NULL)
+                return -1;
+
+        do_build_user_path(path, u_path, ts->cwd_path);
+
+        if (path[0] == '\0')
+        {
+                // 规范化失败（cwd 未设置或最终路径超长）
+                slab_free(path);
+                return -1;
+        }
 
         // 2. 逐个读取用户空间 argv 数组，把每个字符串拷到内核
         //    argv_addr 指向用户空间的 char*[]（8 字节指针数组）
@@ -193,6 +209,8 @@ uint64_t sys_exec()
         //    两种情况下内核副本都已无用：
         //    - 成功：字符串已被 copyout 到新用户栈
         //    - 失败：kexec 自己恢复了旧页表，直接释放
+        slab_free(path);
+
         for (int i = 0; i < alloc_count; i++)
         {
                 slab_free(argv[i]);
@@ -201,6 +219,8 @@ uint64_t sys_exec()
         return ret;
 
 fail:
+        slab_free(path);
+
         for (int i = 0; i < alloc_count; i++)
         {
                 slab_free(argv[i]);

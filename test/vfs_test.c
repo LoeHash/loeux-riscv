@@ -1,291 +1,330 @@
 #include <vfs.h>
 #include <virtio.h>
 #include <test.h>
-#include <fat12.h>
+#include <fat32.h>
 #include <printk.h>
 #include <panic.h>
 #include <proc.h>
-extern struct mount_entry mount_points[MAX_MOUNT_NUM];
+#include <memory.h>
+#include <lib.h>
 
-// offset处读取文件n个字节
-void vfs_test_seek_file(const char *path, int offset, uint64_t n)
+/*
+ * 新版 VFS 接口测试
+ *
+ * 打开文件的标准姿势：
+ *   fd = vfs_open(path, flags);
+ *   f  = fd_get(fd);        // 临时引用
+ *   vfs_read / vfs_write / vfs_seek(f, ...)
+ *   file_put(f);            // 释放临时引用
+ *   fd_close(fd);           // 释放 fd 引用
+ */
+
+static void print_mount_tree(struct mount *mnt, int depth)
 {
-        int fd = vfs_open(path, FS_O_RW);
+        struct mount *c;
 
-        if (fd == -1)
-        {
-                panic(PANIC_ERROR, "vfs_open\n");
-        }
+        if (mnt == NULL)
+                return;
 
-        printk("==========================================\n");
-        printk("从 %d 开始, 读取文件 %s 的 %lu 个字节\n", offset, path, n);
-        char *buf = alloc_page();
-        vfs_seek(fd, offset);
-        // 直接读取 n个字节
-        vfs_read(fd, buf, n);
+        for (int i = 0; i < depth; i++)
+                printk("    ");
 
-        printk("在 %d 处, 读取文件 %s 的 %lu 个字节 的内容是:\n", offset, path, n);
-        for (int i = 0; i < n; i++)
-        {
-                printk("%0#lx ", buf[i]);
-        }
-        printk("\n");
+        printk("%-20s fs=%-8s sb=%0#lx\n",
+               mnt->path,
+               (mnt->sb && mnt->sb->fs) ? mnt->sb->fs->name : "?",
+               (unsigned long)(mnt->sb ? mnt->sb : 0));
 
-        vfs_close(fd);
-}
-
-void vfs_test_read_file(const char *path)
-{
-        int fd = vfs_open(path, FS_O_RW);
-
-        if (fd == -1)
-        {
-                panic(PANIC_ERROR, "vfs_open\n");
-        }
-
-        printk("==========================================\n");
-        printk("读取整个文件\n");
-        char *buf = alloc_page();
-        uint64_t read = 0;
-        uint64_t read_times = 0;
-        uint64_t byte_count = 0;
-        // 一次读取 2048 字节
-        while ((read = vfs_read(fd, buf, 4096)) > 0)
-        {
-                byte_count += read;
-                printk("第 %lu 次读取, 读取字节数: %lu\n", ++read_times, read);
-        }
-
-        printk("共读取 %lu 次, 共计读取字节数: %lu\n", read_times, byte_count);
+        for (c = mnt->child; c != NULL; c = c->next)
+                print_mount_tree(c, depth + 1);
 }
 
 void print_mount_table(void)
 {
-        int i;
-        int found = 0;
-
         printk("\n==================== Mount Table ====================\n");
-        printk("%-4s %-30s %-12s %-12s\n", "Idx", "Mount Point", "Device", "FS Type");
-        printk("---------------------------------------------------------\n");
-
-        for (i = 0; i < MAX_MOUNT_NUM; i++)
-        {
-                struct mount_entry *entry = &mount_points[i];
-
-                // 检查挂载点是否有效（假设空字符串表示未使用）
-                if (entry->mount_point[0] == '\0')
-                {
-                        continue;
-                }
-
-                found = 1;
-
-                // 打印索引和挂载点
-                printk("%-4d %-30s ", i, entry->mount_point);
-
-                // 打印设备地址
-                if (entry->device != NULL)
-                {
-                        printk("%0#lx ", (unsigned long)entry->device);
-                }
-                else
-                {
-                        printk("%-12s ", "NULL");
-                }
-
-                // 打印文件系统类型（根据 fs_ops 地址判断，或者你可以添加 fs_type 字段）
-                if (entry->fs_ops != NULL)
-                {
-                        printk("%0#lx", (unsigned long)entry->fs_ops);
-                }
-                else
-                {
-                        printk("%-12s", "NULL");
-                }
-                printk("\n");
-
-                // 可选：打印更多详细信息
-                printk("    fs_priv: ");
-                if (entry->fs_priv != NULL)
-                {
-                        printk("%0#lx", (unsigned long)entry->fs_priv);
-                }
-                else
-                {
-                        printk("NULL");
-                }
-                printk("\n");
-
-                // 如果有 block_device，打印其信息
-                if (entry->device != NULL)
-                {
-                        printk("    sector_count: ");
-                        uint64_t sectors = entry->device->driver.sector_count(entry->device->private_data);
-                        printk("%ld\n", sectors);
-                }
-                printk("\n");
-        }
-
-        if (!found)
-        {
-                printk("No mount points found.\n");
-        }
-
-        printk("==================================\n");
+        print_mount_tree(vfs_get_root_mount(), 0);
+        printk("=====================================================\n");
 }
 
-void test_fat12_operations(void)
+// offset处读取文件n个字节
+void vfs_test_seek_file(const char *path, int offset, uint64_t n)
 {
-        char read_buf[512] = {0};
-        const char *write_data = "Hello FAT12! This is a test write from kernel via VFS.";
-        int fd, ret;
-        int64_t bytes;
-        struct file *file;
+        int fd;
+        struct file *f;
+        char *buf;
+        int64_t rd;
 
-        printk("\n========== FAT12 File Operation Test ==========\n");
+        fd = vfs_open(path, O_RDONLY);
 
-        printk("[Test 1] Listing root directory\n");
-        struct fat12_priv *fs = (struct fat12_priv *)0x81ab2000;
-        uint8_t *buf = alloc_page();
-        if (buf)
-        {
-                for (uint32_t s = fs->root_dir_start; s < fs->root_dir_start + fs->root_dir_sectors; s++)
-                {
-                        fs->bdev->driver.read(fs->bdev->private_data, s, buf);
-                        for (int i = 0; i < 16; i++)
-                        {
-                                struct fat12_dirent *e = (struct fat12_dirent *)(buf + i * 32);
-                                if (e->dir_name[0] == 0x00)
-                                {
-                                        free_page(buf);
-                                        goto test2;
-                                }
-                                if (e->dir_name[0] == 0xE5)
-                                        continue;
-                                if (e->dir_attr == 0x0F)
-                                        continue;
-                                if (e->dir_attr == 0x08)
-                                        continue;
-                                printk("  %.8s.%.3s size=%u cluster=%u\n",
-                                       e->dir_name, e->dir_ext, e->dir_file_size, e->dir_first_cluster_low);
-                        }
-                }
-                free_page(buf);
-        }
-
-test2:
-        printk("\n[Test 2] Opening /hello.txt for read/write\n");
-        fd = vfs_open("/hello.txt", FS_O_RW);
         if (fd < 0)
         {
-                printk("  ✗ Failed to open /hello.txt (fd=%d)\n", fd);
+                printk("vfs_test_seek_file: open %s failed\n", path);
                 return;
         }
-        printk("  ✓ File opened successfully, fd=%d\n", fd);
 
-        printk("\n[Test 2b] fstat(/hello.txt)\n");
+        f = fd_get(fd);
+        buf = alloc_page();
+
+        if (f != NULL && buf != NULL &&
+            vfs_seek(f, offset, SEEK_SET) >= 0)
         {
-                struct stat st;
-                if (vfs_fstat(fd, &st) < 0)
+                rd = vfs_read(f, buf, n);
+
+                printk("从 %d 开始, 读取文件 %s 的 %lu 个字节, 实际读取 %ld\n",
+                       offset, path, n, rd);
+
+                for (int64_t i = 0; i < rd && i < 64; i++)
+                        printk("%0#lx ", (unsigned char)buf[i]);
+
+                printk("\n");
+        }
+
+        if (buf)
+                free_page(buf);
+        if (f)
+                file_put(f);
+
+        fd_close(fd);
+}
+
+void vfs_test_read_file(const char *path)
+{
+        int fd;
+        struct file *f;
+        char *buf;
+        int64_t n;
+        uint64_t total = 0;
+        uint64_t times = 0;
+
+        fd = vfs_open(path, O_RDONLY);
+
+        if (fd < 0)
+        {
+                printk("vfs_test_read_file: open %s failed\n", path);
+                return;
+        }
+
+        f = fd_get(fd);
+        buf = alloc_page();
+
+        if (f != NULL && buf != NULL)
+        {
+                while ((n = vfs_read(f, buf, 4096)) > 0)
                 {
-                        printk("  ✗ vfs_fstat failed\n");
+                        total += n;
+                        times++;
+                }
+
+                printk("读取 %s: 共 %lu 次, 共计 %lu 字节\n",
+                       path, times, total);
+        }
+
+        if (buf)
+                free_page(buf);
+        if (f)
+                file_put(f);
+
+        fd_close(fd);
+}
+
+/* 写入/读回校验一块数据 */
+static int test_write_readback(const char *path,
+                               const char *data,
+                               uint32_t len)
+{
+        int fd;
+        struct file *f;
+        char *buf;
+        int64_t n;
+        int ok = 0;
+
+        fd = vfs_open(path, O_RDONLY);
+
+        if (fd < 0)
+        {
+                printk("  reopen %s failed\n", path);
+                return 0;
+        }
+
+        f = fd_get(fd);
+        buf = alloc_page();
+
+        if (f != NULL && buf != NULL)
+        {
+                n = vfs_read(f, buf, len + 16);
+
+                if (n == (int64_t)len &&
+                    memcmp(buf, data, len) == 0)
+                {
+                        ok = 1;
                 }
                 else
                 {
-                        printk("  st_dev=%lu st_ino=%lu st_mode=0%o st_nlink=%u\n",
-                               (unsigned long)st.st_dev, (unsigned long)st.st_ino,
-                               (unsigned)st.st_mode, (unsigned)st.st_nlink);
-                        printk("  st_uid=%u st_gid=%u st_size=%ld st_blksize=%ld st_blocks=%ld\n",
-                               (unsigned)st.st_uid, (unsigned)st.st_gid,
-                               (long)st.st_size, (long)st.st_blksize, (long)st.st_blocks);
-                        printk("  st_atime=%ld st_mtime=%ld st_ctime=%ld\n",
-                               (long)st.st_atime, (long)st.st_mtime, (long)st.st_ctime);
-                        if (S_ISREG(st.st_mode))
-                                printk("  ✓ S_ISREG\n");
-                        else
-                                printk("  ✗ expected regular file\n");
+                        printk("  readback len=%ld (want %u)\n", n, len);
                 }
         }
 
-        printk("\n[Test 3] Reading from /hello.txt (first 16 bytes)\n");
-        memset(read_buf, 0, sizeof(read_buf));
-        bytes = vfs_read(fd, read_buf, 16);
-        if (bytes < 0)
+        if (buf)
+                free_page(buf);
+        if (f)
+                file_put(f);
+
+        fd_close(fd);
+
+        return ok;
+}
+
+void test_fat32_operations(void)
+{
+        const char *msg = "Hello FAT32! loeux riscv vfs test.";
+        const uint32_t msg_len = sizeof("Hello FAT32! loeux riscv vfs test.") - 1;
+        int fd;
+        struct file *f;
+        struct inode *ino = NULL;
+        int64_t n;
+
+        printk("\n========== FAT32 File Operation Test ==========\n");
+
+        printk("[Test 1] create /T1.TXT and write\n");
+
+        if (vfs_create("/T1.TXT", 0644, &ino) != 0)
         {
-                printk("  ✗ Read failed: %ld\n", bytes);
+                printk("  vfs_create failed\n");
         }
         else
         {
-                printk("  ✓ Read %ld bytes\n", bytes);
-                printk("  Data: ");
-                for (int i = 0; i < bytes && i < 16; i++)
+                /* create 返回的引用归 caller，校验后立即释放 */
+                printk("  create OK: size=%lu refcount=%u\n",
+                       ino->size, ino->refcount);
+                inode_put(ino);
+        }
+
+        fd = vfs_open("/T1.TXT", O_RDWR | O_TRUNC);
+
+        if (fd < 0)
+        {
+                printk("  open /T1.TXT failed\n");
+                return;
+        }
+
+        f = fd_get(fd);
+
+        if (f == NULL)
+        {
+                fd_close(fd);
+                return;
+        }
+
+        n = vfs_write(f, msg, msg_len);
+        printk("  write: %ld bytes (want %u) %s\n",
+               n, msg_len, n == (int64_t)msg_len ? "OK" : "FAIL");
+
+        file_put(f);
+        fd_close(fd);
+
+        printk("[Test 2] read back /T1.TXT\n");
+
+        if (test_write_readback("/T1.TXT", msg, msg_len))
+                printk("  readback OK\n");
+        else
+                printk("  readback FAIL\n");
+
+        printk("[Test 3] mkdir /TDIR and create child\n");
+
+        if (vfs_mkdir("/TDIR", 0755) != 0)
+                printk("  mkdir /TDIR failed\n");
+
+        if (vfs_create("/TDIR/CHILD.TXT", 0644, &ino) != 0)
+                printk("  create /TDIR/CHILD.TXT failed\n");
+        else
+                inode_put(ino);
+
+        {
+                struct inode *dir = NULL;
+
+                if (vfs_lookup("/TDIR", &dir) == 0 && dir != NULL)
                 {
-                        if (read_buf[i] >= 0x20 && read_buf[i] < 0x7F)
-                                printk("%c", read_buf[i]);
-                        else
-                                printk(".");
+                        printk("  lookup /TDIR OK: size=%lu refcount=%u\n",
+                               dir->size, dir->refcount);
+                        inode_put(dir);
                 }
-                printk("\n  Hex: ");
-                for (int i = 0; i < bytes && i < 16; i++)
+                else
                 {
-                        printk("%0#lx ", (unsigned char)read_buf[i]);
+                        printk("  lookup /TDIR failed\n");
                 }
-                printk("\n");
         }
 
-        printk("\n[Test 4] Writing to /hello.txt (append)\n");
-        file = get_task()->ofile[fd];
-        if (file)
-        {
-                struct fat12_node *fnode = (struct fat12_node *)file->private;
-                printk("  Current file size: %u bytes\n", fnode->file_size);
-                file->pos = fnode->file_size;
-        }
-        bytes = vfs_write(fd, write_data, strlen(write_data));
-        if (bytes < 0)
-        {
-                printk("  ✗ Write failed: %ld\n", bytes);
-        }
-        else
-        {
-                printk("  ✓ Write %ld bytes: \"%s\"\n", bytes, write_data);
-        }
+        printk("[Test 4] readdir /\n");
 
-        printk("\n[Test 5] Reading back to verify write\n");
-        if (file)
-                file->pos = 0;
-        memset(read_buf, 0, sizeof(read_buf));
-        bytes = vfs_read(fd, read_buf, 512);
-        if (bytes < 0)
+        fd = vfs_open("/", O_RDONLY | O_DIRECTORY);
+
+        if (fd >= 0)
         {
-                printk("  ✗ Read back failed: %ld\n", bytes);
-        }
-        else
-        {
-                printk("  ✓ Read back %ld bytes\n", bytes);
-                printk("  Full content:\n  ");
-                for (int i = 0; i < bytes && i < 64; i++)
+                f = fd_get(fd);
+
+                if (f != NULL)
                 {
-                        if (read_buf[i] >= 0x20 && read_buf[i] < 0x7F)
-                                printk("%c", read_buf[i]);
-                        else
-                                printk(".");
+                        struct vfs_dirent de;
+
+                        while (vfs_readdir(f, &de) == 0)
+                        {
+                                printk("  [%s] ino=%lu\n", de.name,
+                                       (unsigned long)de.ino);
+                        }
+
+                        file_put(f);
                 }
-                if (bytes > 64)
-                        printk("...");
-                printk("\n");
+
+                fd_close(fd);
         }
 
-        printk("\n[Test 6] Closing file\n");
-        ret = vfs_close(fd);
-        if (ret < 0)
+        printk("[Test 5] unlink /T1.TXT\n");
+
+        if (vfs_unlink("/T1.TXT") != 0)
+                printk("  unlink failed\n");
+
+        if (vfs_lookup("/T1.TXT", &ino) == 0)
         {
-                printk("  ✗ Close failed: %d\n", ret);
+                printk("  FAIL: lookup after unlink succeeded\n");
+                inode_put(ino);
         }
         else
-        {
-                printk("  ✓ File closed successfully\n");
-        }
+                printk("  lookup after unlink fails as expected\n");
 
-        printk("\n========== FAT12 File Operation Test Complete ==========\n");
+        printk("[Test 6] rmdir /TDIR\n");
+
+        if (vfs_unlink("/TDIR/CHILD.TXT") != 0)
+                printk("  unlink child failed\n");
+
+        if (vfs_rmdir("/TDIR") != 0)
+                printk("  rmdir failed (not empty?)\n");
+        else
+                printk("  rmdir OK\n");
+
+        printk("========== FAT32 File Operation Test Complete ==========\n");
+}
+
+void test_umount(void)
+{
+        printk("\n========== Umount Test ==========\n");
+
+        printk("[Test 1] umount / 应该失败\n");
+
+        if (vfs_umount("/") == 0)
+                printk("  FAIL: root umounted!\n");
+        else
+                printk("  OK: root umount rejected\n");
+
+        printk("[Test 2] umount 不存在的挂载点应该失败\n");
+
+        if (vfs_umount("/NO_SUCH_MOUNT") == 0)
+                printk("  FAIL: unknown mount umounted!\n");
+        else
+                printk("  OK: unknown mount rejected\n");
+
+        /*
+         * 完整的 mount/umount 往返测试需要第二个块设备，
+         * 单设备环境下通过 fail 路径验证接口行为。
+         */
+
+        printk("========== Umount Test Complete ==========\n");
 }

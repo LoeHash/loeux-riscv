@@ -540,12 +540,35 @@ void init_vfs(void);
 ///
 /// @param dev     块设备
 /// @param target  挂载点路径，例如 "/"、"/mnt"
-/// @param fs_type 文件系统类型名，例如 "fat12"
+/// @param fs_type 文件系统类型名，例如 "fat32"
 ///
 /// @return 成功返回 0，失败返回 -1
 int vfs_mount(struct block_device *dev,
               const char *target,
               const char *fs_type);
+
+/// @brief 卸载挂载点 target。
+///
+/// 拒绝卸载根文件系统；有子挂载点、或任一进程的
+/// ofile / cwd 仍引用该文件系统时返回失败（busy）。
+///
+/// @param target 挂载点路径，例如 "/mnt"
+///
+/// @return 成功返回 0，失败返回 -1
+int vfs_umount(const char *target);
+
+/// @brief 返回根挂载点。
+///
+/// 用于调试（如打印挂载表）。未挂载根文件系统时返回 NULL。
+///
+/// @return 根挂载点，失败返回 NULL
+struct mount *vfs_get_root_mount(void);
+
+/// @brief 为当前进程建立标准输入/输出/错误（fd 0/1/2）。
+///
+/// 三个 fd 都指向控制台字符设备 /dev/ttyS0。
+/// 必须在 ofile[] 全空的进程上调用。
+void init_vfs_std(void);
 
 /// @brief 给定一个绝对路径，找到覆盖该路径的最深层 mount。
 ///

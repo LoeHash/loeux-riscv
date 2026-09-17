@@ -185,6 +185,9 @@ struct task_struct
         bool in_syscall;
 
         struct inode *cwd;      // 更新cwd inode语义
+        // cwd 的文本路径（sys_pwd / sys_exec / PATH 搜索用），
+        // 与 cwd inode 同步更新；长度对齐 VFS_MAX_PATH_LEN
+        char cwd_path[128];
 
         struct file *ofile[NOFILE]; // Open files
         // struct fd_table ofile;
@@ -225,12 +228,12 @@ struct slab
 typedef struct slab slab_t;
 
 /// 全局slab缓存器
-/// 保存最初的9个父亲slab
+/// 保存最初的10个父亲slab
 struct slab_global_cache
 {
         struct spinlock lock;
         padding_t __pad0[64 - sizeof(struct spinlock)];
-        slab_t *slabs[9];
+        slab_t *slabs[10];
 } __attribute__((aligned(64)));
 typedef struct slab_global_cache slab_global_cache_t;
 
