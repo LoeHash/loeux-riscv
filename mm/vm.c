@@ -615,7 +615,7 @@ int vm_pagetbl_copy_asign(page_table src_pg, page_table dst_pg, uint64_t va_star
         int32_t flag;
 
         va = va_start;
-        for (; va <= va_start + sz; va += PG_4K_SIZE)
+        for (; va < va_start + sz; va += PG_4K_SIZE)    // 解决边界，导致多复制一页的问题
         {
                 if ((p = pte_walk(src_pg, va, 0)) == 0)
                 {

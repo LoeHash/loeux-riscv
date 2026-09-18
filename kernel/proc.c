@@ -516,7 +516,7 @@ void free_task_pgtable(page_table pagetable, uint64_t sz)
 
         // 这里就不会取消映射了
         pg_user_vmfree(pagetable, sz);
-        vmprint(pagetable);
+        // vmprint(pagetable);
 }
 
 static void do_free_task_heap(page_table pg, uint64_t heap_start, uint64_t heap_history_max){
@@ -828,6 +828,7 @@ int kfork()
         new_ts->size = father_ts->size;
         new_ts->parent = father_ts;
         new_ts->heap_start = father_ts->heap_start;
+        new_ts->heap_brk = father_ts->heap_brk;
         new_ts->heap_history_max = father_ts->heap_history_max;
         
         // 4. 复制name和cwd
@@ -888,7 +889,6 @@ int kfork()
         // 注意：锁已释放，new_ts 生命周期不再受控——
         // 子进程可能已被其他 hart 调度、甚至 exit 并被回收。
         // 此处绝不能再解引用 new_ts
-
         return new_ts->pid;
 }
 

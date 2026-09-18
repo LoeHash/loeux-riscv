@@ -47,6 +47,7 @@ OBJS := asm/kernel_trap_vec.o\
 	mm/slab.o\
 	drivers/virtio_disk.o\
 	drivers/uart.o\
+	fs/ext2.o\
 	fs/fat32.o\
 	fs/vfs.o\
 	fs/char_dev.o\
@@ -127,6 +128,7 @@ mm/vm.o: mm/vm.c
 mm/slab.o: mm/slab.c 
 drivers/virtio_disk.o: drivers/virtio_disk.c 
 drivers/uart.o: drivers/uart.c 
+fs/ext2.o: fs/ext2.c
 fs/fat32.o: fs/fat32.c 
 fs/vfs.o: fs/vfs.c 
 fs/char_dev.o: fs/char_dev.c 

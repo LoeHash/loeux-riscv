@@ -267,15 +267,16 @@ static void do_page_fault(uint64_t fault_addr, enum page_fault_type type)
         {
                 release(&ts->lk);
                 free_page(pa);
+                printk("[WWWRRROONG!!!!!!] GOING TO KILL THE PID: %d\n", ts->pid);
                 to_kill(ts);
                 return;
         }
-        printk("[pf] pid=%d addr=%p type=%s brk=%p start=%p -> %s\n",
-                ts->pid, (void *)fault_addr,
-                type == PF_LOAD ? "load" : "store",
-                (void *)ts->heap_brk, (void *)ts->heap_start,
-                (fault_addr < ts->heap_start || fault_addr >= ts->heap_brk)
-                        ? "kill" : "alloc");
+        // printk("[pf] pid=%d addr=%p type=%s brk=%p start=%p -> %s\n",
+        //         ts->pid, (void *)fault_addr,
+        //         type == PF_LOAD ? "load" : "store",
+        //         (void *)ts->heap_brk, (void *)ts->heap_start,
+        //         (fault_addr < ts->heap_start || fault_addr >= ts->heap_brk)
+        //                 ? "kill" : "alloc");
         release(&ts->lk);
 }
 

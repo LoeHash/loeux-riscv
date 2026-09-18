@@ -16,6 +16,7 @@
 #include <test.h>
 #include <slab.h>
 #include <fat32.h>
+#include <ext2.h>
 
 extern char _sec_entry64[];
 
@@ -56,6 +57,8 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         init_vfs();
         // 注册 fat32 文件系统
         init_fat32();
+        // 注册 ext2 文件系统
+        init_ext2();
         init_uart();
         // init_vfs_std() 已移至 first_ret()：
         // 该函数需要为当前 task 在 ofile[] 中分配 fd 0/1/2，
@@ -78,7 +81,7 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
 
         // 挂载硬盘
-        if (vfs_mount(&virtio_block_device, "/", "fat32") == -1)
+        if (vfs_mount(&virtio_block_device, "/", "ext2") == -1)
         {
                 panic(PANIC_ERROR, "kstart vfs_mount: error!\n");
         }
