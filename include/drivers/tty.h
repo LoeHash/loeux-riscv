@@ -19,7 +19,7 @@ struct tty_ops
     int (*close)(struct tty *tty);
     /// 输出一个字符。返回 0 成功，-1 失败。
     int (*putc)(struct tty *tty, char c);
-    /// 阻塞读一个字符。返回 0 成功，-1 失败。
+    /// 阻塞读一个字符。返回 0 成功，-1 失败。 必须阻塞读取到一个字符。
     int (*getc)(struct tty *tty, char *out);
     /// 非阻塞检查是否有输入。返回 1 有，0 无。
     int (*has_input)(struct tty *tty);
@@ -30,7 +30,7 @@ struct tty
 {
     const char *name;          /* "uart/0" / "console/0" */
     const struct tty_ops *ops; /* 底层实现 */
-    void *priv;                /* 底层设备上下文 */
+    void *priv;                /* 底层设备上下文 也就是真正的终端设备 */
 
     /* 行编辑缓冲 */
     char linebuf[TTY_LINE_MAX];

@@ -1374,7 +1374,7 @@ int vfs_open(const char *path,
                 return -1;
 
         /*
-         * /dev/ 前缀：字符设备
+         * /dev/tty 前缀：终端设备
          */
         if (strncmp(path, "/dev/tty/", 5) == 0)
         {
@@ -1386,7 +1386,7 @@ int vfs_open(const char *path,
 
                 if (cdev->ops != NULL &&
                     cdev->ops->open != NULL &&
-                    cdev->ops->open(cdev, (int)flags) < 0)
+                    cdev->ops->open(cdev->priv, (int)flags) < 0)
                         return -1;
 
                 struct file *file = slab_alloc(sizeof(*file));
