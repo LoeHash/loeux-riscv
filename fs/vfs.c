@@ -1376,7 +1376,7 @@ int vfs_open(const char *path,
         /*
          * /dev/ 前缀：字符设备
          */
-        if (strncmp(path, "/dev/", 5) == 0)
+        if (strncmp(path, "/dev/tty/", 5) == 0)
         {
                 struct char_device *cdev =
                     vfs_find_chardev(path + 5);
@@ -1386,7 +1386,7 @@ int vfs_open(const char *path,
 
                 if (cdev->ops != NULL &&
                     cdev->ops->open != NULL &&
-                    cdev->ops->open(cdev->priv, (int)flags) < 0)
+                    cdev->ops->open(cdev, (int)flags) < 0)
                         return -1;
 
                 struct file *file = slab_alloc(sizeof(*file));
@@ -2190,8 +2190,8 @@ void init_vfs_std(void)
 {
         for (int i = 0; i < 3; i++)
         {
-                if (vfs_open("/dev/ttyS0", O_RDWR) < 0)
-                        panic_error("init_vfs_std: open /dev/ttyS0 failed");
+                if (vfs_open("/dev/tty/uart/0", O_RDWR) < 0)
+                        panic_error("init_vfs_std: open /dev/tty/uart/0 failed");
         }
 }
 

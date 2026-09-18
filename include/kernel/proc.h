@@ -37,4 +37,6 @@ int set_cwd(struct task_struct *ts, const char *path);
 pid_t wait(int *status);
 pid_t waitpid(pid_t pid, int *status);
 void to_kill(struct task_struct *t);
+void _wakeup(void *chan);
+void sleep_locked(void *chan, spinlock_t *lock);
 #endif

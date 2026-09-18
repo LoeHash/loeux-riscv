@@ -21,6 +21,5 @@ struct char_device
 int vfs_register_chardev(const char *name, struct char_device_ops *ops, void *priv);
 struct char_device *vfs_find_chardev(const char *name);
 
-extern struct char_device char_devices[MAX_CHAR_DEV];
-extern int char_dev_count;
+int init_char_dev(void);
 #endif

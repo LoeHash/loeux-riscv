@@ -6,11 +6,13 @@
 
 static spinlock_t uart_lock = {0};
 static void do_screen_echo(char c, int internal_i);
+
 struct char_device_ops uart_ops = {
     .open = uart_open,
     .read = uart_read,
     .write = uart_write,
-    .close = uart_close};
+    .close = uart_close
+};
 
 void init_uart(void)
 {

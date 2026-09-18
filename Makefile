@@ -10,15 +10,16 @@ INCLUDES := -I. \
             -I./include/test \
             -I./include/mm \
             -I./include/drivers \
+            -I./include/drivers/tty \
             -I./include/fs \
             -I./include/utils \
             -I./kernel \
             -I./mm \
             -I./boot \
             -I./asm \
-	    -I./fs \
-	    -I./drivers\
-	    -I./test\
+		    -I./fs \
+		    -I./drivers\
+	    	-I./test\
 ARCH := rv64gc
 ABI := lp64
 CFLAGS := -g -march=$(ARCH) -mabi=$(ABI) -nostdlib -ffreestanding $(INCLUDES) -Wall -Werro
@@ -46,6 +47,8 @@ OBJS := asm/kernel_trap_vec.o\
 	mm/vm.o\
 	mm/slab.o\
 	drivers/virtio_disk.o\
+	drivers/tty/uart_tty.o\
+	drivers/tty.o\
 	drivers/uart.o\
 	fs/ext2.o\
 	fs/fat32.o\
@@ -128,6 +131,8 @@ mm/vm.o: mm/vm.c
 mm/slab.o: mm/slab.c 
 drivers/virtio_disk.o: drivers/virtio_disk.c 
 drivers/uart.o: drivers/uart.c 
+drivers/tty/uart_tty.o: drivers/tty/uart_tty.c 
+drivers/tty.o: drivers/tty.c 
 fs/ext2.o: fs/ext2.c
 fs/fat32.o: fs/fat32.c 
 fs/vfs.o: fs/vfs.c 
@@ -158,7 +163,10 @@ qemu:
 			-smp 4 \
 			-m 2048M \
 			-kernel ./kernel.elf \
-			-nographic \
+# 			-nographic \
+			-device virtio-gpu-pci \
+			-display sdl\
+			-serial mon:stdio	
 			-global virtio-mmio.force-legacy=false\
 			-drive file=./loeux.img,format=raw,if=none,id=loeux \
 			-device virtio-blk-device,drive=loeux,bus=virtio-mmio-bus.0
@@ -170,7 +178,9 @@ gdb:
 			-smp 4 \
 			-m 2048M \
 			-kernel ./kernel.elf \
-			-nographic \
+# 			-nographic \
+			-device virtio-gpu-pci \
+			-display sdl gl=on\	
 			-global virtio-mmio.force-legacy=false\
 			-drive file=./loeux.img,format=raw,if=none,id=loeux \
 			-device virtio-blk-device,drive=loeux,bus=virtio-mmio-bus.0\

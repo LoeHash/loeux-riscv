@@ -8,6 +8,7 @@ INCLUDES := -I. \
 			-I../include/mm \
 			-I../mm \
 			-I../include/drivers \
+			-I../include/drivers/tty \
 			-I../include/fs \
 			-I../include/test \
 			-I../include/utils

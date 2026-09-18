@@ -17,6 +17,9 @@
 #include <slab.h>
 #include <fat32.h>
 #include <ext2.h>
+#include <char_dev.h>
+#include <drivers/tty.h>
+#include <drivers/tty/uart_tty.h>
 
 extern char _sec_entry64[];
 
@@ -45,6 +48,8 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         init_kvmmap();
         // 初始化slab分配器
         init_slab();
+        // 初始化字符设备
+        init_char_dev();
         // 初始化计时器
         init_timer();
         // 开启内核中断异常处理
@@ -55,11 +60,19 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         init_virtio_disk();
         // 初始化虚拟文件系统
         init_vfs();
+        // 初始化 tty
+        init_tty();
+        // 初始化 uart tty
+        init_uart_tty();
         // 注册 fat32 文件系统
         init_fat32();
         // 注册 ext2 文件系统
         init_ext2();
+        // 初始化 uart
         init_uart();
+
+
+
         // init_vfs_std() 已移至 first_ret()：
         // 该函数需要为当前 task 在 ofile[] 中分配 fd 0/1/2，
         // boot 阶段还没有 current task，故推迟到首个进程启动时执行。
