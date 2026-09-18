@@ -201,6 +201,37 @@ return (uint32_t)(get_sys_timer_tick() / 100) + 1700000000U;
 
 ext2 的 `i_atime` / `i_ctime` / `i_mtime` 都是 32-bit unix 秒，与 VFS `vfs_kstat.atime` 等直接对应。
 
+### 8. 块缓存（write-back buffer cache）
+
+**问题**：无缓存时，`ext2_read_block` / `ext2_write_block` 每次都同步走 virtio；一个 4K 块要 8 次 512B 扇区往返。一次 `mkdir` 会反复读写同一批元数据块（inode bitmap、block bitmap、inode 表块、父目录块）——经实测会卡顿很久。
+
+**方案**：在 `struct ext2_fs_priv` 上挂一张 hashmap（`utils/hashmap`，键 = 块号 `uint32_t`，值 = `ext2_cache_entry{block, data, dirty}`）：
+
+- `ext2_read_block`：命中则 `memcpy` 返回；未命中走 `ext2_disk_read_raw` 读入缓存再 `memcpy`。
+- `ext2_write_block`：只写缓存并标记 `dirty`，不立即落盘。
+- `ext2_cache_flush`：在 `mkdir` / `create` / `unlink` / `rmdir` / `truncate` / `write` 等顶层修改操作**成功返回前**一次性把所有 dirty 块写回磁盘。
+- 只读路径（`lookup` / `readdir`）不写盘，纯读缓存，命中即返回。
+
+**死锁 / 调度陷阱（实际踩过：`mkdir` 触发 `sched: noff != 1` panic）**：
+`hash_table_foreach` 回调全程持有 `ht->lock` 自旋锁（持锁 = `push_off`，中断关闭）。
+而 virtio 同步 IO（`virtio_disk_rw_sync`）在轮询完成前会**主动 `intr_on()` 重新开中断**，
+轮询期间可能被时钟中断抢占并进入 `sched()`。若回调内做磁盘写，进程进入调度器时
+`noff == 2`（ht->lock 的一次 + 进程锁的一次），触发 [kernel/proc.c](file:///home/loe/work/os/loeux-riscv/kernel/proc.c)
+的 `sched: noff != 1` panic。
+
+因此 flush 采用 **gather-then-write** 两段式：
+
+1. `hash_table_foreach` 回调内**只收集** dirty 条目指针到数组并清 `dirty`，绝不做 IO；
+2. foreach 返回（`ht->lock` 已释放）后，再调 `ext2_disk_write_raw` 逐块写盘；写失败重新置 `dirty` 留待下次。
+
+条目较多（数组超过 slab 单次 4096B 上限）时分批循环；一批全部写失败则终止避免设备故障时死循环。
+另外缓存"未命中读盘"路径也必须在 `hash_table_lookup` **返回之后**（锁已释放）才调
+`ext2_disk_read_raw`，不能持锁读盘。
+
+**退化**：缓存初始化失败或 slab 分配失败时，`ext2_read_block` / `ext2_write_block` 自动退化到 raw 直读直写，保证功能正确（只是慢）。
+
+**缓存生命周期**：`get_super` 中 `priv` 字段设好后、第一次 `ext2_inode_read` 前调 `ext2_cache_init`；`kill_sb` 中先 `ext2_cache_flush`（落盘 dirty）再 `ext2_cache_destroy`（释放所有条目与 hashmap）。各错误回滚路径也调 `ext2_cache_destroy` 避免泄漏。
+
 ## 六、限制与已知缺陷
 
 | 项 | 说明 |
