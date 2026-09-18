@@ -59,6 +59,17 @@ struct ext2_fs_priv
         /* 缓存的超级块字段，写回时需要保持一致 */
         uint32_t s_state;
         uint32_t s_rev_level;
+
+        /*
+         * 块缓存（buffer cache，write-back）。
+         * 以块号为键缓存整块数据，写操作只标记 dirty，
+         * 在 mkdir/create/unlink/write/truncate 等顶层修改操作
+         * 末尾由 ext2_cache_flush() 一次性写回磁盘。
+         * 这能消除一次操作内对同一元数据块（bitmap/inode表/目录块）
+         * 的反复同步 IO——mkdir 慢的根因就在这里。
+         * 内部用 utils/hashmap，键为 uint32_t 块号。
+         */
+        void *cache;
 };
 
 /*

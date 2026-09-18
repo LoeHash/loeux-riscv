@@ -7,6 +7,7 @@
 #include <timer.h>
 #include <slab.h>
 #include <spinlock.h>
+#include <hashmap.h>
 
 /*
  * ext2 文件系统实现
@@ -148,9 +149,33 @@ static inline uint64_t ext2_block_to_sector(struct ext2_fs_priv *fs,
         return (uint64_t)block * ext2_block_sectors(fs);
 }
 
-static int ext2_read_block(struct ext2_fs_priv *fs,
-                           uint32_t block,
-                           void *buf)
+/*
+ * 块缓存（write-back buffer cache）
+ *
+ * mkdir / create / unlink 等单次操作会反复读写同一批元数据块
+ *（inode bitmap、block bitmap、inode 表块、父目录块）。
+ * 无缓存时每次 ext2_read_block / ext2_write_block 都同步走 virtio，
+ * 一个 4K 块要 8 次 512B 扇区往返，叠加起来就是 mkdir 的明显卡顿。
+ *
+ * 这里在 fs_priv 上挂一张 hashmap：键 = 块号(uint32_t)，值 = cache_entry。
+ *   - read_block：命中则 memcpy 返回，未命中走下面的 raw 读入缓存再 memcpy。
+ *   - write_block：只写缓存并标记 dirty，不立即落盘。
+ *   - ext2_cache_flush：在顶层修改操作返回前一次性把所有 dirty 块写回磁盘。
+ * 只读路径（lookup / readdir）不写盘，纯读缓存，命中即返回。
+ *
+ * 注意：cache 内部（miss 读盘、flush 写盘）必须调 raw 版本，
+ * 否则 ext2_write_block → cache_lookup → hash_table_lookup 会与
+ * flush 回调里持有的 ht->lock 递归死锁。
+ */
+struct ext2_cache_entry
+{
+        uint32_t block;     /* 键：块号；&entry->block 作为 hashmap 的 key */
+        uint8_t *data;      /* block_size 字节的块数据 */
+        bool dirty;         /* 是否被修改过、尚未写回 */
+};
+
+static int ext2_disk_read_raw(struct ext2_fs_priv *fs,
+                              uint32_t block, void *buf)
 {
         uint64_t sector = ext2_block_to_sector(fs, block);
         uint32_t nsec = ext2_block_sectors(fs);
@@ -166,9 +191,8 @@ static int ext2_read_block(struct ext2_fs_priv *fs,
         return 0;
 }
 
-static int ext2_write_block(struct ext2_fs_priv *fs,
-                            uint32_t block,
-                            const void *buf)
+static int ext2_disk_write_raw(struct ext2_fs_priv *fs,
+                               uint32_t block, const void *buf)
 {
         uint64_t sector = ext2_block_to_sector(fs, block);
         uint32_t nsec = ext2_block_sectors(fs);
@@ -182,6 +206,256 @@ static int ext2_write_block(struct ext2_fs_priv *fs,
         }
 
         return 0;
+}
+
+static int ext2_cache_init(struct ext2_fs_priv *fs)
+{
+        fs->cache = hash_table_create(16, NULL, NULL);
+        return fs->cache == NULL ? -1 : 0;
+}
+
+/*
+ * flush 收集上下文。
+ * hash_table_foreach 的回调全程持有 ht->lock（自旋锁，持锁期间中断关闭），
+ * 而 virtio 同步 IO 在轮询前会 intr_on() 重新开中断，轮询期间可能被
+ * 时钟中断抢占并调度——持自旋锁进入 sched() 会让 noff==2，触发
+ * "sched: noff != 1" panic。
+ *
+ * 因此回调内【绝不能做 IO】，只能把 dirty 条目指针收集到数组并清 dirty；
+ * 真正的 raw 写盘在 foreach 返回（锁已释放）之后进行。
+ */
+struct ext2_flush_ctx
+{
+        struct ext2_cache_entry **ents;
+        uint32_t cap;
+        uint32_t n;
+};
+
+/* foreach 回调：只收集 dirty 条目指针并清 dirty，不做 IO。 */
+static void ext2_cache_gather_cb(const void *key, uint32_t key_len,
+                                void *value, void *arg)
+{
+        struct ext2_flush_ctx *ctx = arg;
+        struct ext2_cache_entry *e = value;
+
+        (void)key; (void)key_len;
+
+        if (e != NULL && e->dirty && ctx->n < ctx->cap)
+        {
+                /* 先清 dirty：写成功就保持清除；写失败再重新置位 */
+                e->dirty = false;
+                ctx->ents[ctx->n++] = e;
+        }
+}
+
+/*
+ * 把所有 dirty 块写回磁盘。
+ * 必须在 vfs_meta_lock 保护下、或 kill_sb 中调用；
+ * 调用期间不得持有其它自旋锁（raw 写盘会开中断并可能调度）。
+ * 返回 0 成功；有块写失败返回 -1（失败块已重新置 dirty，下次重试）。
+ */
+#define EXT2_FLUSH_BATCH 512 /* 512 * 8B = 4096B，恰为 slab 单次上限 */
+
+static int ext2_cache_flush(struct ext2_fs_priv *fs)
+{
+        struct ext2_flush_ctx ctx;
+        int ret = 0;
+
+        if (fs == NULL || fs->cache == NULL)
+                return 0;
+
+        ctx.ents = slab_alloc(EXT2_FLUSH_BATCH * sizeof(void *));
+        if (ctx.ents == NULL)
+                return -1;
+
+        /*
+         * 分批收集 + 锁外写盘：
+         * 每批最多 EXT2_FLUSH_BATCH 个；一批全部写失败则终止，
+         * 避免设备持续故障时死循环。
+         */
+        for (;;)
+        {
+                uint32_t failed = 0;
+
+                ctx.cap = EXT2_FLUSH_BATCH;
+                ctx.n = 0;
+                hash_table_foreach(fs->cache, ext2_cache_gather_cb, &ctx);
+
+                if (ctx.n == 0)
+                        break;
+
+                /* foreach 已返回，ht->lock 已释放，此处做 raw 写盘 */
+                for (uint32_t i = 0; i < ctx.n; i++)
+                {
+                        struct ext2_cache_entry *e = ctx.ents[i];
+                        if (ext2_disk_write_raw(fs, e->block, e->data) < 0)
+                        {
+                                e->dirty = true; /* 下次 flush 重试 */
+                                failed++;
+                                ret = -1;
+                        }
+                }
+
+                /* 本批没装满，说明缓存中已无遗留 dirty 项 */
+                if (ctx.n < ctx.cap)
+                        break;
+                /* 整批全失败：设备异常，继续重试无意义 */
+                if (failed == ctx.n)
+                        break;
+        }
+
+        slab_free(ctx.ents);
+        return ret;
+}
+
+/* foreach 回调：释放每个条目的 data 与条目本身。 */
+static void ext2_cache_free_cb(const void *key, uint32_t key_len,
+                               void *value, void *arg)
+{
+        (void)key; (void)key_len; (void)arg;
+        if (value != NULL)
+        {
+                struct ext2_cache_entry *e = value;
+                if (e->data != NULL)
+                        slab_free(e->data);
+                slab_free(e);
+        }
+}
+
+static void ext2_cache_destroy(struct ext2_fs_priv *fs)
+{
+        if (fs == NULL || fs->cache == NULL)
+                return;
+        hash_table_foreach(fs->cache, ext2_cache_free_cb, NULL);
+        hash_table_destroy(fs->cache);
+        fs->cache = NULL;
+}
+
+/*
+ * 走缓存的块读：命中直接 memcpy；未命中读盘并缓存。
+ * buf 由调用者提供，至少 block_size 字节。
+ */
+static int ext2_read_block(struct ext2_fs_priv *fs,
+                           uint32_t block, void *buf)
+{
+        uint32_t key = block;
+        struct ext2_cache_entry *e;
+
+        if (fs->cache != NULL)
+        {
+                e = hash_table_lookup(fs->cache, &key, sizeof(key));
+                if (e != NULL)
+                {
+                        memcpy(buf, e->data, fs->block_size);
+                        return 0;
+                }
+        }
+
+        /* 未命中：从磁盘读入缓存，再 memcpy 给调用者 */
+        if (fs->cache != NULL)
+        {
+                e = slab_alloc(sizeof(*e));
+                if (e != NULL)
+                {
+                        e->block = block;
+                        e->data = slab_alloc(fs->block_size);
+                        e->dirty = false;
+                        if (e->data == NULL)
+                        {
+                                slab_free(e);
+                        }
+                        else if (ext2_disk_read_raw(fs, block, e->data) < 0)
+                        {
+                                slab_free(e->data);
+                                slab_free(e);
+                        }
+                        else
+                        {
+                                /* 若已存在（并发），覆盖旧值会泄漏，先 delete */
+                                uint32_t k2 = block;
+                                if (hash_table_lookup(fs->cache, &k2,
+                                                      sizeof(k2)) != NULL)
+                                        hash_table_delete(fs->cache,
+                                                          &k2, sizeof(k2));
+                                if (!hash_table_insert_if_absent(fs->cache,
+                                        &e->block, sizeof(e->block), e))
+                                {
+                                        /* 竞态失败：直接放掉，落回 raw 路径 */
+                                        slab_free(e->data);
+                                        slab_free(e);
+                                }
+                                else
+                                {
+                                        memcpy(buf, e->data, fs->block_size);
+                                        return 0;
+                                }
+                        }
+                }
+        }
+
+        /* 缓存不可用或分配失败：退化到直接读盘 */
+        return ext2_disk_read_raw(fs, block, buf);
+}
+
+/*
+ * 走缓存的块写：只写缓存标 dirty，不立即落盘。
+ * 由 ext2_cache_flush() 在顶层操作末尾统一写回。
+ */
+static int ext2_write_block(struct ext2_fs_priv *fs,
+                            uint32_t block, const void *buf)
+{
+        uint32_t key = block;
+        struct ext2_cache_entry *e;
+
+        if (fs->cache != NULL)
+        {
+                e = hash_table_lookup(fs->cache, &key, sizeof(key));
+                if (e != NULL)
+                {
+                        memcpy(e->data, buf, fs->block_size);
+                        e->dirty = true;
+                        return 0;
+                }
+
+                /* 不在缓存：分配新条目插入 */
+                e = slab_alloc(sizeof(*e));
+                if (e != NULL)
+                {
+                        e->block = block;
+                        e->data = slab_alloc(fs->block_size);
+                        e->dirty = true;
+                        if (e->data == NULL)
+                        {
+                                slab_free(e);
+                        }
+                        else
+                        {
+                                memcpy(e->data, buf, fs->block_size);
+                                if (!hash_table_insert_if_absent(fs->cache,
+                                        &e->block, sizeof(e->block), e))
+                                {
+                                        /* 已存在：查到旧条目更新 */
+                                        uint32_t k2 = block;
+                                        struct ext2_cache_entry *old =
+                                                hash_table_lookup(fs->cache,
+                                                  &k2, sizeof(k2));
+                                        if (old != NULL)
+                                        {
+                                                memcpy(old->data, buf,
+                                                       fs->block_size);
+                                                old->dirty = true;
+                                        }
+                                        slab_free(e->data);
+                                        slab_free(e);
+                                        return 0;
+                                }
+                                return 0;
+                        }
+                }
+        }
+
+        /* 缓存不可用：退化到直接写盘 */
+        return ext2_disk_write_raw(fs, block, buf);
 }
 
 /* 读超级块所在的扇区，结果放在 1024 字节缓冲区 */
@@ -1689,6 +1963,7 @@ static int ext2_create(struct inode *dir,
                 return -1;
         }
 
+        ext2_cache_flush(fs);
         *inode = ni;
         return 0;
 }
@@ -1792,6 +2067,7 @@ static int ext2_mkdir(struct inode *dir,
         ext2_refresh_i_blocks(fs, dp);
         ext2_priv_save(fs, dp);
 
+        ext2_cache_flush(fs);
         *inode = ni;
         return 0;
 }
@@ -1855,6 +2131,7 @@ static int ext2_unlink(struct inode *dir, const char *name)
         dp->i_ctime = now;
         ext2_priv_save(fs, dp);
 
+        ext2_cache_flush(fs);
         return 0;
 }
 
@@ -1923,6 +2200,7 @@ static int ext2_rmdir(struct inode *dir, const char *name)
         dp->i_ctime = now;
         ext2_priv_save(fs, dp);
 
+        ext2_cache_flush(fs);
         return 0;
 }
 
@@ -2047,7 +2325,10 @@ static int ext2_truncate(struct inode *inode, uint64_t size)
 
         ext2_refresh_i_blocks(fs, priv);
 
-        return ext2_priv_save(fs, priv);
+        if (ext2_priv_save(fs, priv) < 0)
+                return -1;
+        ext2_cache_flush(fs);
+        return 0;
 }
 
 /* 
@@ -2267,6 +2548,7 @@ static int64_t ext2_write(struct file *file, const void *buf, uint64_t count)
         if (ext2_write_data(inode, file->pos, buf, count, &out_len) < 0)
                 return -1;
 
+        ext2_cache_flush(inode->sb->private);
         return out_len;
 }
 
@@ -2394,9 +2676,20 @@ static int ext2_get_super(struct filesystem *fs,
         priv->s_state = sb.s_state;
         priv->s_rev_level = sb.s_rev_level;
 
+        /*
+         * 在第一次 ext2_read_block / ext2_write_block（即 ext2_inode_read）
+         * 之前初始化块缓存。之后所有块访问都走缓存。
+         */
+        if (ext2_cache_init(priv) < 0)
+        {
+                slab_free(priv);
+                return -1;
+        }
+
         sb_obj = slab_alloc(sizeof(*sb_obj));
         if (sb_obj == NULL)
         {
+                ext2_cache_destroy(priv);
                 slab_free(priv);
                 return -1;
         }
@@ -2410,6 +2703,7 @@ static int ext2_get_super(struct filesystem *fs,
         if (ext2_inode_read(priv, EXT2_ROOT_INO, &root_di) < 0)
         {
                 slab_free(sb_obj);
+                ext2_cache_destroy(priv);
                 slab_free(priv);
                 return -1;
         }
@@ -2418,6 +2712,7 @@ static int ext2_get_super(struct filesystem *fs,
         if (root == NULL)
         {
                 slab_free(sb_obj);
+                ext2_cache_destroy(priv);
                 slab_free(priv);
                 return -1;
         }
@@ -2432,6 +2727,7 @@ static int ext2_get_super(struct filesystem *fs,
         {
                 inode_put(root);
                 slab_free(sb_obj);
+                ext2_cache_destroy(priv);
                 slab_free(priv);
                 return -1;
         }
@@ -2451,7 +2747,12 @@ static void ext2_kill_sb(struct super_block *sb)
         inode_put(sb->root);
 
         if (sb->private != NULL)
+        {
+                /* 卸载前把所有 dirty 块落盘，再释放缓存结构 */
+                ext2_cache_flush(sb->private);
+                ext2_cache_destroy(sb->private);
                 slab_free(sb->private);
+        }
 
         slab_free(sb);
 }
