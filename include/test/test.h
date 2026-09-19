@@ -2,7 +2,7 @@
 #define _TEST_H
 #include <type.h>
 #include <printk.h>
-#include <virtio.h>
+#include <virtio_mmio.h>
 #include <fdt.h>
 #include <vm.h>
 #include <lib.h>

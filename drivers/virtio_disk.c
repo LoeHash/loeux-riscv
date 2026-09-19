@@ -1,6 +1,6 @@
 #include <type.h>
 #include <riscv.h>
-#include <virtio.h>
+#include <virtio_mmio.h>
 #include <lib.h>
 #include <memory.h>
 #include <memlayout.h>
@@ -230,7 +230,7 @@ uint32_t virtio_disk_rw_sync(
         while (vq.used_start->idx == last)
         {
                 // 轮询
-                for (int i = 0; i < 1000; i++)
+                for (int i = 0; i < 500; i++)
                 {
                         asm volatile("nop");
                 }
@@ -289,7 +289,7 @@ static void detect_disk()
                 {
                         continue;
                 }
-                if (*R_LEVEL(VIRTIO_MMIO_DEVICE_ID_OFFSET, i) == 0)
+                if (*R_LEVEL(VIRTIO_MMIO_DEVICE_ID_OFFSET, i) != VIRTIO_DISK_DEVICE_ID)
                 {
                         // empty.
                         continue;

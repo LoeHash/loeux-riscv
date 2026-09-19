@@ -1,4 +1,4 @@
-#include <virtio.h>
+#include <virtio_mmio.h>
 #include <test.h>
 
 void test_write_verify()

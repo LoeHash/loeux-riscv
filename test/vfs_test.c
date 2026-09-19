@@ -1,5 +1,5 @@
 #include <vfs.h>
-#include <virtio.h>
+#include <virtio_mmio.h>
 #include <test.h>
 #include <fat32.h>
 #include <printk.h>

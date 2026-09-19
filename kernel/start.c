@@ -12,7 +12,7 @@
 #include <trap.h>
 #include <timer.h>
 #include <uart.h>
-#include <virtio.h>
+#include <virtio_mmio.h>
 #include <test.h>
 #include <slab.h>
 #include <fat32.h>
