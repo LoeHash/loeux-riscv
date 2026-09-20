@@ -163,32 +163,30 @@ clean:
 	rm -f $(TARGET) $(TARGET_BIN)
 qemu:
 	qemu-system-riscv64 \
-			-machine virt \
-			-smp 4 \
-			-m 2048M \
-			-kernel ./kernel.elf \
-# 			-nographic \
-			-device virtio-gpu-pci \
-			-display sdl\
-			-serial mon:stdio	
-			-global virtio-mmio.force-legacy=false\
-			-drive file=./loeux.img,format=raw,if=none,id=loeux \
-			-device virtio-blk-device,drive=loeux,bus=virtio-mmio-bus.0
+    		-machine virt \
+    		-smp 4 \
+    		-m 2048M \
+    		-kernel kernel.elf \
+    		-device virtio-gpu-device,bus=virtio-mmio-bus.1 \
+    		-display sdl \
+    		-serial mon:stdio \
+    		-global virtio-mmio.force-legacy=false \
+    		-drive file=loeux.img,format=raw,if=none,id=loeux \
+    		-device virtio-blk-device,drive=loeux,bus=virtio-mmio-bus.0
 
 
 gdb:
 	qemu-system-riscv64 \
-			-machine virt \
-			-smp 4 \
-			-m 2048M \
-			-kernel ./kernel.elf \
-# 			-nographic \
-			-device virtio-gpu-pci \
-			-display sdl gl=on\	
-			-global virtio-mmio.force-legacy=false\
-			-drive file=./loeux.img,format=raw,if=none,id=loeux \
-			-device virtio-blk-device,drive=loeux,bus=virtio-mmio-bus.0\
-			-serial mon:stdio\
-			-s -S\
+    		-machine virt \
+    		-smp 4 \
+    		-m 2048M \
+    		-kernel kernel.elf \
+    		-device virtio-gpu-device,bus=virtio-mmio-bus.1 \
+    		-display sdl \
+    		-serial mon:stdio \
+    		-global virtio-mmio.force-legacy=false \
+    		-drive file=loeux.img,format=raw,if=none,id=loeux \
+    		-device virtio-blk-device,drive=loeux,bus=virtio-mmio-bus.0\
+		-s -S\
 
 
