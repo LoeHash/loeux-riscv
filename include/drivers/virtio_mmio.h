@@ -5,6 +5,7 @@
 #define VIRTIO_QUEUE_INIT_ERROR_VQ_IS_NULL -1
 #define VIRTIO_QUEUE_INIT_ERROR_VQ_DESC_TOO_LONG -2
 
+#define VIRTIO_MMIO_COUNT  8
 
 #define VIRTIO_MMIO_MAGIC_VALUE_OFFSET 0x000 // 0x74726976
 #define VIRTIO_MMIO_VERSION_OFFSET 0x004     // 应该为 2
@@ -34,6 +35,7 @@
 // disk things
 #define DISK_SECTOR_SIZE 512
 #define VIRTIO_DISK_DEVICE_ID 2 // 块设备
+#define VIRTIO_GPU_DEVICE_ID 16 // 块设备
 #define SECTOR_SIZE_TO_KB(capacity) ((capacity) * DISK_SECTOR_SIZE / 1024)
 #define SECTOR_SIZE_TO_MB(capacity) ((capacity) * DISK_SECTOR_SIZE / 1024 / 1024)
 #define SECTOR_SIZE_TO_GB(capacity) ((capacity) * DISK_SECTOR_SIZE / 1024 / 1024 / 1024)
@@ -137,6 +139,7 @@ struct virtq_used_elem {
 struct virtq_used_n {
     uint16_t flags;
     uint16_t idx;                    // 设备下一个要写的位置
+    uint32_t padding;
     struct virtq_used_elem ring[];
 } __attribute__((packed));
 

@@ -2,9 +2,12 @@
 #include <slab.h>
 #include <panic.h>
 #include <spinlock.h>
+
 static int vq_alloc_desc_chain(struct virtqueue_n* vq);
 static int vq_fill_desc_chain(struct virtqueue_n *vq, uint32_t start_idx);
 static int vq_alloc_avail_ring(struct virtqueue_n* vq);
+static int vq_alloc_used_ring(struct virtqueue_n* vq);
+
 
 int init_virtqueue(struct virtqueue_n *vq, uint32_t start_idx)
 {
@@ -28,9 +31,27 @@ int init_virtqueue(struct virtqueue_n *vq, uint32_t start_idx)
         if ((ret = vq_alloc_avail_ring(vq))) {
                 return ret;
         }
-        
+
+        // 创建 used ring
+        if ((ret = vq_alloc_used_ring(vq))) {
+                return ret;
+        }
         
         return ret;
+}
+
+static int vq_alloc_used_ring(struct virtqueue_n* vq)
+{        
+        if (vq == NULL) {
+                return -1;
+        }
+
+        // 分配used ring
+        int used_ring_size = vq->queue_size * sizeof(struct virtq_used_elem);
+        struct virtq_used_n *vu = slab_alloc(sizeof(struct virtq_used_n) + used_ring_size); 
+        vq->used_start = vu;
+        
+        return 0;
 }
 
 static int vq_alloc_avail_ring(struct virtqueue_n* vq)
@@ -65,13 +86,14 @@ static int vq_alloc_desc_chain(struct virtqueue_n* vq){
         return 0;
 }
 
-static int vq_fill_desc_chain(struct virtqueue_n *vq, uint32_t start_idx){
-        struct virtq_desc_n *start = vq->desc_start, *end = vq->desc_start + vq->queue_size;
-
-        for (int i = start_idx; start < end; i++, start++) {
-                start->next = i;
+static int vq_fill_desc_chain(struct virtqueue_n *vq, uint32_t start_idx)
+{
+        for (uint32_t i = 0; i < vq->queue_size; i++) {
+                vq->desc_start[i].next  = (i + 1) % vq->queue_size;
+                vq->desc_start[i].flags = 0;
+                vq->desc_start[i].addr  = 0;
+                vq->desc_start[i].len   = 0;
         }
-
         return 0;
 }
 
