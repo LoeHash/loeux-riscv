@@ -46,6 +46,7 @@ OBJS := asm/kernel_trap_vec.o\
 	mm/memory.o\
 	mm/vm.o\
 	mm/slab.o\
+	mm/dma.o\
 	drivers/virtio_mmio.o\
 	drivers/virtio_disk.o\
 	drivers/virtio_gpu.o\
@@ -131,6 +132,7 @@ kernel/syscall.o: kernel/syscall.c
 mm/memory.o: mm/memory.c 
 mm/vm.o: mm/vm.c 
 mm/slab.o: mm/slab.c 
+mm/dma.o: mm/dma.c 
 drivers/virtio_disk.o: drivers/virtio_disk.c 
 drivers/virtio_gpu.o: drivers/virtio_gpu.c 
 drivers/uart.o: drivers/uart.c 

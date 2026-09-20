@@ -1,5 +1,6 @@
 #include <sbi.h>
 #include <fdt.h>
+#include <dma.h>
 #include <printk.h>
 #include <spinlock.h>
 #include <riscv.h>
@@ -47,6 +48,7 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         init_memory();
         // 构建内核页表 同時啓動mmu
         init_kvmmap();
+        init_dma();
         // 初始化slab分配器
         init_slab();
         // 初始化字符设备
@@ -60,6 +62,8 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         // 初始化disk
         init_virtio_disk();
         // 初始化gpu
+        // vmprint(kernel_pt);
+        printk("DMA_START_BASE: %0#x, and data is: %d\n", DMA_START_BASE, *(int *)DMA_START_BASE);
         init_virtio_gpu();
         // 初始化虚拟文件系统
         init_vfs();
