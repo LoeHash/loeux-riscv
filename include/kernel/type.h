@@ -36,6 +36,10 @@ struct gloal_memory_descriptor {
   struct page *kernel_tail;  // 保留节点的尾
   struct page *fdt_head;     // fdt设备树保留节点的头
   struct page *fdt_tail;     // fdt设备树保留节点的尾
+  struct page *dma_head;        // dma区域 头部
+  struct page *dma_tail;        // dma区域 尾部
+  phys_addr_t dma_start_at; // 绝对，dma起始
+  phys_addr_t dma_end_at;   // 绝对，dma结束
   struct page *free_head;    // 空闲节点的头
   struct page *free_tail;    // 空闲节点的尾
   phys_addr_t free_start_at; // 绝对，空闲起始

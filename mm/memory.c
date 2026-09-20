@@ -71,6 +71,7 @@ void init_memory()
 
         char mem_buff[mem_buff_size];
         fdt_walk_nodes((uint64_t)sub_node_base_addr, detect_memory_info, mem_buff);
+
         // 接下来对于内存进行分配
         // 1. 计算出内存大小
         for (uint32_t i = 0; i < mem_info.nr_banks; i++)
@@ -127,6 +128,7 @@ void init_memory()
 
         // 接下来，进行特殊处理
         // 因为有一些物理内存是opensbi和kernel本身 + page数据所占用的
+        // 同时保留出DMA区域
         // 所以最终的page结束的位置是在: pg 现在的位置
         start = (char *)MEMORY_START;
         end = (char *)pg;
@@ -138,11 +140,39 @@ void init_memory()
                 start += PG_4K_SIZE;
         }
 
+
+
         gmd.free_tail = gmd.kernel_tail; // 初始化空闲节点
         gmd.kernel_tail = pg;            // 保留节点的尾
         gmd.kernel_tail->next = NULL;    // 将保留节点的尾部断开
-
+        
         pg = PHY_TO_PAGE(start);
+
+        // 记录 DMA 区起止 page
+        gmd.dma_head = pg;
+        gmd.dma_tail = pg + (DMA_SIZE / PG_4K_SIZE) - 1;   // DMA_SIZE = 16MB
+
+        gmd.dma_start_at = gmd.dma_head->paddr;
+        gmd.dma_end_at   = gmd.dma_tail->paddr;
+
+        // 标记 DMA 区所有页为 RESERVED，避免被页分配器拿走
+        {
+        struct page *p = gmd.dma_head;
+        for (int i = 0; i < DMA_SIZE / PG_4K_SIZE; i++, p++) {
+                p->flags |= PG_FLAG_RESERVED;
+        }
+        }
+
+        // 把 DMA 区从空闲链里断开：free_head 跳到 DMA 区之后
+        pg = gmd.dma_tail->next;          // DMA 区后面第一个页
+        gmd.free_head = pg;
+        pg->prev = NULL;                  // 断开前面的链接
+
+        // DMA 链内部头尾 
+        gmd.dma_head->prev = NULL;
+        gmd.dma_tail->next = NULL;
+
+
         printk("Last not reserved page: addr=%0#x, refcount=%d, flags=%0#x, prev=%0#x, next=%0#x\n",
                pg->paddr,
                pg->refcount,
