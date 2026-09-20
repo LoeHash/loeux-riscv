@@ -59,6 +59,7 @@ OBJS := asm/kernel_trap_vec.o\
 	fs/char_dev.o\
 	test/fdt_test.o\
 	test/mem_test.o\
+	test/virtio_gpu_test.o\
 	test/uart_test.o\
 	test/vfs_test.o\
 	test/virtio_disk_test.o\
@@ -145,6 +146,7 @@ fs/vfs.o: fs/vfs.c
 fs/char_dev.o: fs/char_dev.c 
 test/fdt_test.o: test/fdt_test.c 
 test/mem_test.o: test/mem_test.c 
+test/virtio_gpu_test.o: test/virtio_gpu_test.c 
 test/uart_test.o: test/uart_test.c 
 test/vfs_test.o: test/vfs_test.c 
 test/virtio_disk_test.o: test/virtio_disk_test.c 

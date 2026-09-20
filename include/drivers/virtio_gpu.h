@@ -9,6 +9,7 @@
 #define VIRTIO_GPU_CMD_RESOURCE_CREATE_2D      0x0101  // 创建 2D 资源
 #define VIRTIO_GPU_CMD_SET_SCANOUT             0x0103  // 设置扫描输出
 #define VIRTIO_GPU_CMD_RESOURCE_FLUSH          0x0104  // 刷新资源到屏幕
+#define VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D     0x0105  // backing -> 设备资源镜像
 #define VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING 0x0106  // 绑定 guest 内存到资源
 
 // 光标相关
@@ -118,8 +119,24 @@ struct virtio_gpu_resource_flush {
     uint32_t padding;
 } __attribute__((packed));
 
-// 单个 scanout 的信息
+/*
+ * 把 guest backing 内存中的像素传输到设备侧的资源镜像。
+ * 现代 QEMU 的 resource 像素缓冲区是独立分配的宿主内存，
+ * 不会直接引用 backing，因此每次写显存后、FLUSH 前，
+ * 必须先发本命令，否则屏幕刷新出来的永远是初始的零值（黑屏）。
+ * r 是目标资源内的区域；offset 是源数据在 backing 中的字节偏移。
+ */
+struct virtio_gpu_transfer_to_host_2d {
+    struct virtio_gpu_ctrl_hdr hdr;  // type = 0x0105
+    struct virtio_gpu_rect r;         // 目标区域
+    uint64_t offset;                  // backing 内源偏移（字节）
+    uint32_t resource_id;             // 资源编号
+    uint32_t padding;
+} __attribute__((packed));
 
 
 void init_virtio_gpu();
+int virtio_gpu_flush(struct virtio_gpu_device *gpu,
+                            uint32_t x, uint32_t y,
+                            uint32_t w, uint32_t h);
 #endif

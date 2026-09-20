@@ -61,10 +61,6 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         init_tasks();
         // 初始化disk
         init_virtio_disk();
-        // 初始化gpu
-        // vmprint(kernel_pt);
-        printk("DMA_START_BASE: %0#x, and data is: %d\n", DMA_START_BASE, *(int *)DMA_START_BASE);
-        init_virtio_gpu();
         // 初始化虚拟文件系统
         init_vfs();
         // 初始化 tty
@@ -77,8 +73,8 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         init_ext2();
         // 初始化 uart
         init_uart();
-
-
+        // 初始化gpu
+        init_virtio_gpu();
 
         // init_vfs_std() 已移至 first_ret()：
         // 该函数需要为当前 task 在 ofile[] 中分配 fd 0/1/2，

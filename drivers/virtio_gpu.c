@@ -1,4 +1,5 @@
 #include <virtio_gpu.h>
+#include <test.h>
 #include <virtio_mmio.h>
 #include <dma.h>
 #include <memlayout.h>
@@ -7,6 +8,22 @@
 #include <lib.h>
 #include <panic.h>
 #include <printk.h>
+
+// 字段核对
+_Static_assert(sizeof(struct virtio_gpu_ctrl_hdr) == 24,
+               "virtio_gpu_ctrl_hdr must be 24 bytes");
+_Static_assert(sizeof(struct virtio_gpu_resource_create_2d) == 40,
+               "virtio_gpu_resource_create_2d must be 40 bytes");
+_Static_assert(sizeof(struct virtio_gpu_mem_entry) == 16,
+               "virtio_gpu_mem_entry must be 16 bytes");
+_Static_assert(sizeof(struct virtio_gpu_resource_attach_backing) == 32,
+               "virtio_gpu_resource_attach_backing must be 32 bytes");
+_Static_assert(sizeof(struct virtio_gpu_set_scanout) == 48,
+               "virtio_gpu_set_scanout must be 48 bytes");
+_Static_assert(sizeof(struct virtio_gpu_resource_flush) == 48,
+               "virtio_gpu_resource_flush must be 48 bytes");
+_Static_assert(sizeof(struct virtio_gpu_transfer_to_host_2d) == 56,
+               "virtio_gpu_transfer_to_host_2d must be 56 bytes");
 
 static struct virtio_gpu_device root_gpu_device = {0};
 static struct virtio_gpu_device *gpu_get_last();
@@ -24,6 +41,7 @@ static void virtio_gpu_driver_ok(uintptr_t base);
 static int virtio_gpu_get_display_info(struct virtio_gpu_device *gpu);
 static int virtio_gpu_create_framebuffer(struct virtio_gpu_device *gpu);
 static volatile uint32_t gpu_device_count = 0; 
+
 
 void init_virtio_gpu(){
         detect_gpu_device();
@@ -91,6 +109,7 @@ static int virtio_gpu_init(struct virtio_gpu_device *gpu)
         gpu->initialized = 1;
 
         dump_gpu(gpu);
+        virtio_gpu_test_draw(gpu);
         return 0;
 }
 
@@ -363,18 +382,21 @@ static int virtio_gpu_create_framebuffer(struct virtio_gpu_device *gpu)
 {
         int ret;
 
-        // 1. 从 DMA 区分配 framebuffer 
-        gpu->fb_size    = gpu->width * gpu->height * 4;
-        gpu->fb         = dma_alloc(gpu->fb_size);
-        if (!gpu->fb){
+        // 1. DMA 分配
+        gpu->fb_size     = gpu->width * gpu->height * 4;
+        gpu->fb          = dma_alloc(gpu->fb_size);
+        if (!gpu->fb) {
+                printk("create_fb: dma_alloc failed, size=%lu\n", gpu->fb_size);
                 return -1;
         }
-        
-        gpu->fb_phy     = (phys_addr_t)va2pa(kernel_pt, (uint64_t)gpu->fb);   // 恒等映射
-        gpu->resource_id = 1;   // 画布索引
+        gpu->fb_phy      = va2pa(kernel_pt, (uint64_t)gpu->fb);
+        gpu->resource_id = 1;
         memset(gpu->fb, 0, gpu->fb_size);
 
-        // 创建2d画布
+        printk("create_fb: fb=%0#lx phy=%0#lx size=%lu\n",
+               (uint64_t)gpu->fb, gpu->fb_phy, gpu->fb_size);
+
+        // 2. CREATE_2D
         {
                 struct virtio_gpu_resource_create_2d *cmd  = slab_alloc(sizeof(*cmd));
                 struct virtio_gpu_ctrl_hdr           *resp = slab_alloc(sizeof(*resp));
@@ -393,6 +415,9 @@ static int virtio_gpu_create_framebuffer(struct virtio_gpu_device *gpu)
                 ret = virtqueue_send(gpu->controlq,
                                      cmd,  sizeof(*cmd),
                                      resp, sizeof(*resp));
+
+                printk("create_2d: ret=%d type=%0#x\n", ret, resp->type);
+
                 if (ret == 0 && resp->type != VIRTIO_GPU_RESP_OK_NODATA)
                         ret = -1;
 
@@ -401,7 +426,7 @@ static int virtio_gpu_create_framebuffer(struct virtio_gpu_device *gpu)
                 if (ret) return ret;
         }
 
-        // 指定地址作为画布的内存映射
+        // 3. ATTACH_BACKING
         {
                 struct {
                         struct virtio_gpu_resource_attach_backing req;
@@ -429,6 +454,9 @@ static int virtio_gpu_create_framebuffer(struct virtio_gpu_device *gpu)
                 ret = virtqueue_send(gpu->controlq,
                                      cmd,  sizeof(*cmd),
                                      resp, sizeof(*resp));
+
+                printk("attach: ret=%d type=%0#x\n", ret, resp->type);
+
                 if (ret == 0 && resp->type != VIRTIO_GPU_RESP_OK_NODATA)
                         ret = -1;
 
@@ -437,10 +465,9 @@ static int virtio_gpu_create_framebuffer(struct virtio_gpu_device *gpu)
                 if (ret) return ret;
         }
 
-        // 刷新
+        // 4. SET_SCANOUT
         {
                 struct virtio_gpu_set_scanout *cmd  = slab_alloc(sizeof(*cmd));
- 
                 struct virtio_gpu_ctrl_hdr    *resp = slab_alloc(sizeof(*resp));
                 if (!cmd || !resp) { slab_free(cmd); slab_free(resp); return -1; }
 
@@ -459,6 +486,9 @@ static int virtio_gpu_create_framebuffer(struct virtio_gpu_device *gpu)
                 ret = virtqueue_send(gpu->controlq,
                                      cmd,  sizeof(*cmd),
                                      resp, sizeof(*resp));
+
+                printk("set_scanout: ret=%d type=%0#x\n", ret, resp->type);
+
                 if (ret == 0 && resp->type != VIRTIO_GPU_RESP_OK_NODATA)
                         ret = -1;
 
@@ -468,7 +498,6 @@ static int virtio_gpu_create_framebuffer(struct virtio_gpu_device *gpu)
         }
 
         return 0;
-
 }
 
 static void dump_gpu(struct virtio_gpu_device *gpu)
@@ -491,4 +520,91 @@ static void dump_gpu(struct virtio_gpu_device *gpu)
         printk("  scanout_id  : %u\n", gpu->scanout_id);
         printk("  initialized : %d\n", gpu->initialized);
 
+}
+
+/*
+ * 把 fb 的一块脏区域刷到屏幕。
+ * 现代qemu需要选转移，在flush
+ *   1) TRANSFER_TO_HOST_2D：把 guest backing(fb) 的像素 DMA 到设备侧
+ *      resource 镜像；QEMU 不会直接引用 backing。
+ *   2) RESOURCE_FLUSH：通知 scanout 该区域已变化，重绘到窗口。
+ */
+int virtio_gpu_flush(struct virtio_gpu_device *gpu,
+                     uint32_t x, uint32_t y,
+                     uint32_t w, uint32_t h)
+{
+        int ret;
+
+        if (w == 0 || h == 0)
+                return 0;
+
+        /* backing 内源数据的字节偏移：第 y 行第 x 个像素 */
+        uint64_t offset = ((uint64_t)y * gpu->width + x) * 4;
+
+        /* 1) TRANSFER_TO_HOST_2D */
+        {
+                struct virtio_gpu_transfer_to_host_2d *cmd  = slab_alloc(sizeof(*cmd));
+                struct virtio_gpu_ctrl_hdr            *resp = slab_alloc(sizeof(*resp));
+                if (!cmd || !resp) { slab_free(cmd); slab_free(resp); return -1; }
+
+                cmd->hdr.type     = VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D;
+                cmd->hdr.flags    = 0;
+                cmd->hdr.fence_id = 0;
+                cmd->hdr.ctx_id   = 0;
+                cmd->hdr.padding  = 0;
+                cmd->r.x          = x;
+                cmd->r.y          = y;
+                cmd->r.width      = w;
+                cmd->r.height     = h;
+                cmd->offset       = offset;
+                cmd->resource_id  = gpu->resource_id;
+                cmd->padding      = 0;
+
+                ret = virtqueue_send(gpu->controlq,
+                                     cmd,  sizeof(*cmd),
+                                     resp, sizeof(*resp));
+
+                printk("transfer2d: ret=%d resp_type=%0#x\n", ret, resp->type);
+
+                if (ret == 0 && resp->type != VIRTIO_GPU_RESP_OK_NODATA)
+                        ret = -1;
+
+                slab_free(cmd);
+                slab_free(resp);
+                if (ret)
+                        return ret;
+        }
+
+        /* 2) RESOURCE_FLUSH */
+        {
+                struct virtio_gpu_resource_flush *cmd  = slab_alloc(sizeof(*cmd));
+                struct virtio_gpu_ctrl_hdr       *resp = slab_alloc(sizeof(*resp));
+                if (!cmd || !resp) { slab_free(cmd); slab_free(resp); return -1; }
+
+                cmd->hdr.type     = VIRTIO_GPU_CMD_RESOURCE_FLUSH;
+                cmd->hdr.flags    = 0;
+                cmd->hdr.fence_id = 0;
+                cmd->hdr.ctx_id   = 0;
+                cmd->hdr.padding  = 0;
+                cmd->r.x          = x;
+                cmd->r.y          = y;
+                cmd->r.width      = w;
+                cmd->r.height     = h;
+                cmd->resource_id  = gpu->resource_id;
+                cmd->padding      = 0;
+
+                ret = virtqueue_send(gpu->controlq,
+                                     cmd,  sizeof(*cmd),
+                                     resp, sizeof(*resp));
+
+                printk("flush: ret=%d resp_type=%0#x\n", ret, resp->type);
+
+                if (ret == 0 && resp->type != VIRTIO_GPU_RESP_OK_NODATA)
+                        ret = -1;
+
+                slab_free(cmd);
+                slab_free(resp);
+        }
+
+        return ret;
 }
