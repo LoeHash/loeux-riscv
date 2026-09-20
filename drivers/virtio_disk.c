@@ -540,30 +540,3 @@ void init_virtio_disk()
         }
 }
 
-void b8_write(uint64_t addr, uint8_t data)
-{
-
-        *((uint8_t *)addr) = data;
-        MEMORY_FENCE;
-}
-
-void b16_write(uint64_t addr, uint16_t data)
-{
-
-        *((uint16_t *)addr) = data;
-        MEMORY_FENCE;
-}
-
-void b64_write(uint64_t addr, uint64_t data)
-{
-
-        *((uint64_t *)addr) = data;
-        MEMORY_FENCE;
-}
-
-void b32_write(uint64_t addr, uint32_t data)
-{
-
-        *((uint32_t *)addr) = data;
-        MEMORY_FENCE;
-}

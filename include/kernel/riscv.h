@@ -247,4 +247,8 @@ static inline void task_restore_stvec(struct task_struct *ts)
         w_stvec(ts->stvec); // 将 task 的 stvec 恢复到当前 hart
 }
 
+static inline void wfi(){
+        asm volatile("wfi");
+}
+
 #endif

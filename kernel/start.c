@@ -20,6 +20,7 @@
 #include <char_dev.h>
 #include <drivers/tty.h>
 #include <drivers/tty/uart_tty.h>
+#include <drivers/virtio_gpu.h>
 
 extern char _sec_entry64[];
 
@@ -58,6 +59,8 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         init_tasks();
         // 初始化disk
         init_virtio_disk();
+        // 初始化gpu
+        init_virtio_gpu();
         // 初始化虚拟文件系统
         init_vfs();
         // 初始化 tty

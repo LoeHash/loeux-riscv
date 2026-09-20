@@ -2,6 +2,7 @@
 #define _INC_VIRTIO_
 #include "type.h"
 #include "block_device.h"
+#include "memory.h"
 #define VIRTIO_QUEUE_INIT_ERROR_VQ_IS_NULL -1
 #define VIRTIO_QUEUE_INIT_ERROR_VQ_DESC_TOO_LONG -2
 
@@ -156,11 +157,14 @@ struct virtq_used
 
 struct virtqueue_n
 {
+        uintptr_t mmio_base;    // base地址
+        uint32_t queue_idx;     // 驱动填写
+
         int irq;
         // 驱动用
-        struct virtq_desc_n *desc_start;
-        struct virtq_avail_n *avail_start;
-        struct virtq_used_n *used_start;
+        volatile struct virtq_desc_n *desc_start;
+        volatile struct virtq_avail_n *avail_start;
+        volatile struct virtq_used_n *used_start;
         
         // 设备用 phy
         phys_addr_t desc_phy;
@@ -176,12 +180,18 @@ struct virtqueue_n
         int queue_size;
 
         spinlock_t vq_lock;
-} __attribute__((packed));
+} ;
 
 
 struct virtqueue
 {
+        // 中断号
         int irq;
+
+        // mmio_base
+        uintptr_t mmio_base;
+        uint32_t queue_idx;
+
         // 驱动用
         struct virtq_desc *desc_start;
         struct virtq_avail *avail_start;
@@ -201,7 +211,7 @@ struct virtqueue
         int queue_size;
 
         spinlock_t vq_lock;
-} __attribute__((packed));
+} ;
 
 // we reco
 extern struct virtio_blk_disk usable_disks[8];
@@ -221,13 +231,69 @@ uint32_t virtio_disk_rw_sync(
     uint32_t bytes,
     uint8_t *status);
 
-void b8_write(uint64_t addr, uint8_t data);
-void b16_write(uint64_t addr, uint16_t data);
-void b64_write(uint64_t addr, uint64_t data);
-void b32_write(uint64_t addr, uint32_t data);
+
+
+static inline void b8_write(uint64_t addr, uint8_t data)
+{
+        *((volatile uint8_t *)addr) = data;
+        MEMORY_FENCE;
+}
+
+static inline void b16_write(uint64_t addr, uint16_t data)
+{
+        *((volatile uint16_t *)addr) = data;
+        MEMORY_FENCE;
+}
+
+static inline void b32_write(uint64_t addr, uint32_t data)
+{
+        *((volatile uint32_t *)addr) = data;
+        MEMORY_FENCE;
+}
+
+static inline void b64_write(uint64_t addr, uint64_t data)
+{
+        *((volatile uint64_t *)addr) = data;
+        MEMORY_FENCE;
+}
+
+static inline uint8_t b8_read(uint64_t addr)
+{
+        uint8_t data = *((volatile uint8_t *)addr);
+        MEMORY_FENCE;
+        return data;
+}
+
+static inline uint16_t b16_read(uint64_t addr)
+{
+        uint16_t data = *((volatile uint16_t *)addr);
+        MEMORY_FENCE;
+        return data;
+}
+
+static inline uint32_t b32_read(uint64_t addr)
+{
+        uint32_t data = *((volatile uint32_t *)addr);
+        MEMORY_FENCE;
+        return data;
+}
+
+static inline uint64_t b64_read(uint64_t addr)
+{
+        uint64_t data = *((volatile uint64_t *)addr);
+        MEMORY_FENCE;
+        return data;
+}
+
+
 void dump_sector_n(struct virtio_blk_disk *disk, int n);
 
 int virtio_blk_read(void *dev, uint64_t sector, void *buf);
 int virtio_blk_write(void *dev, uint64_t sector, const void *buf);
 uint64_t virtio_blk_sector_count(void *dev);
+struct virtqueue_n *alloc_virtqueue(int queue_size);
+int init_virtqueue(struct virtqueue_n *vq, uint32_t start_idx);
+int virtqueue_send(struct virtqueue_n *vq,
+                   void *cmd,  uint32_t cmd_len,
+                   void *resp, uint32_t resp_len);
 #endif
