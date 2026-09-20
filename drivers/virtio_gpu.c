@@ -1,6 +1,8 @@
 #include <virtio_gpu.h>
 #include <virtio_mmio.h>
+#include <dma.h>
 #include <memlayout.h>
+#include <vm.h>
 #include <slab.h>
 #include <lib.h>
 #include <panic.h>
@@ -359,8 +361,114 @@ static int virtio_gpu_get_display_info(struct virtio_gpu_device *gpu)
 
 static int virtio_gpu_create_framebuffer(struct virtio_gpu_device *gpu)
 {
-        dump_gpu(gpu);
-        while(1);
+        int ret;
+
+        // 1. 从 DMA 区分配 framebuffer 
+        gpu->fb_size    = gpu->width * gpu->height * 4;
+        gpu->fb         = dma_alloc(gpu->fb_size);
+        if (!gpu->fb){
+                return -1;
+        }
+        
+        gpu->fb_phy     = (phys_addr_t)va2pa(kernel_pt, (uint64_t)gpu->fb);   // 恒等映射
+        gpu->resource_id = 1;   // 画布索引
+        memset(gpu->fb, 0, gpu->fb_size);
+
+        // 创建2d画布
+        {
+                struct virtio_gpu_resource_create_2d *cmd  = slab_alloc(sizeof(*cmd));
+                struct virtio_gpu_ctrl_hdr           *resp = slab_alloc(sizeof(*resp));
+                if (!cmd || !resp) { slab_free(cmd); slab_free(resp); return -1; }
+
+                cmd->hdr.type     = VIRTIO_GPU_CMD_RESOURCE_CREATE_2D;
+                cmd->hdr.flags    = 0;
+                cmd->hdr.fence_id = 0;
+                cmd->hdr.ctx_id   = 0;
+                cmd->hdr.padding  = 0;
+                cmd->resource_id  = gpu->resource_id;
+                cmd->format       = VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM;
+                cmd->width        = gpu->width;
+                cmd->height       = gpu->height;
+
+                ret = virtqueue_send(gpu->controlq,
+                                     cmd,  sizeof(*cmd),
+                                     resp, sizeof(*resp));
+                if (ret == 0 && resp->type != VIRTIO_GPU_RESP_OK_NODATA)
+                        ret = -1;
+
+                slab_free(cmd);
+                slab_free(resp);
+                if (ret) return ret;
+        }
+
+        // 指定地址作为画布的内存映射
+        {
+                struct {
+                        struct virtio_gpu_resource_attach_backing req;
+                        struct virtio_gpu_mem_entry                entry;
+                } __attribute__((packed)) *cmd;
+
+                struct virtio_gpu_ctrl_hdr *resp;
+
+                cmd  = slab_alloc(sizeof(*cmd));
+                resp = slab_alloc(sizeof(*resp));
+                if (!cmd || !resp) { slab_free(cmd); slab_free(resp); return -1; }
+
+                cmd->req.hdr.type     = VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING;
+                cmd->req.hdr.flags    = 0;
+                cmd->req.hdr.fence_id = 0;
+                cmd->req.hdr.ctx_id   = 0;
+                cmd->req.hdr.padding  = 0;
+                cmd->req.resource_id  = gpu->resource_id;
+                cmd->req.nr_entries   = 1;
+
+                cmd->entry.addr    = gpu->fb_phy;
+                cmd->entry.length  = gpu->fb_size;
+                cmd->entry.padding = 0;
+
+                ret = virtqueue_send(gpu->controlq,
+                                     cmd,  sizeof(*cmd),
+                                     resp, sizeof(*resp));
+                if (ret == 0 && resp->type != VIRTIO_GPU_RESP_OK_NODATA)
+                        ret = -1;
+
+                slab_free(cmd);
+                slab_free(resp);
+                if (ret) return ret;
+        }
+
+        // 刷新
+        {
+                struct virtio_gpu_set_scanout *cmd  = slab_alloc(sizeof(*cmd));
+ 
+                struct virtio_gpu_ctrl_hdr    *resp = slab_alloc(sizeof(*resp));
+                if (!cmd || !resp) { slab_free(cmd); slab_free(resp); return -1; }
+
+                cmd->hdr.type     = VIRTIO_GPU_CMD_SET_SCANOUT;
+                cmd->hdr.flags    = 0;
+                cmd->hdr.fence_id = 0;
+                cmd->hdr.ctx_id   = 0;
+                cmd->hdr.padding  = 0;
+                cmd->r.x          = 0;
+                cmd->r.y          = 0;
+                cmd->r.width      = gpu->width;
+                cmd->r.height     = gpu->height;
+                cmd->scanout_id   = gpu->scanout_id;
+                cmd->resource_id  = gpu->resource_id;
+
+                ret = virtqueue_send(gpu->controlq,
+                                     cmd,  sizeof(*cmd),
+                                     resp, sizeof(*resp));
+                if (ret == 0 && resp->type != VIRTIO_GPU_RESP_OK_NODATA)
+                        ret = -1;
+
+                slab_free(cmd);
+                slab_free(resp);
+                if (ret) return ret;
+        }
+
+        return 0;
+
 }
 
 static void dump_gpu(struct virtio_gpu_device *gpu)

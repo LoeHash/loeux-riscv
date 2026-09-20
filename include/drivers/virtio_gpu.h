@@ -80,5 +80,46 @@ struct virtio_gpu_resp_display_info {
     struct virtio_gpu_display_one pmodes[16]; // 最多 16 个 scanout
 } __attribute__((packed));
 
+struct virtio_gpu_resource_create_2d {
+    struct virtio_gpu_ctrl_hdr hdr;  // type = 0x0101
+    uint32_t resource_id;             // 画布编号
+    uint32_t format;                  // 像素格式
+    uint32_t width;                   // 宽
+    uint32_t height;                  // 高
+} __attribute__((packed));
+
+struct virtio_gpu_mem_entry {
+    uint64_t addr;      // 这段内存的物理起始地址
+    uint32_t length;    // 这段内存多长
+    uint32_t padding;
+} __attribute__((packed));
+
+// 绑定内存到资源
+struct virtio_gpu_resource_attach_backing {
+    struct virtio_gpu_ctrl_hdr hdr;  // type = 0x0106
+    uint32_t resource_id;             // 资源编号
+    uint32_t nr_entries;              // 后面跟几个 mem_entry
+    struct virtio_gpu_mem_entry entries[]; 
+} __attribute__((packed));
+
+// 设置扫描输出
+struct virtio_gpu_set_scanout {
+    struct virtio_gpu_ctrl_hdr hdr;  // type = 0x0103
+    struct virtio_gpu_rect r;         // 显示区域
+    uint32_t scanout_id;              // 哪个 scanout
+    uint32_t resource_id;             // 资源编号
+} __attribute__((packed));
+
+// 刷新资源
+struct virtio_gpu_resource_flush {
+    struct virtio_gpu_ctrl_hdr hdr;  // type = 0x0104
+    struct virtio_gpu_rect r;         // 刷新区域
+    uint32_t resource_id;             // 资源编号
+    uint32_t padding;
+} __attribute__((packed));
+
+// 单个 scanout 的信息
+
+
 void init_virtio_gpu();
 #endif
