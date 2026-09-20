@@ -45,4 +45,5 @@ int copyout(page_table pagetable, uint64_t dstva, char *src, uint64_t len);
 int copyin(page_table pagetable, char *dst, uint64_t srcva, uint64_t len);
 int vm_pagetbl_copy(page_table src_pg, page_table dst_pg, uint64_t sz, bool is_user_copy);
 int vm_pagetbl_copy_asign(page_table src_pg, page_table dst_pg, uint64_t va_start, uint64_t sz);
+uint64_t va2pa(page_table pt, uint64_t va);
 #endif

@@ -120,6 +120,13 @@ void kvm_do_mapping(page_table pgtable)
                 ((gmd.fdt_tail->paddr - gmd.fdt_head->paddr) / PG_4K_SIZE) + 1,
                 PTE_V | PTE_R, 0);
 
+                // 3. 映射 DMA 区域
+        kvminit(pgtable,
+                DMA_START_BASE,
+                gmd.dma_start_at,
+                ((gmd.dma_end_at - gmd.dma_start_at) / PG_4K_SIZE) + 1,
+                PTE_V | PTE_R | PTE_W, 0);
+
         // 映射空闲内存
         kvminit(pgtable,
                 gmd.free_start_at,
@@ -652,4 +659,18 @@ int vm_pagetbl_copy_asign(page_table src_pg, page_table dst_pg, uint64_t va_star
         }
 
         return 0;
+}
+
+
+uint64_t va2pa(page_table pt, uint64_t va) {
+        for (int level = 2; level > 0; level--) {
+                pte *p = &pt[PX(level, va)];
+                if (!(*p & PTE_V))
+                        return (uint64_t)-1;
+                pt = (page_table)PTE2PA(*p);
+        }
+        pte *p = &pt[PX(0, va)];
+        if (!(*p & PTE_V))
+                return (uint64_t)-1;
+        return PTE2PA(*p) | (va & 0xFFF);
 }

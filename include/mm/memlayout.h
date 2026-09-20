@@ -93,6 +93,13 @@
 
 #define END_OF_KERNEL_STACK 0x3F7FFF2000
 
+#define DMA_PAGE_COUNT 4096                              // DMA 区页数 = 4096 页
+#define DMA_SIZE       (DMA_PAGE_COUNT * PG_4K_SIZE)     // DMA 区大小 = 16MB
+
+#define DMA_END        (END_OF_KERNEL_STACK - PG_4K_SIZE) // DMA 区上界（不含），下方留一页保护
+#define DMA_START_BASE (DMA_END - DMA_SIZE)               // DMA 区起始物理地址
+
+
 // 用户栈顶
 // 在当前阶段我仅作内核在0x80000000处的恒等映射
 // 后期会迁移到高地址，至于现在, 给用户预留2gb
