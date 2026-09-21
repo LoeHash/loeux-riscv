@@ -168,8 +168,8 @@ qemu:
     		-serial mon:stdio \
     		-global virtio-mmio.force-legacy=false \
     		-drive file=loeux.img,format=raw,if=none,id=loeux \
-    		-device virtio-blk-device,drive=loeux,bus=virtio-mmio-bus.0
-
+    		-device virtio-blk-device,drive=loeux,bus=virtio-mmio-bus.0 \
+    		-device virtio-keyboard-device,bus=virtio-mmio-bus.2
 
 gdb:
 	qemu-system-riscv64 \
@@ -182,7 +182,8 @@ gdb:
     		-serial mon:stdio \
     		-global virtio-mmio.force-legacy=false \
     		-drive file=loeux.img,format=raw,if=none,id=loeux \
-    		-device virtio-blk-device,drive=loeux,bus=virtio-mmio-bus.0\
+    		-device virtio-blk-device,drive=loeux,bus=virtio-mmio-bus.0 \
+    		-device virtio-keyboard-device,bus=virtio-mmio-bus.2 \
 		-s -S\
 
 
