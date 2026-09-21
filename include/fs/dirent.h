@@ -9,16 +9,6 @@
 /*
  * getdents 的目录项 ABI（内核 copyout 与用户程序共用同一布局）。
  *
- * 风格来自 Linux getdents64：d_ino / d_off / d_reclen / d_type / d_name。
- * 本内核不做变长记录——d_reclen 恒为 sizeof(struct dirent)，
- * 用户态按固定步长遍历返回缓冲区即可：
- *
- *     struct dirent *d;
- *     for (int off = 0; off < n; off += d->d_reclen)
- *         d = (struct dirent *)(buf + off);
- *
- * 内核与用户态均用同一版 riscv64 gcc 编译，填充规则一致；
- * 所有字段本身也都是自然对齐的。
  */
 
 #define VFS_NAME_MAX 255 /* 文件名最大长度（不含结尾 '\0'） */

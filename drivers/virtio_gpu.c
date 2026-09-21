@@ -43,6 +43,12 @@ static int virtio_gpu_create_framebuffer(struct virtio_gpu_device *gpu);
 static volatile uint32_t gpu_device_count = 0; 
 
 
+
+
+
+
+
+
 void init_virtio_gpu(){
         detect_gpu_device();
         init_all_gpu();
@@ -323,19 +329,16 @@ static int virtio_gpu_get_display_info(struct virtio_gpu_device *gpu)
         cmd->padding  = 0;
 
         
-        printk("QUEUE_NUM macro=%d\n", VIRTIO_GPU_MAX_QUEUE_NUM);
-        printk("desc_phy=%0#lx avail_phy=%0#lx used_phy=%0#lx\n",
-        gpu->controlq->desc_phy, gpu->controlq->avail_phy, gpu->controlq->used_phy);
-        printk("cmd=%0#lx resp=%0#lx\n", (uint64_t)cmd, (uint64_t)resp);
+        // printk("QUEUE_NUM macro=%d\n", VIRTIO_GPU_MAX_QUEUE_NUM);
+        // printk("desc_phy=%0#lx avail_phy=%0#lx used_phy=%0#lx\n",
+        // gpu->controlq->desc_phy, gpu->controlq->avail_phy, gpu->controlq->used_phy);
+        // printk("cmd=%0#lx resp=%0#lx\n", (uint64_t)cmd, (uint64_t)resp);
 
         uintptr_t base = gpu->mmio_base;
         b32_write(base + VIRTIO_MMIO_QUEUE_SEL_OFFSET, 0);   // 选中 controlq
 
         /*
          * 注意：QUEUE_NUM / QUEUE_DESC_* / QUEUE_AVAIL_* / QUEUE_USED_*
-         * 在 virtio-mmio 规范里是【只写】寄存器，QEMU 读它们恒返回 0，
-         * 不能用读回值判断配置是否生效。可读的队列状态只有
-         * QUEUE_NUM_MAX（设备能力）和 QUEUE_READY（是否已激活）。
          */
         printk("=== controlq state ===\n");
         /* read-only: device-advertised MAX depth (controlq=64, cursorq=16) */
@@ -393,8 +396,8 @@ static int virtio_gpu_create_framebuffer(struct virtio_gpu_device *gpu)
         gpu->resource_id = 1;
         memset(gpu->fb, 0, gpu->fb_size);
 
-        printk("create_fb: fb=%0#lx phy=%0#lx size=%lu\n",
-               (uint64_t)gpu->fb, gpu->fb_phy, gpu->fb_size);
+        // printk("create_fb: fb=%0#lx phy=%0#lx size=%lu\n",
+        //        (uint64_t)gpu->fb, gpu->fb_phy, gpu->fb_size);
 
         // 2. CREATE_2D
         {
@@ -416,7 +419,7 @@ static int virtio_gpu_create_framebuffer(struct virtio_gpu_device *gpu)
                                      cmd,  sizeof(*cmd),
                                      resp, sizeof(*resp));
 
-                printk("create_2d: ret=%d type=%0#x\n", ret, resp->type);
+                // printk("create_2d: ret=%d type=%0#x\n", ret, resp->type);
 
                 if (ret == 0 && resp->type != VIRTIO_GPU_RESP_OK_NODATA)
                         ret = -1;
@@ -455,7 +458,7 @@ static int virtio_gpu_create_framebuffer(struct virtio_gpu_device *gpu)
                                      cmd,  sizeof(*cmd),
                                      resp, sizeof(*resp));
 
-                printk("attach: ret=%d type=%0#x\n", ret, resp->type);
+                // printk("attach: ret=%d type=%0#x\n", ret, resp->type);
 
                 if (ret == 0 && resp->type != VIRTIO_GPU_RESP_OK_NODATA)
                         ret = -1;
@@ -487,7 +490,7 @@ static int virtio_gpu_create_framebuffer(struct virtio_gpu_device *gpu)
                                      cmd,  sizeof(*cmd),
                                      resp, sizeof(*resp));
 
-                printk("set_scanout: ret=%d type=%0#x\n", ret, resp->type);
+                // printk("set_scanout: ret=%d type=%0#x\n", ret, resp->type);
 
                 if (ret == 0 && resp->type != VIRTIO_GPU_RESP_OK_NODATA)
                         ret = -1;

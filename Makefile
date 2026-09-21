@@ -4,22 +4,9 @@ CC := $(CROSS_COMPILE)gcc
 LD := $(CROSS_COMPILE)ld
 OBJCOPY := $(CROSS_COMPILE)objcopy
 
-INCLUDES := -I. \
-            -I./include \
-            -I./include/kernel \
-            -I./include/test \
-            -I./include/mm \
-            -I./include/drivers \
-            -I./include/drivers/tty \
-            -I./include/fs \
-            -I./include/utils \
-            -I./kernel \
-            -I./mm \
-            -I./boot \
-            -I./asm \
-		    -I./fs \
-		    -I./drivers\
-	    	-I./test\
+ROOT := $(CURDIR)
+include $(ROOT)/build/paths.mk
+
 ARCH := rv64gc
 ABI := lp64
 CFLAGS := -g -march=$(ARCH) -mabi=$(ABI) -nostdlib -ffreestanding $(INCLUDES) -Wall -Werro
@@ -66,6 +53,7 @@ OBJS := asm/kernel_trap_vec.o\
 	test/vm_test.o\
 	test/slab_test.o\
 	utils/hashmap.o\
+	font/ascii8x16.o\
 
 
 
@@ -153,7 +141,7 @@ test/virtio_disk_test.o: test/virtio_disk_test.c
 test/vm_test.o: test/vm_test.c 
 test/slab_test.o: test/slab_test.c 
 utils/hashmap.o: utils/hashmap.c 
-
+font/ascii8x16.o: font/ascii8x16.c
 
 clean:
 	$(MAKE) -C boot clean

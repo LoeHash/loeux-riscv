@@ -1,4 +1,4 @@
-# fs/Makefile - 编译文件系统模块
+# font/Makefile - 编译字体模块
 
 CROSS_COMPILE ?= riscv64-linux-gnu-
 CC := $(CROSS_COMPILE)gcc
