@@ -2,6 +2,7 @@
 #include <fdt.h>
 #include <dma.h>
 #include <printk.h>
+#include <drivers/gpu/kgfx.h>
 #include <spinlock.h>
 #include <riscv.h>
 #include <vfs.h>
@@ -13,15 +14,15 @@
 #include <trap.h>
 #include <timer.h>
 #include <uart.h>
-#include <virtio_mmio.h>
-#include <test.h>
+#include <drivers/virtio_mmio.h>
+#include <test/test.h>
 #include <slab.h>
 #include <fat32.h>
 #include <ext2.h>
 #include <char_dev.h>
 #include <drivers/tty.h>
 #include <drivers/tty/uart_tty.h>
-#include <drivers/virtio_gpu.h>
+#include <drivers/gpu/virtio_gpu.h>
 
 extern char _sec_entry64[];
 
@@ -75,7 +76,9 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         init_uart();
         // 初始化gpu
         init_virtio_gpu();
-
+        // 初始化kgfx
+        init_kgfx();
+        
         // init_vfs_std() 已移至 first_ret()：
         // 该函数需要为当前 task 在 ofile[] 中分配 fd 0/1/2，
         // boot 阶段还没有 current task，故推迟到首个进程启动时执行。
@@ -142,3 +145,4 @@ void secondary_start(uint64_t hart_id, uint64_t data_addr)
         sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
         scheduler();
 }
+
