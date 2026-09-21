@@ -27,4 +27,13 @@ int vm_compare_full_pagetable(page_table pt1, page_table pt2);
 void test_slab(void);
 void test_slab_race(void);
 void virtio_gpu_test_draw(struct virtio_gpu_device *gpu);
+void kgfx_test_text(struct virtio_gpu_device *gpu);
+void kgfx_test_rect(struct virtio_gpu_device *gpu);
+void kgfx_test_line(struct virtio_gpu_device *gpu);
+void kgfx_test_all_chars(struct virtio_gpu_device *gpu);
+void kgfx_test_color_bars(struct virtio_gpu_device *gpu);
+void kgfx_test_rects(struct virtio_gpu_device *gpu);
+void kgfx_test_lines(struct virtio_gpu_device *gpu);
+void kgfx_test_text_lines(struct virtio_gpu_device *gpu);
+void kgfx_test_all(struct virtio_gpu_device *gpu);
 #endif
