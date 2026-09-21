@@ -36,7 +36,8 @@ OBJS := asm/kernel_trap_vec.o\
 	mm/dma.o\
 	drivers/virtio_mmio.o\
 	drivers/virtio_disk.o\
-	drivers/virtio_gpu.o\
+	drivers/gpu/virtio_gpu.o\
+	drivers/gpu/kgfx.o\
 	drivers/tty/uart_tty.o\
 	drivers/tty.o\
 	drivers/uart.o\
@@ -123,7 +124,8 @@ mm/vm.o: mm/vm.c
 mm/slab.o: mm/slab.c 
 mm/dma.o: mm/dma.c 
 drivers/virtio_disk.o: drivers/virtio_disk.c 
-drivers/virtio_gpu.o: drivers/virtio_gpu.c 
+drivers/gpu/virtio_gpu.o: drivers/gpu/virtio_gpu.c 
+drivers/gpu/kgfx.o: drivers/gpu/kgfx.c 
 drivers/uart.o: drivers/uart.c 
 drivers/tty/uart_tty.o: drivers/tty/uart_tty.c 
 drivers/tty.o: drivers/tty.c 

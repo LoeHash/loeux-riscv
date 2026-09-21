@@ -1,35 +1,26 @@
-# drivers/Makefile
+# drivers/Makefile - 编译所有驱动C文件
 
 CROSS_COMPILE ?= riscv64-linux-gnu-
 CC := $(CROSS_COMPILE)gcc
-ROOT := $(abspath $(CURDIR)/..)
+ROOT := $(abspath $(CURDIR)/../..)
 include $(ROOT)/build/paths.mk
-
 CFLAGS := -march=rv64gc -mabi=lp64 -nostdlib -ffreestanding $(INCLUDES) -g
 CFLAGS += -MMD -MP
 
-# 子目录列表
-SUBDIRS := $(wildcard */)
-
-# 当前目录的源文件
 SRC_C := $(wildcard *.c)
 OBJS  := $(SRC_C:.c=.o)
 SRC_S := $(wildcard *.S)
 ASMOBJS := $(SRC_S:.S=.o)
 
-.PHONY: all clean $(SUBDIRS)
-
-all: $(OBJS) $(ASMOBJS) $(SUBDIRS)
+.PHONY: all clean
 
 
-$(SUBDIRS):
-	$(MAKE) -C $@
+all: $(OBJS) $(ASMOBJS)
 
+# 模式规则：将每个 .c 编译为对应的 .o
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
 	rm -f *.o *.d
-	for d in $(SUBDIRS); do $(MAKE) -C $$d clean; done
-
 -include $(OBJS:.o=.d)
