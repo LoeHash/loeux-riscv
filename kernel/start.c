@@ -18,6 +18,7 @@
 #include <test/test.h>
 #include <slab.h>
 #include <fat32.h>
+#include <keyboard.h>
 #include <ext2.h>
 #include <char_dev.h>
 #include <drivers/tty.h>
@@ -81,7 +82,9 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         init_kgfx();
         // 初始化 gpu tty
         init_gpu_tty();
-
+        // 初始化键盘
+        init_keyboard();
+                
         // init_vfs_std() 已移至 first_ret()：
         // 该函数需要为当前 task 在 ofile[] 中分配 fd 0/1/2，
         // boot 阶段还没有 current task，故推迟到首个进程启动时执行。

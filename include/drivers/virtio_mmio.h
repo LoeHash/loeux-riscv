@@ -36,7 +36,8 @@
 // disk things
 #define DISK_SECTOR_SIZE 512
 #define VIRTIO_DISK_DEVICE_ID 2 // 块设备
-#define VIRTIO_GPU_DEVICE_ID 16 // 块设备
+#define VIRTIO_GPU_DEVICE_ID 16 // gpu
+#define VIRTIO_KEYBOARD_DEVICE_ID 18 // keyboard
 #define SECTOR_SIZE_TO_KB(capacity) ((capacity) * DISK_SECTOR_SIZE / 1024)
 #define SECTOR_SIZE_TO_MB(capacity) ((capacity) * DISK_SECTOR_SIZE / 1024 / 1024)
 #define SECTOR_SIZE_TO_GB(capacity) ((capacity) * DISK_SECTOR_SIZE / 1024 / 1024 / 1024)

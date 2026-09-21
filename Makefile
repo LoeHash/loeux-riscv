@@ -36,6 +36,7 @@ OBJS := asm/kernel_trap_vec.o\
 	mm/dma.o\
 	drivers/virtio_mmio.o\
 	drivers/virtio_disk.o\
+	drivers/keyboard.o\
 	drivers/tty/gpu_tty.o\
 	drivers/gpu/virtio_gpu.o\
 	drivers/gpu/kgfx.o\
@@ -132,6 +133,7 @@ drivers/tty/uart_tty.o: drivers/tty/uart_tty.c
 drivers/tty/gpu_tty.o: drivers/tty/gpu_tty.c 
 drivers/tty.o: drivers/tty.c 
 drivers/virtio_mmio.o: drivers/virtio_mmio.c
+drivers/keyboard.o: drivers/keyboard.c
 fs/ext2.o: fs/ext2.c
 fs/fat32.o: fs/fat32.c 
 fs/vfs.o: fs/vfs.c 
@@ -159,7 +161,7 @@ clean:
 	rm -f $(TARGET) $(TARGET_BIN)
 qemu:
 	qemu-system-riscv64 \
-    		-machine virt \
+    		-machine virt,dumpdtb=qemu.dtb \
     		-smp 4 \
     		-m 2048M \
     		-kernel kernel.elf \

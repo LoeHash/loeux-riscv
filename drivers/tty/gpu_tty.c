@@ -1,4 +1,5 @@
 #include <tty.h>
+#include <keyboard.h>
 #include <virtio_gpu.h>
 #include <uart.h>
 #include <lib.h>
@@ -88,10 +89,7 @@ static int gpu_tty_putc(struct tty *tty, char c)
 
 static int gpu_tty_getc(struct tty *tty, char *out)
 {
-        // while(1);
-        *out = uart_getchar();
-        return 0;
-        // return 0;
+	return keyboard_getchar(out);
 }
 
 static int gpu_tty_has_input(struct tty *tty)
