@@ -2,6 +2,9 @@
 #define _INC_VIRTIO_GPU_H__
 #include <type.h>
 
+#define VIRTIO_GPU_SELECT_IDX 0
+
+
 #define VIRTIO_GPU_MAX_QUEUE_NUM 8
 
 // ---- VirtIO GPU 命令码 ----
@@ -140,4 +143,5 @@ int virtio_gpu_flush(struct virtio_gpu_device *gpu,
                             uint32_t x, uint32_t y,
                             uint32_t w, uint32_t h);
 void virtio_gpu_update(struct virtio_gpu_device *gpu, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+struct virtio_gpu_device *gpu_get(uint32_t idx);
 #endif

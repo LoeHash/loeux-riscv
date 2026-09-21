@@ -2190,8 +2190,8 @@ void init_vfs_std(void)
 {
         for (int i = 0; i < 3; i++)
         {
-                if (vfs_open("/dev/tty/uart/0", O_RDWR) < 0)
-                        panic_error("init_vfs_std: open /dev/tty/uart/0 failed");
+                if (vfs_open(VFS_STD_DEVICE, O_RDWR) < 0)
+                        panic_error("init_vfs_std: open %s failed", VFS_STD_DEVICE);
         }
 }
 

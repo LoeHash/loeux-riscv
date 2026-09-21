@@ -4,5 +4,5 @@
 #include <tty.h>
 #include <uart.h>
 
-void init_uart_tty(void);
+void init_uart_tty();
 #endif

@@ -45,6 +45,18 @@ static int virtio_gpu_get_display_info(struct virtio_gpu_device *gpu);
 static int virtio_gpu_create_framebuffer(struct virtio_gpu_device *gpu);
 static volatile uint32_t gpu_device_count = 0; 
 
+struct virtio_gpu_device *gpu_get(uint32_t idx)
+{
+        struct virtio_gpu_device *now = root_gpu_device.next;
+
+        for (uint32_t i = 0; i < idx; i++) {
+                now = now->next;
+        }
+
+        return now;     
+}
+
+
 void init_virtio_gpu(){
         detect_gpu_device();
         init_all_gpu();
@@ -88,15 +100,6 @@ static int virtio_gpu_init(struct virtio_gpu_device *gpu)
         virtio_gpu_driver_ok(base);
 
 
-        // 
-        printk("before get display info, the gpu:\n");
-        dump_gpu(gpu);
-        printk("magic=%0#x version=%u devid=%u\n",
-                b32_read(base + VIRTIO_MMIO_MAGIC_VALUE_OFFSET),
-                b32_read(base + VIRTIO_MMIO_VERSION_OFFSET),
-                b32_read(base + VIRTIO_MMIO_DEVICE_ID_OFFSET));
-
-
         if ((ret = virtio_gpu_get_display_info(gpu))){
                 printk("[Wrong] can not get the display info!\n");
                 return ret;
@@ -112,7 +115,7 @@ static int virtio_gpu_init(struct virtio_gpu_device *gpu)
 
         dump_gpu(gpu);
         
-        kgfx_test_all(gpu);
+        // kgfx_test_all(gpu);
 
         return 0;
 }
@@ -565,7 +568,6 @@ int virtio_gpu_flush(struct virtio_gpu_device *gpu,
                                      cmd,  sizeof(*cmd),
                                      resp, sizeof(*resp));
 
-                printk("transfer2d: ret=%d resp_type=%0#x\n", ret, resp->type);
 
                 if (ret == 0 && resp->type != VIRTIO_GPU_RESP_OK_NODATA)
                         ret = -1;
@@ -598,7 +600,6 @@ int virtio_gpu_flush(struct virtio_gpu_device *gpu,
                                      cmd,  sizeof(*cmd),
                                      resp, sizeof(*resp));
 
-                printk("flush: ret=%d resp_type=%0#x\n", ret, resp->type);
 
                 if (ret == 0 && resp->type != VIRTIO_GPU_RESP_OK_NODATA)
                         ret = -1;

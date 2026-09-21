@@ -6,7 +6,7 @@
 #include <hashmap.h>
 
 #define VFS_ROOT_PARENT_SPECIAL 0xDEADBEEFCAFEBABEULL
-
+#define VFS_STD_DEVICE "/dev/tty/gpu/0"
 /*
 VFS inode 生命周期总结
 

@@ -195,15 +195,15 @@ void kgfx_test_text_lines(struct virtio_gpu_device *gpu)
 void kgfx_test_all(struct virtio_gpu_device *gpu)
 {
         kgfx_test_all_chars(gpu);
-        stupid_delay(1000000000);
+        stupid_delay(300000000);
         kgfx_test_color_bars(gpu);
-        stupid_delay(1000000000);
+        stupid_delay(300000000);
         kgfx_test_rects(gpu);
-        stupid_delay(1000000000);
+        stupid_delay(300000000);
         kgfx_test_lines(gpu);
-        stupid_delay(1000000000);
+        stupid_delay(300000000);
         kgfx_test_text_lines(gpu);
-        stupid_delay(1000000000);
+        stupid_delay(300000000);
 }
 
 static void stupid_delay(uint32_t ticks){

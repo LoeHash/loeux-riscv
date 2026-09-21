@@ -1,8 +1,20 @@
-#ifndef __INC_UART_TTY_H__
-#define __INC_UART_TTY_H__
+#ifndef __INC_GPU_TTY_H__
+#define __INC_GPU_TTY_H__
 #include <type.h>
 #include <tty.h>
 #include <virtio_gpu.h>
 
-void init_gpu_tty(void);
+// 当前tty相关信息
+struct gpu_tty_state {
+    struct virtio_gpu_device *gpu;
+    uint32_t cur_x;
+    uint32_t cur_y;
+    uint32_t fg;
+    uint32_t bg;
+    int cursor_visible;    // 当前是否可见
+    int cursor_drawn;      // 光标是否已经画在屏幕上
+    uint32_t blink_counter; // 闪烁计时
+};
+
+void init_gpu_tty();
 #endif
