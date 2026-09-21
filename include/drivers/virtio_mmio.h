@@ -138,11 +138,20 @@ struct virtq_used_elem {
     uint32_t len;   // 设备实际写了多少字节
 } __attribute__((packed));
 
+/*
+ * virtio split vring 的 used ring 布局
+ *   offset 0: u16 flags
+ *   offset 2: u16 idx
+ *   offset 4: used_elem ring[QueueSize] 
+ * 每个 used_elem 为 { u32 id; u32 len; }
+ * 千万不要在 idx 与 ring 之间插 padding，否则读 ring[] 会整体后移 4 字节，
+ * 把上一个元素的 len 误读成下一个元素的 id 键盘驱动因此把 len=8 当成
+ * desc id=8 回填 avail，触发 QEMU "Guest says index 8 is available"。
+ */
 struct virtq_used_n {
     uint16_t flags;
-    uint16_t idx;                    // 设备下一个要写的位置
-    uint32_t padding;
-    struct virtq_used_elem ring[];
+    uint16_t idx;                    // 设备已完成的请求数
+    struct virtq_used_elem ring[];  // offset 4
 } __attribute__((packed));
 
 struct virtq_used
