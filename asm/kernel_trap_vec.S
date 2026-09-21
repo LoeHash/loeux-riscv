@@ -6,7 +6,6 @@ kernel_trap_vec:
 
         addi sp, sp, -256
 
-        # ra
         sd ra, 0(sp)
 
         # 8(sp) unused
