@@ -66,7 +66,26 @@ static int virtio_keyboard_init(struct virtio_input_device *kb)
 		if (virtio_keyboard_submit_event(kb, i) < 0)
 			return -1;
 	}
-        kb->initialized = 1;
+
+	/* TEMP DEBUG: dump vring */
+	{
+		struct virtqueue_n *v = kb->eventq;
+		printk("KBVQ qsize=%d desc_pa=%lx avail_pa=%lx used_pa=%lx\n",
+		       v->queue_size, v->desc_phy, v->avail_phy, v->used_phy);
+		printk("KBVQ avail flags=%u idx=%u ring=[%u %u %u %u %u %u %u %u]\n",
+		       v->avail_start->flags, v->avail_start->idx,
+		       v->avail_start->ring[0], v->avail_start->ring[1],
+		       v->avail_start->ring[2], v->avail_start->ring[3],
+		       v->avail_start->ring[4], v->avail_start->ring[5],
+		       v->avail_start->ring[6], v->avail_start->ring[7]);
+		printk("KBVQ avail ring[8..11]=[%u %u %u %u] used_idx=%u evbuf_pa=%lx\n",
+		       v->avail_start->ring[8], v->avail_start->ring[9],
+		       v->avail_start->ring[10], v->avail_start->ring[11],
+		       v->used_start->idx, (uint64_t)&ev_bufs[0]);
+	}
+
+	return 0;
+}      kb->initialized = 1;
 	return 0;
 }
 
