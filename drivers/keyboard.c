@@ -85,8 +85,6 @@ static int virtio_keyboard_init(struct virtio_input_device *kb)
 	}
 
 	return 0;
-}      kb->initialized = 1;
-	return 0;
 }
 
 static void virtio_keyboard_handshake(uintptr_t base)
