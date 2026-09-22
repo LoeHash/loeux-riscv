@@ -2,6 +2,7 @@
 #include <kernel/spinlock.h>
 #include <drivers/gpu/virtio_gpu.h>
 #include <utils/math.h>
+#include <lib.h>
 #include <ascii8x16.h>
 
 // 脏区域
@@ -49,6 +50,33 @@ void kgfx_clear(struct virtio_gpu_device *gpu, uint32_t color)
                 p[i] = color;
 
         mark_dirty(0, 0, gpu->width, gpu->height);
+}
+
+void kgfx_scroll_up(struct virtio_gpu_device *gpu, uint32_t line_h, uint32_t bg)
+{
+        if (gpu == NULL || gpu->fb == NULL)
+                return;
+        if (line_h == 0 || line_h > gpu->height)
+                return;
+
+        uint32_t W = gpu->width;
+        uint32_t H = gpu->height;
+        uint32_t *fb = (uint32_t *)gpu->fb;
+        uint64_t total_px = (uint64_t)W * H;
+        uint64_t line_px  = (uint64_t)W * line_h;
+
+        /*
+         * 内容整体上移 line_h 行：源与目的重叠，必须 memmove。
+         * 一次整屏滚动只标一次脏，最终由 kgfx_update 单次刷屏。
+         */
+        memmove(fb, fb + line_px, (total_px - line_px) * sizeof(uint32_t));
+
+        /* 底部新空出的 line_h 行填背景色 */
+        uint32_t *bot = fb + (total_px - line_px);
+        for (uint64_t i = 0; i < line_px; i++)
+                bot[i] = bg;
+
+        mark_dirty(0, 0, W, H);
 }
 
 void kgfx_fill_rect(struct virtio_gpu_device *gpu,

@@ -123,7 +123,11 @@ struct virtqueue_n *alloc_virtqueue(int queue_size)
         vq->queue_size = queue_size;
 
         vq->free_desc_bit_map = 0;
-        
+
+        /* SMP 下并发提交同一 vq 会损坏 desc 分配 / avail ring，必须持锁 */
+        init_spinlock(&vq->vq_lock);
+        init_spinlock(&vq->fdbm_lk);
+
         return vq;
 }
 
@@ -135,14 +139,23 @@ int virtqueue_send(struct virtqueue_n *vq,
         if (vq == NULL || cmd == NULL || resp == NULL)
                 return -1;
 
-        // 1. 找两个空闲描述符 
+        /*
+         * 锁住整个「分配 desc → 填 avail → notify → 等完成 → 释放 desc」
+         * 流程。QEMU 对 notify 的处理是同步的，锁内基本不会真等待。
+         */
+        acquire(&vq->vq_lock);
+
+        // 1. 找两个空闲描述符
         int i0 = vq_find_free_desc(vq);
-        if (i0 < 0)
+        if (i0 < 0) {
+                release(&vq->vq_lock);
                 return -1;
+        }
 
         int i1 = vq_find_free_desc(vq);
         if (i1 < 0) {
                 vq->free_desc_bit_map &= ~(1ULL << i0);
+                release(&vq->vq_lock);
                 return -1;
         }
 
@@ -188,6 +201,7 @@ int virtqueue_send(struct virtqueue_n *vq,
                                "avail_idx=%u used_idx=%u old_used=%u\n",
                                 i0, i1, vq->avail_start->idx,
                                 vq->used_start->idx, old_used);
+                        release(&vq->vq_lock);
                         return -1;
                 }
                 wfi();
@@ -199,6 +213,7 @@ int virtqueue_send(struct virtqueue_n *vq,
         vq->free_desc_bit_map &= ~(1ULL << i0);
         vq->free_desc_bit_map &= ~(1ULL << i1);
 
+        release(&vq->vq_lock);
         return 0;
 }
 

@@ -23,6 +23,9 @@ struct tty_ops
     int (*getc)(struct tty *tty, char *out);
     /// 非阻塞检查是否有输入。返回 1 有，0 无。
     int (*has_input)(struct tty *tty);
+    /// 把积攒的输出真正刷到屏幕。可空（如 uart 无需 flush）。
+    /// putc 只应画到后端缓冲，由 flush 统一上屏，实现批量刷新。
+    int (*flush)(struct tty *tty);
 };
 
 /// @brief 终端会话对象。

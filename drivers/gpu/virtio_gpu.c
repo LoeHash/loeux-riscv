@@ -7,6 +7,7 @@
 #include <mm/slab.h>
 #include <kernel/panic.h>
 #include <kernel/printk.h>
+#include <kernel/spinlock.h>
 #include <lib.h>
 
 
@@ -30,6 +31,19 @@ _Static_assert(sizeof(struct virtio_gpu_transfer_to_host_2d) == 56,
 
 static struct virtio_gpu_device root_gpu_device = {0};
 static struct virtio_gpu_device *gpu_get_last();
+
+/*
+ * flush 热路径的命令/响应缓冲。
+ * 用静态 BSS（内核恒等映射，物理地址 == 虚拟地址，与键盘 ev_bufs 同理），
+ * 避免每次 flush 两次 slab 分配/释放；gpu_flush_lock 串行化使用。
+ */
+static union {
+        struct virtio_gpu_transfer_to_host_2d t2d;
+        struct virtio_gpu_resource_flush      fl;
+        uint8_t                               pad[64];
+} flush_cmd __attribute__((aligned(16)));
+static struct virtio_gpu_ctrl_hdr flush_resp __attribute__((aligned(16)));
+static spinlock_t gpu_flush_lock = {0};
 
 static void dump_gpu(struct virtio_gpu_device *gpu);
 static void detect_gpu_device();
@@ -58,6 +72,7 @@ struct virtio_gpu_device *gpu_get(uint32_t idx)
 
 
 void init_virtio_gpu(){
+        init_spinlock(&gpu_flush_lock);
         detect_gpu_device();
         init_all_gpu();
 }
@@ -542,72 +557,65 @@ int virtio_gpu_flush(struct virtio_gpu_device *gpu,
         if (w == 0 || h == 0)
                 return 0;
 
+        /* 命令缓冲是静态共享的，且同一 controlq 不允许并发提交 */
+        acquire(&gpu_flush_lock);
+
         /* backing 内源数据的字节偏移：第 y 行第 x 个像素 */
         uint64_t offset = ((uint64_t)y * gpu->width + x) * 4;
 
         /* 1) TRANSFER_TO_HOST_2D */
         {
-                struct virtio_gpu_transfer_to_host_2d *cmd  = slab_alloc(sizeof(*cmd));
-                struct virtio_gpu_ctrl_hdr            *resp = slab_alloc(sizeof(*resp));
-                if (!cmd || !resp) { slab_free(cmd); slab_free(resp); return -1; }
+                struct virtio_gpu_transfer_to_host_2d *cmd  = &flush_cmd.t2d;
+                struct virtio_gpu_ctrl_hdr            *resp = &flush_resp;
+
+                memset(cmd, 0, sizeof(*cmd));
+                memset(resp, 0, sizeof(*resp));
 
                 cmd->hdr.type     = VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D;
-                cmd->hdr.flags    = 0;
-                cmd->hdr.fence_id = 0;
-                cmd->hdr.ctx_id   = 0;
-                cmd->hdr.padding  = 0;
                 cmd->r.x          = x;
                 cmd->r.y          = y;
                 cmd->r.width      = w;
                 cmd->r.height     = h;
                 cmd->offset       = offset;
                 cmd->resource_id  = gpu->resource_id;
-                cmd->padding      = 0;
 
                 ret = virtqueue_send(gpu->controlq,
                                      cmd,  sizeof(*cmd),
                                      resp, sizeof(*resp));
 
-
                 if (ret == 0 && resp->type != VIRTIO_GPU_RESP_OK_NODATA)
                         ret = -1;
 
-                slab_free(cmd);
-                slab_free(resp);
-                if (ret)
+                if (ret) {
+                        release(&gpu_flush_lock);
                         return ret;
+                }
         }
 
         /* 2) RESOURCE_FLUSH */
         {
-                struct virtio_gpu_resource_flush *cmd  = slab_alloc(sizeof(*cmd));
-                struct virtio_gpu_ctrl_hdr       *resp = slab_alloc(sizeof(*resp));
-                if (!cmd || !resp) { slab_free(cmd); slab_free(resp); return -1; }
+                struct virtio_gpu_resource_flush *cmd  = &flush_cmd.fl;
+                struct virtio_gpu_ctrl_hdr       *resp = &flush_resp;
+
+                memset(cmd, 0, sizeof(*cmd));
+                memset(resp, 0, sizeof(*resp));
 
                 cmd->hdr.type     = VIRTIO_GPU_CMD_RESOURCE_FLUSH;
-                cmd->hdr.flags    = 0;
-                cmd->hdr.fence_id = 0;
-                cmd->hdr.ctx_id   = 0;
-                cmd->hdr.padding  = 0;
                 cmd->r.x          = x;
                 cmd->r.y          = y;
                 cmd->r.width      = w;
                 cmd->r.height     = h;
                 cmd->resource_id  = gpu->resource_id;
-                cmd->padding      = 0;
 
                 ret = virtqueue_send(gpu->controlq,
                                      cmd,  sizeof(*cmd),
                                      resp, sizeof(*resp));
 
-
                 if (ret == 0 && resp->type != VIRTIO_GPU_RESP_OK_NODATA)
                         ret = -1;
-
-                slab_free(cmd);
-                slab_free(resp);
         }
 
+        release(&gpu_flush_lock);
         return ret;
 }
 

@@ -74,6 +74,14 @@ static int tty_cdev_write(void *priv, const void *buf, uint64_t count, uint64_t 
     }
     release(&tty->output_lock);
 
+    /*
+     * 整批输出只刷一次屏。
+     * putc 只画到后端缓冲并标脏，flush 在这里统一上屏：
+     * 一次 write 不论多少字符，只有一次 GPU 传输 + 窗口重绘。
+     */
+    if (tty->ops->flush)
+        tty->ops->flush(tty);
+
     *out_len = count;
     return 0;
 }
@@ -139,6 +147,15 @@ static int tty_cdev_read(void *priv, void *buf, uint64_t count, uint64_t *out_le
             break;
         }
         release(&tty->read_lock);
+
+        /*
+         * 即将阻塞等输入：先把已回显的字符刷上屏。
+         * 若底层还有输入待处理（如粘贴、快速输入）则不刷，
+         * 继续批量处理，等真正要等的时候再刷一次。
+         */
+        if (tty->ops->flush &&
+            (!tty->ops->has_input || !tty->ops->has_input(tty)))
+            tty->ops->flush(tty);
 
         /* 行未就绪，从底层拿一个原始字符 */
         char c;

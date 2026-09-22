@@ -22,15 +22,19 @@ static void gpu_tty_test(void);
 static void gpu_tty_erase_cursor(struct gpu_tty_state *st);
 static void gpu_tty_draw_cursor(struct gpu_tty_state *st);
 
+/*
+ * 光标擦/画只写后端 fb 并标脏，不主动刷屏。
+ * 真正的 GPU 传输统一由 gpu_tty_flush 完成：
+ * 一次批量输出只产生一次 TRANSFER_TO_HOST_2D + RESOURCE_FLUSH，
+ * 避免 QEMU 端每个字符都做一次窗口重绘（这是之前卡顿的根源）。
+ */
 static void gpu_tty_draw_cursor(struct gpu_tty_state *st)
 {
-        // printk("draw_cursor: drawn=%d cur=(%u,%u)\n", st->cursor_drawn, st->cur_x, st->cur_y);
 	if (st->cursor_drawn)
 		return;
 
 	kgfx_fill_rect(st->gpu, st->cur_x, st->cur_y + 14,
 	               ASCII8X16_W, 2, 0xFFFFFFFF);
-	kgfx_update(st->gpu);
 	st->cursor_drawn = 1;
 }
 
@@ -41,19 +45,25 @@ static void gpu_tty_erase_cursor(struct gpu_tty_state *st)
 
 	kgfx_fill_rect(st->gpu, st->cur_x, st->cur_y + 14,
 	               ASCII8X16_W, 2, st->bg);
-	kgfx_update(st->gpu);
 	st->cursor_drawn = 0;
 }
 
 static void gpu_tty_advance_line(struct gpu_tty_state *st)
 {
+        struct virtio_gpu_device *gpu = st->gpu;
+
         st->cur_x = 0;
         st->cur_y += ASCII8X16_H;
 
-        if (st->cur_y + ASCII8X16_H > st->gpu->height) {
-                kgfx_clear(st->gpu, st->bg);
-                st->cur_x = 0;
-                st->cur_y = 0;
+        if (st->cur_y + ASCII8X16_H > gpu->height) {
+                /*
+                 * 到底：向上滚动一行，保留历史内容（原来的做法是
+                 * kgfx_clear 清全屏从头开始，终端历史全部丢失）。
+                 * putc 总是先擦光标再走这里，所以不会有白色
+                 * 光标线被一起滚上去。
+                 */
+                kgfx_scroll_up(gpu, ASCII8X16_H, st->bg);
+                st->cur_y = gpu->height - ASCII8X16_H;
         }
 }
 
@@ -68,7 +78,6 @@ static int gpu_tty_putc(struct tty *tty, char c)
 		st->cur_x = 0;
 	} else if (c == '\n') {
 		gpu_tty_advance_line(st);
-		kgfx_update(gpu);
 	} else if (c == '\b') {
 		if (st->cur_x >= ASCII8X16_W)
 			st->cur_x -= ASCII8X16_W;
@@ -78,12 +87,19 @@ static int gpu_tty_putc(struct tty *tty, char c)
 
 		kgfx_draw_char(gpu, c, st->cur_x, st->cur_y, st->fg, st->bg);
 		st->cur_x += ASCII8X16_W;
-		kgfx_update(gpu);
 	}
 
 	if (st->cursor_visible)
 		gpu_tty_draw_cursor(st);
 
+	return 0;
+}
+
+/* 把标脏的后端缓冲一次性刷到屏幕 */
+static int gpu_tty_flush(struct tty *tty)
+{
+	struct gpu_tty_state *st = tty->priv;
+	kgfx_update(st->gpu);
 	return 0;
 }
 
@@ -94,7 +110,8 @@ static int gpu_tty_getc(struct tty *tty, char *out)
 
 static int gpu_tty_has_input(struct tty *tty)
 {
-        return 0;
+        (void)tty;
+        return keyboard_has_input();
 }
 
 static int gpu_tty_open(struct tty *tty, int flags)
@@ -113,6 +130,7 @@ static const struct tty_ops gpu_tty_ops = {
         .putc      = gpu_tty_putc,
         .getc      = gpu_tty_getc,
         .has_input = gpu_tty_has_input,
+        .flush     = gpu_tty_flush,
 };
 
 static struct tty gpu0_tty;
@@ -193,4 +211,7 @@ static void gpu_tty_test(void)
         t->ops->putc(t, 'D');
         t->ops->putc(t, 'E');
         t->ops->putc(t, '\n');
+
+        /* 批量输出结束，一次性刷屏 */
+        t->ops->flush(t);
 }

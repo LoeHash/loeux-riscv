@@ -20,6 +20,12 @@ void kgfx_draw_string(struct virtio_gpu_device *gpu, const char *s,
                       uint32_t x, uint32_t y, uint32_t fg, uint32_t bg);
 void kgfx_clear(struct virtio_gpu_device *gpu, uint32_t color);
 
+/*
+ * 终端滚动：内容整体上移 line_h 像素行，顶部 line_h 行滚出，
+ * 底部新出现的 line_h 行填 bg。用于保留终端历史（代替清屏重来）。
+ */
+void kgfx_scroll_up(struct virtio_gpu_device *gpu, uint32_t line_h, uint32_t bg);
+
 void kgfx_update(struct virtio_gpu_device *gpu);
 void init_kgfx(void);
 #endif

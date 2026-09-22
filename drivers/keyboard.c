@@ -4,10 +4,13 @@
 #include <virtio_mmio.h>
 #include <slab.h>
 #include <panic.h>
+#include <spinlock.h>
 #include <riscv.h>
 
 static struct virtio_input_device root_keyboard_device = {0};
 static int keyboard_device_count = 0;
+/* 保护字符环形缓冲（head/tail/buf），供多核并发读写 */
+static spinlock_t kb_buf_lk = {0};
 
 static struct virtio_input_device *keyboard_get_last(void);
 static int  virtio_keyboard_init(struct virtio_input_device *kb);
@@ -25,6 +28,7 @@ static struct virtio_input_event ev_bufs[INPUT_EVENT_BUFS];
 void init_keyboard(void)
 {
 	printk("init_keyboard\n");
+	init_spinlock(&kb_buf_lk);
 	detect_keyboard_device();
 	init_all_keyboard();
 }
@@ -147,11 +151,11 @@ static void virtio_keyboard_driver_ok(uintptr_t base)
 }
 
 /*
- * 提交一个空事件缓冲区。desc 下标强制等于 buf 下标，
- * 这样 poll 里 used.id 直接就是 buf 下标。
+ * 提交一个空事件缓冲（调用方必须已持有 vq->fdbm_lk）。
+ * desc 下标强制等于 buf 下标，这样 poll 里 used.id 直接就是 buf 下标。
  * 返回 desc 下标，失败 -1。
  */
-static int virtio_keyboard_submit_event(struct virtio_input_device *kb, int idx)
+static int submit_event_locked(struct virtio_input_device *kb, int idx)
 {
 	struct virtqueue_n *vq = kb->eventq;
 	int d = idx;
@@ -175,6 +179,18 @@ static int virtio_keyboard_submit_event(struct virtio_input_device *kb, int idx)
 	b32_write(vq->mmio_base + VIRTIO_MMIO_QUEUE_NOTIFY_OFFSET, vq->queue_idx);
 
 	return d;
+}
+
+/* 外壳：自带锁，供初始化路径使用 */
+static int virtio_keyboard_submit_event(struct virtio_input_device *kb, int idx)
+{
+	struct virtqueue_n *vq = kb->eventq;
+	int ret;
+
+	acquire(&vq->fdbm_lk);
+	ret = submit_event_locked(kb, idx);
+	release(&vq->fdbm_lk);
+	return ret;
 }
 
 static void detect_keyboard_device(void)
@@ -272,19 +288,41 @@ static int buf_empty(struct virtio_input_device *kb)
 
 static void buf_push(struct virtio_input_device *kb, char c)
 {
-	if (buf_full(kb))
+	acquire(&kb_buf_lk);
+	if (buf_full(kb)) {
+		release(&kb_buf_lk);
 		return;
+	}
 	kb->buf[kb->tail] = c;
 	kb->tail = (kb->tail + 1) % INPUT_CHAR_BUF_SIZE;
+	release(&kb_buf_lk);
 }
 
 static int buf_pop(struct virtio_input_device *kb, char *out)
 {
-	if (buf_empty(kb))
+	acquire(&kb_buf_lk);
+	if (buf_empty(kb)) {
+		release(&kb_buf_lk);
 		return -1;
+	}
 	*out = kb->buf[kb->head];
 	kb->head = (kb->head + 1) % INPUT_CHAR_BUF_SIZE;
+	release(&kb_buf_lk);
 	return 0;
+}
+
+int keyboard_has_input(void)
+{
+	struct virtio_input_device *kb = root_keyboard_device.next;
+	int has;
+
+	if (kb == NULL)
+		return 0;
+
+	acquire(&kb_buf_lk);
+	has = !buf_empty(kb);
+	release(&kb_buf_lk);
+	return has;
 }
 
 static void handle_key(struct virtio_input_device *kb, uint16_t code, uint32_t value)
@@ -311,19 +349,31 @@ static int keyboard_poll(struct virtio_input_device *kb)
 	int n = 0;
 
 	while (vq->used_start->idx != kb->last_used_idx) {
-		struct virtq_used_elem *e =
-			&vq->used_start->ring[kb->last_used_idx % vq->queue_size];
+		/*
+		 * 锁内：取走一个完成事件（拷出内容），回收 desc 并立即
+		 * 重挂到 avail。重挂后设备随时可能写新事件进 ev_bufs[bi]，
+		 * 所以键值处理（handle_key）必须用拷贝、放在锁外做。
+		 */
+		struct virtio_input_event ev;
+		int buf_idx;
 
-		int buf_idx = e->id;
+		acquire(&vq->fdbm_lk);
+		{
+			struct virtq_used_elem *e =
+				&vq->used_start->ring[kb->last_used_idx % vq->queue_size];
 
-		struct virtio_input_event *ev = &ev_bufs[buf_idx];
-		if (ev->type == VIRTIO_INPUT_EV_KEY)
-			handle_key(kb, ev->code, ev->value);
+			buf_idx = e->id;
+			ev = ev_bufs[buf_idx];
 
-		vq->free_desc_bit_map &= ~(1ULL << buf_idx);
-		kb->last_used_idx++;
+			vq->free_desc_bit_map &= ~(1ULL << buf_idx);
+			kb->last_used_idx++;
 
-		virtio_keyboard_submit_event(kb, buf_idx);
+			submit_event_locked(kb, buf_idx);
+		}
+		release(&vq->fdbm_lk);
+
+		if (ev.type == VIRTIO_INPUT_EV_KEY)
+			handle_key(kb, ev.code, ev.value);
 
 		n++;
 	}
@@ -338,12 +388,12 @@ int keyboard_getchar(char *out)
                 printk("device is null!\n");
                 return -1;
         }
-	while (buf_empty(kb)) {
+	for (;;) {
 		keyboard_poll(kb);
-		if (!buf_empty(kb))
-			break;
+
+		if (buf_pop(kb, out) == 0)
+			return 0;
+
 		wfi();
 	}
-
-	return buf_pop(kb, out);
 }

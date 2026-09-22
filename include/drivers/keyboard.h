@@ -49,5 +49,6 @@ struct virtio_input_device {
 
 void init_keyboard(void);
 int  keyboard_getchar(char *out);
+int  keyboard_has_input(void);
 
 #endif
