@@ -70,8 +70,12 @@ static int gpu_tty_putc(struct tty* tty, char c)
 	struct gpu_tty_state* st = tty->priv;
 	struct virtio_gpu_device* gpu = st->gpu;
 
-	/* 先擦光标（nodirty） */
+	/* 先擦光标（nodirty）——光标擦除也需要后续标脏 */
 	gpu_tty_erase_cursor(st);
+
+	/* 保存擦光标前的位置，用于后续标脏覆盖字符区域 + 光标区域 */
+	uint32_t draw_x = st->cur_x;
+	uint32_t draw_y = st->cur_y;
 
 	if (c == '\r') {
 		st->cur_x = 0;
@@ -90,12 +94,27 @@ static int gpu_tty_putc(struct tty* tty, char c)
 		st->cur_x += ASCII8X16_W;
 	}
 
-	/* 画光标（nodirty） */
-	if (st->cursor_visible)
-		gpu_tty_draw_cursor(st);
+	if (st->cursor_visible) {
+		kgfx_fill_rect_nodirty(st->gpu,
+				       st->cur_x,
+				       st->cur_y + 14,
+				       ASCII8X16_W,
+				       2,
+				       0xFFFFFFFF);
+		st->cursor_drawn = 1;
+	}
 
-	/* 一次性标脏整个字符区域（含光标行） */
-	kgfx_mark_dirty_screen(st->cur_x, st->cur_y, ASCII8X16_W, ASCII8X16_H);
+	/*
+	 * 标脏：覆盖【擦光标前的位置】到【画光标后的位置】的整个区域。
+	 * 不能用 st->cur_x 直接标脏——画字符后 cur_x 已 +8 前移到下一个
+	 * 位置，如果直接用新 cur_x 标脏就漏标了刚画的字符区域，导致
+	 * 字符不回显、只有光标闪烁。这是一个位置错位 bug。
+	 */
+	uint32_t x0 = draw_x;
+	uint32_t x1 = st->cur_x + ASCII8X16_W;
+	uint32_t y0 = draw_y;
+	uint32_t y1 = st->cur_y + ASCII8X16_H;
+	kgfx_mark_dirty_screen(x0, y0, x1 - x0, y1 - y0);
 
 	return 0;
 }
