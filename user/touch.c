@@ -1,25 +1,23 @@
 #include <ulib.h>
 #include <stdio.h>
 
-int main(int argc, char **argv)
+int main(int argc, char** argv)
 {
-        int fd;
+	int fd;
 
-        if (argc != 2)
-        {
-                printf("usage: touch <path>\n");
-                return -1;
-        }
+	if (argc != 2) {
+		printf("usage: touch <path>\n");
+		return -1;
+	}
 
-        fd = open(argv[1], O_CREAT);
+	fd = open(argv[1], O_CREAT);
 
-        if (fd < 0)
-        {
-                printf("touch: failed to create '%s'\n", argv[1]);
-                return -1;
-        }
+	if (fd < 0) {
+		printf("touch: failed to create '%s'\n", argv[1]);
+		return -1;
+	}
 
-        close(fd);
+	close(fd);
 
-        return 0;
+	return 0;
 }

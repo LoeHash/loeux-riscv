@@ -37,118 +37,113 @@ void test_keyboard_read(void);
 
 void kstart(unsigned long hart_id, unsigned long ft_addr)
 {
-        // write tp to save ours hart id to
-        // get cput struct in anywhere
-        w_tp(hart_id);
-        w_sie(r_sie() | SIE_SEIE | SIE_STIE);
+	// write tp to save ours hart id to
+	// get cput struct in anywhere
+	w_tp(hart_id);
+	w_sie(r_sie() | SIE_SEIE | SIE_STIE);
 
-        init_cpu();
-        main_core = hart_id;
+	init_cpu();
+	main_core = hart_id;
 
-        // 绕过所有函数调用，直接测锁
-        // fdt solve.
-        init_fdt(ft_addr);
-        init_memory();
-        // 构建内核页表 同時啓動mmu
-        init_kvmmap();
-        init_dma();
-        // 初始化slab分配器
-        init_slab();
-        // 初始化字符设备
-        init_char_dev();
-        // 初始化计时器
-        init_timer();
-        // 开启内核中断异常处理
-        init_kernel_trap_vec();
-        // 初始化task
-        init_tasks();
-        // 初始化disk
-        init_virtio_disk();
-        // 初始化虚拟文件系统
-        init_vfs();
-        // 初始化 tty
-        init_tty();
-        // 初始化 uart tty
-        init_uart_tty();
-        // 注册 fat32 文件系统
-        init_fat32();
-        // 注册 ext2 文件系统
-        init_ext2();
-        // 初始化 uart
-        init_uart();
-        // 初始化gpu
-        init_virtio_gpu();
-        // 初始化kgfx
-        init_kgfx();
-        // 初始化 gpu tty
-        init_gpu_tty();
-        // 初始化键盘
-        init_keyboard();
-                
-        // init_vfs_std() 已移至 first_ret()：
-        // 该函数需要为当前 task 在 ofile[] 中分配 fd 0/1/2，
-        // boot 阶段还没有 current task，故推迟到首个进程启动时执行。
-        pte *p = pte_walk(kernel_pt, MMIO_UART_OFFEST, 0);
-        if (p && (*p & PTE_V))
-        {
-                printk("MMIO mapped before MMU on: PTE=%lx, PA=%lx\n", p, PTE2PA(*p));
-        }
-        else
-        {
-                panic(PANIC_ERROR, "MMIO NOT mapped before MMU on!");
-        }
+	// 绕过所有函数调用，直接测锁
+	// fdt solve.
+	init_fdt(ft_addr);
+	init_memory();
+	// 构建内核页表 同時啓動mmu
+	init_kvmmap();
+	init_dma();
+	// 初始化slab分配器
+	init_slab();
+	// 初始化字符设备
+	init_char_dev();
+	// 初始化计时器
+	init_timer();
+	// 开启内核中断异常处理
+	init_kernel_trap_vec();
+	// 初始化task
+	init_tasks();
+	// 初始化disk
+	init_virtio_disk();
+	// 初始化虚拟文件系统
+	init_vfs();
+	// 初始化 tty
+	init_tty();
+	// 初始化 uart tty
+	init_uart_tty();
+	// 注册 fat32 文件系统
+	init_fat32();
+	// 注册 ext2 文件系统
+	init_ext2();
+	// 初始化 uart
+	init_uart();
+	// 初始化gpu
+	init_virtio_gpu();
+	// 初始化kgfx
+	init_kgfx();
+	// 初始化 gpu tty
+	init_gpu_tty();
+	// 初始化键盘
+	init_keyboard();
 
-        // 开启全局中断
-        intr_on();
-        // 开启时钟中断
-        enable_timer_interrupt();
-        // 设置一次定时器
-        sbi_set_timer(rdtime() + (BASE_FREQUENCY / TIMER_TICKS_PER_SEC));
+	// init_vfs_std() 已移至 first_ret()：
+	// 该函数需要为当前 task 在 ofile[] 中分配 fd 0/1/2，
+	// boot 阶段还没有 current task，故推迟到首个进程启动时执行。
+	pte* p = pte_walk(kernel_pt, MMIO_UART_OFFEST, 0);
+	if (p && (*p & PTE_V)) {
+		printk("MMIO mapped before MMU on: PTE=%lx, PA=%lx\n",
+		       p,
+		       PTE2PA(*p));
+	} else {
+		panic(PANIC_ERROR, "MMIO NOT mapped before MMU on!");
+	}
 
-        // 挂载硬盘
-        if (vfs_mount(&virtio_block_device, "/", "ext2") == -1)
-        {
-                panic(PANIC_ERROR, "kstart vfs_mount: error!\n");
-        }
-        print_mount_table();
+	// 开启全局中断
+	intr_on();
+	// 开启时钟中断
+	enable_timer_interrupt();
+	// 设置一次定时器
+	sbi_set_timer(rdtime() + (BASE_FREQUENCY / TIMER_TICKS_PER_SEC));
 
-        // 初始化第一个进程
-        init_user();
-        __atomic_store_n(&kernel_inited, 1, __ATOMIC_RELEASE);
+	// 挂载硬盘
+	if (vfs_mount(&virtio_block_device, "/", "ext2") == -1) {
+		panic(PANIC_ERROR, "kstart vfs_mount: error!\n");
+	}
+	print_mount_table();
 
-        // // 唤醒多核
-        for (int i = 0; i < NCPUS; i++)
-        {
-                if (i == main_core)
-                {
-                        continue;
-                }
-                sbi_hart_start(i, (uint64_t)_sec_entry64, (uint64_t)NULL);
-        }
+	// 初始化第一个进程
+	init_user();
+	__atomic_store_n(&kernel_inited, 1, __ATOMIC_RELEASE);
 
-        __atomic_thread_fence(__ATOMIC_SEQ_CST);
-        scheduler();
+	// // 唤醒多核
+	for (int i = 0; i < NCPUS; i++) {
+		if (i == main_core) {
+			continue;
+		}
+		sbi_hart_start(i, (uint64_t)_sec_entry64, (uint64_t)NULL);
+	}
+
+	__atomic_thread_fence(__ATOMIC_SEQ_CST);
+	scheduler();
 }
 
 // 从核入口
 void secondary_start(uint64_t hart_id, uint64_t data_addr)
 {
-        while (!__atomic_load_n(&kernel_inited, __ATOMIC_ACQUIRE))
-                ;
-        __atomic_thread_fence(__ATOMIC_SEQ_CST);
+	while (!__atomic_load_n(&kernel_inited, __ATOMIC_ACQUIRE))
+		;
+	__atomic_thread_fence(__ATOMIC_SEQ_CST);
 
-        w_tp(hart_id);
-        init_cpu();
-        init_kvmhart();
-        init_kernel_trap_vec();
+	w_tp(hart_id);
+	init_cpu();
+	init_kvmhart();
+	init_kernel_trap_vec();
 
-        printk("secondary start! hart id: %d\n", hart_id);
+	printk("secondary start! hart id: %d\n", hart_id);
 
-        // 开启时钟中断
-        intr_on();
-        enable_timer_interrupt();
-        // 设置一次定时器
-        sbi_set_timer(rdtime() + (BASE_FREQUENCY / TIMER_TICKS_PER_SEC));
-        scheduler();
+	// 开启时钟中断
+	intr_on();
+	enable_timer_interrupt();
+	// 设置一次定时器
+	sbi_set_timer(rdtime() + (BASE_FREQUENCY / TIMER_TICKS_PER_SEC));
+	scheduler();
 }
-

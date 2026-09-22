@@ -23,6 +23,7 @@ user.dump
 compile_commands.json
 error.txt
 .clangd
+.clang-format
 .clangd/*
 .cache/*
 .cache

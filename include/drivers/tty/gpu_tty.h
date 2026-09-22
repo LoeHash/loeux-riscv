@@ -3,6 +3,7 @@
 #include <type.h>
 #include <tty.h>
 #include <virtio_gpu.h>
+#define BLINK_INTERVAL 50   
 
 // 当前tty相关信息
 struct gpu_tty_state {
@@ -15,6 +16,6 @@ struct gpu_tty_state {
     int cursor_drawn;      // 光标是否已经画在屏幕上
     uint32_t blink_counter; // 闪烁计时
 };
-
+void gpu_tty_tick();
 void init_gpu_tty();
 #endif

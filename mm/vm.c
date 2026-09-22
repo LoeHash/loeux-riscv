@@ -18,44 +18,40 @@ extern char _trampoline_jump[];
 // turn on the paging
 void init_kvmhart()
 {
-        sfence_vma();
-        w_satp(MAKE_SATP(kernel_pt));
-        sfence_vma();
+	sfence_vma();
+	w_satp(MAKE_SATP(kernel_pt));
+	sfence_vma();
 }
 
 void init_kvmmap()
 {
 
-        acquire(&vm_init_lock);
-        if (vm_init_status == 1)
-        {
-                release(&vm_init_lock);
-                return;
-        }
+	acquire(&vm_init_lock);
+	if (vm_init_status == 1) {
+		release(&vm_init_lock);
+		return;
+	}
 
-        kernel_pt = (page_table)alloc_page();
-        memset(kernel_pt, 0, 4096);
+	kernel_pt = (page_table)alloc_page();
+	memset(kernel_pt, 0, 4096);
 
-        printk("before mapping: %0#lx\n", (uint64_t)kernel_pt);
-        kvm_do_mapping(kernel_pt);
-        printk("after mapping: %0#lx\n", (uint64_t)kernel_pt);
-        pte *ptep = pte_walk(kernel_pt, MMIO_VIRTIO_OFFEST, 0);
-        if (ptep == NULL)
-        {
-                printk("PTE WALK FAILED\n");
-        }
-        else
-        {
-                printk("PTE = %lx\n", *ptep);
-                printk("PA = %lx\n", PTE2PA(*ptep));
-        }
-        printk("Finished the kernel mapping. \n");
-        printk("opening the MMU...\n");
-        init_kvmhart();
-        release(&vm_init_lock);
-        printk("Done the MMU!\n");
-        vm_init_status = 1;
-        MEMORY_FENCE;
+	printk("before mapping: %0#lx\n", (uint64_t)kernel_pt);
+	kvm_do_mapping(kernel_pt);
+	printk("after mapping: %0#lx\n", (uint64_t)kernel_pt);
+	pte* ptep = pte_walk(kernel_pt, MMIO_VIRTIO_OFFEST, 0);
+	if (ptep == NULL) {
+		printk("PTE WALK FAILED\n");
+	} else {
+		printk("PTE = %lx\n", *ptep);
+		printk("PA = %lx\n", PTE2PA(*ptep));
+	}
+	printk("Finished the kernel mapping. \n");
+	printk("opening the MMU...\n");
+	init_kvmhart();
+	release(&vm_init_lock);
+	printk("Done the MMU!\n");
+	vm_init_status = 1;
+	MEMORY_FENCE;
 }
 
 // dangerous....
@@ -66,183 +62,186 @@ void init_kvmmap()
 /// @param pa 物理地址
 /// @param perm 权限
 /// @return 0 成功 -1 失败
-int mappages(page_table pagetable, uint64_t va, uint64_t size, uint64_t pa, int perm)
+int mappages(
+    page_table pagetable, uint64_t va, uint64_t size, uint64_t pa, int perm)
 {
-        uint64_t a, last;
-        pte *pte;
+	uint64_t a, last;
+	pte* pte;
 
-        if ((va % PG_4K_SIZE) != 0)
-                panic(PANIC_ERROR, "mappages: va not aligned\n");
+	if ((va % PG_4K_SIZE) != 0)
+		panic(PANIC_ERROR, "mappages: va not aligned\n");
 
-        if ((size % PG_4K_SIZE) != 0)
-                panic(PANIC_ERROR, "mappages: size not aligned\n");
+	if ((size % PG_4K_SIZE) != 0)
+		panic(PANIC_ERROR, "mappages: size not aligned\n");
 
-        if (size == 0)
-                panic(PANIC_ERROR, "mappages: size\n");
+	if (size == 0)
+		panic(PANIC_ERROR, "mappages: size\n");
 
-        a = va;
-        // printk("va: %0#lx, pa: %0#lx size: %lu\n", a, pa, size);
+	a = va;
+	// printk("va: %0#lx, pa: %0#lx size: %lu\n", a, pa, size);
 
-        last = va + size - PG_4K_SIZE;
-        for (;;)
-        {
-                // printk("va: %0#lx\n", a);
+	last = va + size - PG_4K_SIZE;
+	for (;;) {
+		// printk("va: %0#lx\n", a);
 
-                if ((pte = pte_walk(pagetable, a, 1)) == 0)
-                        return -1;
-                if (*pte & PTE_V)
-                {
-                        printk("va: %0#lx, pa: %0#lx\n", a, pa);
-                        panic(PANIC_ERROR, "mappages: remap\n");
-                }
-                *pte = PA2PTE(pa) | perm | PTE_V;
-                if (a == last)
-                        break;
-                a += PG_4K_SIZE;
-                pa += PG_4K_SIZE;
-        }
-        return 0;
+		if ((pte = pte_walk(pagetable, a, 1)) == 0)
+			return -1;
+		if (*pte & PTE_V) {
+			printk("va: %0#lx, pa: %0#lx\n", a, pa);
+			panic(PANIC_ERROR, "mappages: remap\n");
+		}
+		*pte = PA2PTE(pa) | perm | PTE_V;
+		if (a == last)
+			break;
+		a += PG_4K_SIZE;
+		pa += PG_4K_SIZE;
+	}
+	return 0;
 }
 
 void kvm_do_mapping(page_table pgtable)
 {
 
-        kvminit(pgtable,
-                KERNEL_START,
-                KERNEL_START,
-                ((gmd.kernel_tail->paddr - KERNEL_START) / PG_4K_SIZE) + 1,
-                PTE_V | PTE_R | PTE_W | PTE_X, 0);
+	kvminit(pgtable,
+		KERNEL_START,
+		KERNEL_START,
+		((gmd.kernel_tail->paddr - KERNEL_START) / PG_4K_SIZE) + 1,
+		PTE_V | PTE_R | PTE_W | PTE_X,
+		0);
 
-        // 2. 映射设备树 (FDT)
-        kvminit(pgtable,
-                gmd.fdt_head->paddr,
-                gmd.fdt_head->paddr,
-                ((gmd.fdt_tail->paddr - gmd.fdt_head->paddr) / PG_4K_SIZE) + 1,
-                PTE_V | PTE_R, 0);
+	// 2. 映射设备树 (FDT)
+	kvminit(pgtable,
+		gmd.fdt_head->paddr,
+		gmd.fdt_head->paddr,
+		((gmd.fdt_tail->paddr - gmd.fdt_head->paddr) / PG_4K_SIZE) + 1,
+		PTE_V | PTE_R,
+		0);
 
-                // 3. 映射 DMA 区域
-        kvminit(pgtable,
-                DMA_START_BASE,
-                gmd.dma_start_at,
-                ((gmd.dma_end_at - gmd.dma_start_at) / PG_4K_SIZE) + 1,
-                PTE_V | PTE_R | PTE_W, 0);
+	// 3. 映射 DMA 区域
+	kvminit(pgtable,
+		DMA_START_BASE,
+		gmd.dma_start_at,
+		((gmd.dma_end_at - gmd.dma_start_at) / PG_4K_SIZE) + 1,
+		PTE_V | PTE_R | PTE_W,
+		0);
 
-        // 映射空闲内存
-        kvminit(pgtable,
-                gmd.free_start_at,
-                gmd.free_start_at,
-                ((gmd.free_end_at - gmd.free_start_at) / PG_4K_SIZE) + 1,
-                PTE_V | PTE_R | PTE_W, 0);
+	// 映射空闲内存
+	kvminit(pgtable,
+		gmd.free_start_at,
+		gmd.free_start_at,
+		((gmd.free_end_at - gmd.free_start_at) / PG_4K_SIZE) + 1,
+		PTE_V | PTE_R | PTE_W,
+		0);
 
-        // // 映射 UART MMIO
-        // kvminit(pgtable,
-        //         MMIO_UART_OFFEST,
-        //         UART_BASE,
-        //         UART_PAGE_SIZE,
-        //         PTE_V | PTE_R | PTE_W, 1);
+	// // 映射 UART MMIO
+	// kvminit(pgtable,
+	//         MMIO_UART_OFFEST,
+	//         UART_BASE,
+	//         UART_PAGE_SIZE,
+	//         PTE_V | PTE_R | PTE_W, 1);
 
-        // // 映射 VirtIO MMIO
-        // kvminit(pgtable,
-        //         MMIO_VIRTIO_OFFEST,
-        //         VIRTIO_MMIO_BASE,
-        //         VIRTIO_PAGE_SIZE,
-        //         PTE_V | PTE_R | PTE_W, 1);
+	// // 映射 VirtIO MMIO
+	// kvminit(pgtable,
+	//         MMIO_VIRTIO_OFFEST,
+	//         VIRTIO_MMIO_BASE,
+	//         VIRTIO_PAGE_SIZE,
+	//         PTE_V | PTE_R | PTE_W, 1);
 
-        // // 映射 CLINT MMIO
-        // kvminit(pgtable,
-        //         MMIO_CLINT_OFFEST,
-        //         CLINT_BASE,
-        //         CLINT_PAGE_SIZE,
-        //         PTE_V | PTE_R | PTE_W, 1);
+	// // 映射 CLINT MMIO
+	// kvminit(pgtable,
+	//         MMIO_CLINT_OFFEST,
+	//         CLINT_BASE,
+	//         CLINT_PAGE_SIZE,
+	//         PTE_V | PTE_R | PTE_W, 1);
 
-        // // 映射 PLIC MMIO
-        // kvminit(pgtable,
-        //         MMIO_PLIC_OFFEST,
-        //         PLIC_BASE,
-        //         PLIC_PAGE_SIZE,
-        //         PTE_V | PTE_R | PTE_W | PTE_X, 1);
+	// // 映射 PLIC MMIO
+	// kvminit(pgtable,
+	//         MMIO_PLIC_OFFEST,
+	//         PLIC_BASE,
+	//         PLIC_PAGE_SIZE,
+	//         PTE_V | PTE_R | PTE_W | PTE_X, 1);
 
-        // // 映射 trampline
-        // kvminit(pgtable,
-        //         TRAMPOLINE,
-        //         (uint64_t)_trampoline_jump,
-        //         1,
-        //         PTE_V | PTE_R | PTE_U | PTE_X, 1);
+	// // 映射 trampline
+	// kvminit(pgtable,
+	//         TRAMPOLINE,
+	//         (uint64_t)_trampoline_jump,
+	//         1,
+	//         PTE_V | PTE_R | PTE_U | PTE_X, 1);
 
-        // // 映射 UART MMIO
-        // kvminit(pgtable,
-        //         MMIO_UART_OFFEST,
-        //         UART_BASE,
-        //         UART_PAGE_SIZE,
-        //         PTE_V | PTE_R | PTE_W | PTE_U, 0);
+	// // 映射 UART MMIO
+	// kvminit(pgtable,
+	//         MMIO_UART_OFFEST,
+	//         UART_BASE,
+	//         UART_PAGE_SIZE,
+	//         PTE_V | PTE_R | PTE_W | PTE_U, 0);
 
-        // // 映射 VirtIO MMIO
-        // kvminit(pgtable,
-        //         MMIO_VIRTIO_OFFEST,
-        //         VIRTIO_MMIO_BASE,
-        //         VIRTIO_PAGE_SIZE,
-        //         PTE_V | PTE_R | PTE_W, 0);
+	// // 映射 VirtIO MMIO
+	// kvminit(pgtable,
+	//         MMIO_VIRTIO_OFFEST,
+	//         VIRTIO_MMIO_BASE,
+	//         VIRTIO_PAGE_SIZE,
+	//         PTE_V | PTE_R | PTE_W, 0);
 
-        // // 映射 CLINT MMIO
-        // kvminit(pgtable,
-        //         MMIO_CLINT_OFFEST,
-        //         CLINT_BASE,
-        //         CLINT_PAGE_SIZE,
-        //         PTE_V | PTE_R | PTE_W, 0);
+	// // 映射 CLINT MMIO
+	// kvminit(pgtable,
+	//         MMIO_CLINT_OFFEST,
+	//         CLINT_BASE,
+	//         CLINT_PAGE_SIZE,
+	//         PTE_V | PTE_R | PTE_W, 0);
 
-        // // 映射 PLIC MMIO
-        // kvminit(pgtable,
-        //         MMIO_PLIC_OFFEST,
-        //         PLIC_BASE,
-        //         PLIC_PAGE_SIZE,
-        //         PTE_V | PTE_R | PTE_W | PTE_X, 0);
+	// // 映射 PLIC MMIO
+	// kvminit(pgtable,
+	//         MMIO_PLIC_OFFEST,
+	//         PLIC_BASE,
+	//         PLIC_PAGE_SIZE,
+	//         PTE_V | PTE_R | PTE_W | PTE_X, 0);
 
-        // // 映射 trampline
-        // kvminit(pgtable,
-        //         TRAMPOLINE,
-        //         (uint64_t)_trampoline_jump,
-        //         1,
-        //         PTE_V | PTE_R | PTE_U | PTE_X, 1);
+	// // 映射 trampline
+	// kvminit(pgtable,
+	//         TRAMPOLINE,
+	//         (uint64_t)_trampoline_jump,
+	//         1,
+	//         PTE_V | PTE_R | PTE_U | PTE_X, 1);
 
-        // 映射 UART MMIO
-        printk("UART\n");
-        mappages(pgtable,
-                 MMIO_UART_OFFEST,
-                 UART_PAGE_SIZE * 4096,
-                 UART_BASE,
-                 PTE_V | PTE_R | PTE_W);
+	// 映射 UART MMIO
+	printk("UART\n");
+	mappages(pgtable,
+		 MMIO_UART_OFFEST,
+		 UART_PAGE_SIZE * 4096,
+		 UART_BASE,
+		 PTE_V | PTE_R | PTE_W);
 
-        // 映射 VirtIO MMIO
-        printk("VirtIO\n");
-        mappages(pgtable,
-                 MMIO_VIRTIO_OFFEST,
-                 VIRTIO_PAGE_SIZE * PG_4K_SIZE,
-                 VIRTIO_MMIO_BASE,
-                 PTE_V | PTE_R | PTE_W);
+	// 映射 VirtIO MMIO
+	printk("VirtIO\n");
+	mappages(pgtable,
+		 MMIO_VIRTIO_OFFEST,
+		 VIRTIO_PAGE_SIZE * PG_4K_SIZE,
+		 VIRTIO_MMIO_BASE,
+		 PTE_V | PTE_R | PTE_W);
 
-        // 映射 CLINT MMIO
-        printk("CLINT\n");
-        mappages(pgtable,
-                 MMIO_CLINT_OFFEST,
-                 CLINT_PAGE_SIZE * PG_4K_SIZE,
-                 CLINT_BASE,
-                 PTE_V | PTE_R | PTE_W);
+	// 映射 CLINT MMIO
+	printk("CLINT\n");
+	mappages(pgtable,
+		 MMIO_CLINT_OFFEST,
+		 CLINT_PAGE_SIZE * PG_4K_SIZE,
+		 CLINT_BASE,
+		 PTE_V | PTE_R | PTE_W);
 
-        // 映射 PLIC MMIO
-        printk("PLIC\n");
-        mappages(pgtable,
-                 MMIO_PLIC_OFFEST,
-                 PLIC_PAGE_SIZE * PG_4K_SIZE,
-                 PLIC_BASE,
-                 PTE_V | PTE_R | PTE_W | PTE_X);
+	// 映射 PLIC MMIO
+	printk("PLIC\n");
+	mappages(pgtable,
+		 MMIO_PLIC_OFFEST,
+		 PLIC_PAGE_SIZE * PG_4K_SIZE,
+		 PLIC_BASE,
+		 PTE_V | PTE_R | PTE_W | PTE_X);
 
-        // 映射 trampline
-        printk("trampline\n");
-        mappages(pgtable,
-                 TRAMPOLINE,
-                 PG_4K_SIZE,
-                 (uint64_t)_trampoline_jump,
-                 PTE_V | PTE_R | PTE_X);
+	// 映射 trampline
+	printk("trampline\n");
+	mappages(pgtable,
+		 TRAMPOLINE,
+		 PG_4K_SIZE,
+		 (uint64_t)_trampoline_jump,
+		 PTE_V | PTE_R | PTE_X);
 }
 
 /// @brief 将 va起始和pa起始构建对应的页表
@@ -251,46 +250,51 @@ void kvm_do_mapping(page_table pgtable)
 /// @param pa           物理地址起始
 /// @param pages        映射的页数
 /// @return count 映射的页数 0 错误
-int kvminit(page_table pt, vir_addr_t va, phys_addr_t pa, uint64_t pages, uint32_t flags, int debug)
+int kvminit(page_table pt,
+	    vir_addr_t va,
+	    phys_addr_t pa,
+	    uint64_t pages,
+	    uint32_t flags,
+	    int debug)
 {
-        // 所有地址，全部向下4kb对其
-        vir_addr_t vad = PGROUNDDOWN(va);
-        phys_addr_t pad = PGROUNDDOWN(pa);
-        pte *p;
-        int count = 0;
+	// 所有地址，全部向下4kb对其
+	vir_addr_t vad = PGROUNDDOWN(va);
+	phys_addr_t pad = PGROUNDDOWN(pa);
+	pte* p;
+	int count = 0;
 
-        while (count < pages)
-        {
-                if (debug == 1)
-                {
-                        // // 打印参数
-                        printk("[kvminit] va = %0#lx, pa = %#x, pages = %lu, flags = %#x\n",
-                               vad, pad, pages, flags);
-                }
-                // pte_walk
-                // 如果遇到没有分配的就会创建
-                p = pte_walk(pt, vad, 1);
-                if (!p)
-                {
-                        panic(PANIC_ERROR, "kvminit: out of memory!\n");
-                }
+	while (count < pages) {
+		if (debug == 1) {
+			// // 打印参数
+			printk("[kvminit] va = %0#lx, pa = %#x, pages = %lu, "
+			       "flags = %#x\n",
+			       vad,
+			       pad,
+			       pages,
+			       flags);
+		}
+		// pte_walk
+		// 如果遇到没有分配的就会创建
+		p = pte_walk(pt, vad, 1);
+		if (!p) {
+			panic(PANIC_ERROR, "kvminit: out of memory!\n");
+		}
 
-                // 拿到了这个pte后
-                // 我们需要将这个物理地址写入
-                // 同时放置flags
-                *p = PA2PTE(pad) | flags;
+		// 拿到了这个pte后
+		// 我们需要将这个物理地址写入
+		// 同时放置flags
+		*p = PA2PTE(pad) | flags;
 
-                if (debug == 1)
-                {
-                        printk("va: %0#lx, pte2pa: %0#lx\n", vad, PTE2PA(*p));
-                }
+		if (debug == 1) {
+			printk("va: %0#lx, pte2pa: %0#lx\n", vad, PTE2PA(*p));
+		}
 
-                // 而后，vad和pad全部线性增长4kb
-                vad += PG_4K_SIZE;
-                pad += PG_4K_SIZE;
-                count++;
-        }
-        return count;
+		// 而后，vad和pad全部线性增长4kb
+		vad += PG_4K_SIZE;
+		pad += PG_4K_SIZE;
+		count++;
+	}
+	return count;
 }
 
 /// @brief 根据va，获取对应的l0 pte
@@ -302,77 +306,69 @@ int kvminit(page_table pt, vir_addr_t va, phys_addr_t pa, uint64_t pages, uint32
 ///     指向了下一个pte, 否则就是一个普通的pte
 ///     不管是普通的pte还是其他pte, 他们都是ppn
 ///     这个ppn是4kb对齐的
-pte *pte_walk(page_table pt, vir_addr_t va, int create)
+pte* pte_walk(page_table pt, vir_addr_t va, int create)
 {
 
-        if (va > MAX_VA)
-        {
-                return NULL;
-        }
+	if (va > MAX_VA) {
+		return NULL;
+	}
 
-        pte *p;
-        for (int level = 2; level > 0; level--)
-        {
-                p = &pt[PX(level, va)];
+	pte* p;
+	for (int level = 2; level > 0; level--) {
+		p = &pt[PX(level, va)];
 
-                if (*p & PTE_V)
-                {
-                        // 已分配的PTE
-                        pt = (uint64_t *)PTE2PA(*p);
-                }
-                else
-                {
-                        if (!create || (pt = alloc_page()) == NULL)
-                        {
-                                // printk("really out!\n");
-                                return 0;
-                        }
+		if (*p & PTE_V) {
+			// 已分配的PTE
+			pt = (uint64_t*)PTE2PA(*p);
+		} else {
+			if (!create || (pt = alloc_page()) == NULL) {
+				// printk("really out!\n");
+				return 0;
+			}
 
-                        // 如果分配成功
-                        // 将这个pt转为pte
-                        *p = PA2PTE(pt) | PTE_V;
-                }
-        }
-        return &(pt[PX(0, va)]);
+			// 如果分配成功
+			// 将这个pt转为pte
+			*p = PA2PTE(pt) | PTE_V;
+		}
+	}
+	return &(pt[PX(0, va)]);
 }
 
 /// @brief 创建一个新的页表
 /// @return
 page_table pg_create()
 {
-        page_table pg;
+	page_table pg;
 
-        if ((pg = (page_table)kalloc()) == 0)
-        {
-                return 0;
-        }
+	if ((pg = (page_table)kalloc()) == 0) {
+		return 0;
+	}
 
-        memset(pg, 0, PG_4K_SIZE);
+	memset(pg, 0, PG_4K_SIZE);
 
-        return pg;
+	return pg;
 }
 
 void pg_unmap(page_table pagetable, uint64_t va, uint64_t npages, int do_free)
 {
-        uint64_t a;
-        pte *pte;
+	uint64_t a;
+	pte* pte;
 
-        if ((va % PG_4K_SIZE) != 0)
-                panic(PANIC_ERROR, "pg_unmap: not aligned");
+	if ((va % PG_4K_SIZE) != 0)
+		panic(PANIC_ERROR, "pg_unmap: not aligned");
 
-        for (a = va; a < va + npages * PG_4K_SIZE; a += PG_4K_SIZE)
-        {
-                if ((pte = pte_walk(pagetable, a, 0)) == 0) // leaf page table entry allocated?
-                        continue;
-                if ((*pte & PTE_V) == 0) // has physical page been allocated?
-                        continue;
-                if (do_free)
-                {
-                        uint64_t pa = PTE2PA(*pte);
-                        kfree((void *)pa);
-                }
-                *pte = 0;
-        }
+	for (a = va; a < va + npages * PG_4K_SIZE; a += PG_4K_SIZE) {
+		if ((pte = pte_walk(pagetable, a, 0)) ==
+		    0) // leaf page table entry allocated?
+			continue;
+		if ((*pte & PTE_V) == 0) // has physical page been allocated?
+			continue;
+		if (do_free) {
+			uint64_t pa = PTE2PA(*pte);
+			kfree((void*)pa);
+		}
+		*pte = 0;
+	}
 }
 
 // 取消所有的映射
@@ -380,174 +376,154 @@ void pg_unmap(page_table pagetable, uint64_t va, uint64_t npages, int do_free)
 // 隐性的限制条件是: 用户代码在 0x1000 处加载
 void pg_user_vmfree(page_table pagetable, uint64_t sz)
 {
-        if (sz > 0)
-        {
-                pg_unmap(pagetable, 0x1000, PGROUNDUP(sz) / PG_4K_SHIFT, 1);
-        }
-        // 释放栈
-        // 从顶部开始，因此需要减去页
-        pg_unmap(pagetable, USER_STACK_BASE, USER_STACK_PAGES, 1);
+	if (sz > 0) {
+		pg_unmap(pagetable, 0x1000, PGROUNDUP(sz) / PG_4K_SHIFT, 1);
+	}
+	// 释放栈
+	// 从顶部开始，因此需要减去页
+	pg_unmap(pagetable, USER_STACK_BASE, USER_STACK_PAGES, 1);
 
-        freewalk(pagetable);
+	freewalk(pagetable);
 }
 
 /// @brief 回收pg中所有分配的物理页
 /// @param pagetable
 void freewalk(page_table pagetable)
 {
-        // there are 2^9 = 512 PTEs in a page table.
-        for (int i = 0; i < 512; i++)
-        {
-                pte pte = pagetable[i];
-                if ((pte & PTE_V) && (pte & (PTE_R | PTE_W | PTE_X)) == 0)
-                {
-                        // this PTE points to a lower-level page table.
-                        uint64_t child = PTE2PA(pte);
-                        freewalk((page_table)child);
-                        pagetable[i] = 0;
-                }
-                else if (pte & PTE_V)
-                {
-                        panic(PANIC_ERROR, "freewalk: leaf\n");
-                }
-        }
-        kfree((void *)pagetable);
+	// there are 2^9 = 512 PTEs in a page table.
+	for (int i = 0; i < 512; i++) {
+		pte pte = pagetable[i];
+		if ((pte & PTE_V) && (pte & (PTE_R | PTE_W | PTE_X)) == 0) {
+			// this PTE points to a lower-level page table.
+			uint64_t child = PTE2PA(pte);
+			freewalk((page_table)child);
+			pagetable[i] = 0;
+		} else if (pte & PTE_V) {
+			panic(PANIC_ERROR, "freewalk: leaf\n");
+		}
+	}
+	kfree((void*)pagetable);
 }
 
 uint64_t walkaddr(page_table pagetable, uint64_t va)
 {
-        pte *pte;
-        uint64_t pa;
+	pte* pte;
+	uint64_t pa;
 
-        if (va >= MAX_VA)
-                return 0;
+	if (va >= MAX_VA)
+		return 0;
 
-        pte = pte_walk(pagetable, va, 0);
-        if (pte == 0)
-                return 0;
-        if ((*pte & PTE_V) == 0)
-                return 0;
-        if ((*pte & PTE_U) == 0)
-                return 0;
-        pa = PTE2PA(*pte);
-        return pa;
+	pte = pte_walk(pagetable, va, 0);
+	if (pte == 0)
+		return 0;
+	if ((*pte & PTE_V) == 0)
+		return 0;
+	if ((*pte & PTE_U) == 0)
+		return 0;
+	pa = PTE2PA(*pte);
+	return pa;
 }
 
 // 未来可增加懒分配机制
-int copyout(page_table pagetable, uint64_t dstva, char *src, uint64_t len)
+int copyout(page_table pagetable, uint64_t dstva, char* src, uint64_t len)
 {
-        uint64_t n, va0, pa0;
-        pte *pte;
+	uint64_t n, va0, pa0;
+	pte* pte;
 
-        // 可能会遇到数据横跨多页
-        while (len > 0)
-        {
-                va0 = PGROUNDDOWN(dstva);
-                if (va0 > MAX_VA)
-                {
-                        return -1;
-                }
+	// 可能会遇到数据横跨多页
+	while (len > 0) {
+		va0 = PGROUNDDOWN(dstva);
+		if (va0 > MAX_VA) {
+			return -1;
+		}
 
-                // 未来这里做懒分配
-                pa0 = walkaddr(pagetable, va0);
-                if (pa0 == 0)
-                {
-                        return -1;
-                }
+		// 未来这里做懒分配
+		pa0 = walkaddr(pagetable, va0);
+		if (pa0 == 0) {
+			return -1;
+		}
 
-                // 权限检查
-                pte = pte_walk(pagetable, va0, 0);
-                if ((*pte & PTE_W) == 0)
-                {
-                        return -1;
-                }
+		// 权限检查
+		pte = pte_walk(pagetable, va0, 0);
+		if ((*pte & PTE_W) == 0) {
+			return -1;
+		}
 
-                n = PG_4K_SIZE - (dstva - va0);
-                if (n > len)
-                        n = len;
-                memmove((void *)(pa0 + (dstva - va0)), src, n);
+		n = PG_4K_SIZE - (dstva - va0);
+		if (n > len)
+			n = len;
+		memmove((void*)(pa0 + (dstva - va0)), src, n);
 
-                len -= n;
-                src += n;
-                dstva = va0 + PG_4K_SIZE;
-        }
-        return 0;
+		len -= n;
+		src += n;
+		dstva = va0 + PG_4K_SIZE;
+	}
+	return 0;
 }
 
-int copyin(page_table pagetable, char *dst, uint64_t srcva, uint64_t len)
+int copyin(page_table pagetable, char* dst, uint64_t srcva, uint64_t len)
 {
-        uint64_t n, va0, pa0;
-        while (len > 0)
-        {
-                va0 = PGROUNDDOWN(srcva);
-                if (va0 > MAX_VA)
-                {
-                        return -1;
-                }
+	uint64_t n, va0, pa0;
+	while (len > 0) {
+		va0 = PGROUNDDOWN(srcva);
+		if (va0 > MAX_VA) {
+			return -1;
+		}
 
-                // 未来这里做懒分配
-                pa0 = walkaddr(pagetable, va0);
-                if (pa0 == 0)
-                {
-                        return -1;
-                }
+		// 未来这里做懒分配
+		pa0 = walkaddr(pagetable, va0);
+		if (pa0 == 0) {
+			return -1;
+		}
 
-                n = PG_4K_SIZE - (srcva - va0);
-                if (n > len)
-                        n = len;
-                memmove(dst, (void *)(pa0 + (srcva - va0)), n);
+		n = PG_4K_SIZE - (srcva - va0);
+		if (n > len)
+			n = len;
+		memmove(dst, (void*)(pa0 + (srcva - va0)), n);
 
-                len -= n;
-                dst += n;
-                srcva = va0 + PG_4K_SIZE;
-        }
-        return 0;
+		len -= n;
+		dst += n;
+		srcva = va0 + PG_4K_SIZE;
+	}
+	return 0;
 }
 
-int copyinstr(page_table pagetable, char *dst, uint64_t srcva, uint64_t max)
+int copyinstr(page_table pagetable, char* dst, uint64_t srcva, uint64_t max)
 {
-        uint64_t n, va0, pa0;
-        int got_null = 0;
+	uint64_t n, va0, pa0;
+	int got_null = 0;
 
-        while (got_null == 0 && max > 0)
-        {
-                va0 = PGROUNDDOWN(srcva);
-                pa0 = walkaddr(pagetable, va0);
-                if (pa0 == 0)
-                        return -1;
-                n = PG_4K_SIZE - (srcva - va0);
-                if (n > max)
-                        n = max;
+	while (got_null == 0 && max > 0) {
+		va0 = PGROUNDDOWN(srcva);
+		pa0 = walkaddr(pagetable, va0);
+		if (pa0 == 0)
+			return -1;
+		n = PG_4K_SIZE - (srcva - va0);
+		if (n > max)
+			n = max;
 
-                char *p = (char *)(pa0 + (srcva - va0));
-                while (n > 0)
-                {
-                        if (*p == '\0')
-                        {
-                                *dst = '\0';
-                                got_null = 1;
-                                break;
-                        }
-                        else
-                        {
-                                *dst = *p;
-                        }
-                        --n;
-                        --max;
-                        p++;
-                        dst++;
-                }
+		char* p = (char*)(pa0 + (srcva - va0));
+		while (n > 0) {
+			if (*p == '\0') {
+				*dst = '\0';
+				got_null = 1;
+				break;
+			} else {
+				*dst = *p;
+			}
+			--n;
+			--max;
+			p++;
+			dst++;
+		}
 
-                srcva = va0 + PG_4K_SIZE;
-        }
-        if (got_null)
-        {
-                return 0;
-        }
-        else
-        {
-                return -1;
-        }
+		srcva = va0 + PG_4K_SIZE;
+	}
+	if (got_null) {
+		return 0;
+	} else {
+		return -1;
+	}
 }
 
 /// @brief 复制src_pg中的所有内容到dst_pg
@@ -556,56 +532,51 @@ int copyinstr(page_table pagetable, char *dst, uint64_t srcva, uint64_t max)
 /// @param sz 复制的字节数
 /// TODO_FUTURE: 未来需要考虑COW机制
 /// @return 0 成功 -1 失败
-int vm_pagetbl_copy(page_table src_pg, page_table dst_pg, uint64_t sz, bool is_user_copy)
+int vm_pagetbl_copy(page_table src_pg,
+		    page_table dst_pg,
+		    uint64_t sz,
+		    bool is_user_copy)
 {
-        pte *p;
-        uint64_t va, pa;
-        char *chunk;
-        int32_t flag;
+	pte* p;
+	uint64_t va, pa;
+	char* chunk;
+	int32_t flag;
 
-        if (is_user_copy)
-        {
-                va = USER_BASE_PROG_ADDR;
-        }
-        else
-        {
-                va = 0;
-        }
+	if (is_user_copy) {
+		va = USER_BASE_PROG_ADDR;
+	} else {
+		va = 0;
+	}
 
-        for (; va <= sz; va += PG_4K_SIZE)
-        {
-                if ((p = pte_walk(src_pg, va, 0)) == 0)
-                {
-                        continue;
-                }
-                if ((*p & PTE_V) == 0)
-                {
-                        continue;
-                }
-                pa = PTE2PA(*p);
-                if (pa == 0)
-                {
-                        continue;
-                }
-                flag = PTE_FLAGS(*p);
-                chunk = kalloc();
-                if (chunk == 0)
-                {
-                        pg_unmap(dst_pg, va, 1, 1);
-                        return -1;
-                }
+	for (; va <= sz; va += PG_4K_SIZE) {
+		if ((p = pte_walk(src_pg, va, 0)) == 0) {
+			continue;
+		}
+		if ((*p & PTE_V) == 0) {
+			continue;
+		}
+		pa = PTE2PA(*p);
+		if (pa == 0) {
+			continue;
+		}
+		flag = PTE_FLAGS(*p);
+		chunk = kalloc();
+		if (chunk == 0) {
+			pg_unmap(dst_pg, va, 1, 1);
+			return -1;
+		}
 
-                memcpy(chunk, (char *)pa, PG_4K_SIZE);
+		memcpy(chunk, (char*)pa, PG_4K_SIZE);
 
-                if (mappages(dst_pg, va, PG_4K_SIZE, (uint64_t)chunk, flag) == -1)
-                {
-                        kfree(chunk);
-                        pg_unmap(dst_pg, va, 1, 1);
-                        return -1;
-                }
-        }
+		if (mappages(dst_pg, va, PG_4K_SIZE, (uint64_t)chunk, flag) ==
+		    -1) {
+			kfree(chunk);
+			pg_unmap(dst_pg, va, 1, 1);
+			return -1;
+		}
+	}
 
-        return 0;
+	return 0;
 }
 
 /// @brief 指定从哪里开始复制src_pg中的内容到dst_pg
@@ -614,63 +585,63 @@ int vm_pagetbl_copy(page_table src_pg, page_table dst_pg, uint64_t sz, bool is_u
 /// @param va_start
 /// @param sz
 /// @return
-int vm_pagetbl_copy_asign(page_table src_pg, page_table dst_pg, uint64_t va_start, uint64_t sz)
+int vm_pagetbl_copy_asign(page_table src_pg,
+			  page_table dst_pg,
+			  uint64_t va_start,
+			  uint64_t sz)
 {
-        pte *p;
-        uint64_t va, pa;
-        char *chunk;
-        int32_t flag;
+	pte* p;
+	uint64_t va, pa;
+	char* chunk;
+	int32_t flag;
 
-        va = va_start;
-        for (; va < va_start + sz; va += PG_4K_SIZE)    // 解决边界，导致多复制一页的问题
-        {
-                if ((p = pte_walk(src_pg, va, 0)) == 0)
-                {
-                        continue;
-                }
-                if ((*p & PTE_V) == 0)
-                {
-                        continue;
-                }
-                pa = PTE2PA(*p);
-                if (pa == 0)
-                {
-                        continue;
-                }
-                flag = PTE_FLAGS(*p);
-                chunk = kalloc();
-                if (chunk == 0)
-                {
-                        pg_unmap(dst_pg, va, 1, 1);
-                        return -1;
-                }
+	va = va_start;
+	for (; va < va_start + sz;
+	     va += PG_4K_SIZE) // 解决边界，导致多复制一页的问题
+	{
+		if ((p = pte_walk(src_pg, va, 0)) == 0) {
+			continue;
+		}
+		if ((*p & PTE_V) == 0) {
+			continue;
+		}
+		pa = PTE2PA(*p);
+		if (pa == 0) {
+			continue;
+		}
+		flag = PTE_FLAGS(*p);
+		chunk = kalloc();
+		if (chunk == 0) {
+			pg_unmap(dst_pg, va, 1, 1);
+			return -1;
+		}
 
-                memcpy(chunk, (char *)pa, PG_4K_SIZE);
+		memcpy(chunk, (char*)pa, PG_4K_SIZE);
 
-                // 必须映射新分配的 chunk，不能映射父进程的 pa。
-                // 若映射 pa，父子会共享同一物理页：父进程后续修改栈/数据
-                // 会直接破坏子进程的内存，且 chunk 被泄漏。
-                if (mappages(dst_pg, va, PG_4K_SIZE, (uint64_t)chunk, flag) == -1)
-                {
-                        kfree(chunk);
-                        pg_unmap(dst_pg, va, 1, 1);
-                        return -1;
-                }
-        }
+		// 必须映射新分配的 chunk，不能映射父进程的 pa。
+		// 若映射 pa，父子会共享同一物理页：父进程后续修改栈/数据
+		// 会直接破坏子进程的内存，且 chunk 被泄漏。
+		if (mappages(dst_pg, va, PG_4K_SIZE, (uint64_t)chunk, flag) ==
+		    -1) {
+			kfree(chunk);
+			pg_unmap(dst_pg, va, 1, 1);
+			return -1;
+		}
+	}
 
-        return 0;
+	return 0;
 }
 
-
-uint64_t va2pa(page_table pt, uint64_t va) {
-        for (int level = 2; level > 0; level--) {
-                pte *p = &pt[PX(level, va)];
-                if (!(*p & PTE_V))
-                        return (uint64_t)-1;
-                pt = (page_table)PTE2PA(*p);
-        }
-        pte *p = &pt[PX(0, va)];
-        if (!(*p & PTE_V))
-                return (uint64_t)-1;
-        return PTE2PA(*p) | (va & 0xFFF);
+uint64_t va2pa(page_table pt, uint64_t va)
+{
+	for (int level = 2; level > 0; level--) {
+		pte* p = &pt[PX(level, va)];
+		if (!(*p & PTE_V))
+			return (uint64_t)-1;
+		pt = (page_table)PTE2PA(*p);
+	}
+	pte* p = &pt[PX(0, va)];
+	if (!(*p & PTE_V))
+		return (uint64_t)-1;
+	return PTE2PA(*p) | (va & 0xFFF);
 }

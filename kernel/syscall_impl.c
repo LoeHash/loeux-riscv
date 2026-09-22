@@ -9,136 +9,124 @@
 #include <memory.h>
 #include <slab.h>
 
-uint64_t sys_sbrk(){
-        
-        int delta;
-        
-        get_arg_int(0, &delta);
-        struct task_struct *ts = get_task();
+uint64_t sys_sbrk()
+{
 
-        if (ts->heap_brk + delta < ts->heap_start)
-        {
-                return -1;
-        }
-        uint64_t before_brk = ts->heap_brk;
-        ts->heap_brk += delta;
+	int delta;
 
-        if (ts->heap_brk > ts->heap_history_max)
-        {
-                ts->heap_history_max = ts->heap_brk;
-        }
+	get_arg_int(0, &delta);
+	struct task_struct* ts = get_task();
 
-        return before_brk;
+	if (ts->heap_brk + delta < ts->heap_start) {
+		return -1;
+	}
+	uint64_t before_brk = ts->heap_brk;
+	ts->heap_brk += delta;
+
+	if (ts->heap_brk > ts->heap_history_max) {
+		ts->heap_history_max = ts->heap_brk;
+	}
+
+	return before_brk;
 }
-
 
 uint64_t sys_pwd()
 {
-        uint64_t buf_addr;
-        int max;
+	uint64_t buf_addr;
+	int max;
 
-        get_arg_addr(0, &buf_addr);
-        get_arg_int(1, &max);
+	get_arg_addr(0, &buf_addr);
+	get_arg_int(1, &max);
 
-        if (max <= 0)
-        {
-                return -1;
-        }
+	if (max <= 0) {
+		return -1;
+	}
 
-        struct task_struct *ts = get_task();
-        acquire(&ts->lk);
+	struct task_struct* ts = get_task();
+	acquire(&ts->lk);
 
-        copy_data_str_out(buf_addr, ts->cwd_path, max < MAX_PATH_LEN ? max : MAX_PATH_LEN);
+	copy_data_str_out(
+	    buf_addr, ts->cwd_path, max < MAX_PATH_LEN ? max : MAX_PATH_LEN);
 
-        release(&ts->lk);
+	release(&ts->lk);
 
-        return 0;
+	return 0;
 }
 
 uint64_t sys_chdir()
 {
-        struct task_struct *ts = get_task();
+	struct task_struct* ts = get_task();
 
-        uint64_t path_addr;
+	uint64_t path_addr;
 
-        get_arg_addr(0,
-                     &path_addr);
+	get_arg_addr(0, &path_addr);
 
-        char *path =
-                slab_alloc(MAX_PATH_LEN);
+	char* path = slab_alloc(MAX_PATH_LEN);
 
-        if (path == NULL)
-                return -1;
+	if (path == NULL)
+		return -1;
 
-        if (copyinstr(ts->pg,
-                      path,
-                      path_addr,
-                      MAX_PATH_LEN) < 0)
-        {
-                slab_free(path);
-                return -1;
-        }
+	if (copyinstr(ts->pg, path, path_addr, MAX_PATH_LEN) < 0) {
+		slab_free(path);
+		return -1;
+	}
 
-        int ret =
-                set_cwd(ts,
-                        path);
+	int ret = set_cwd(ts, path);
 
-        slab_free(path);
+	slab_free(path);
 
-        return ret;
+	return ret;
 }
 
 uint64_t sys_wait()
 {
-        uint64_t status;
-        get_arg_addr(0, &status);
-        uint64_t status_u = 0;
-        pid_t pid = wait((int *)&status_u);
-        copy_data_addr(status, &status_u);
-        return pid;
+	uint64_t status;
+	get_arg_addr(0, &status);
+	uint64_t status_u = 0;
+	pid_t pid = wait((int*)&status_u);
+	copy_data_addr(status, &status_u);
+	return pid;
 }
 
 uint64_t sys_waitpid()
 {
-        int pid;
-        uint64_t status_addr;
-        get_arg_int(0, &pid);
-        get_arg_addr(1, &status_addr);
+	int pid;
+	uint64_t status_addr;
+	get_arg_int(0, &pid);
+	get_arg_addr(1, &status_addr);
 
-        uint64_t status_u = 0;
-        pid_t ret = waitpid(pid, (int *)&status_u);
-        if (status_addr != 0)
-        {
-                copy_data_addr(status_addr, &status_u);
-        }
-        return ret;
+	uint64_t status_u = 0;
+	pid_t ret = waitpid(pid, (int*)&status_u);
+	if (status_addr != 0) {
+		copy_data_addr(status_addr, &status_u);
+	}
+	return ret;
 }
 
 uint64_t sys_exit()
 {
-        int exit_code;
-        get_arg_int(0, &exit_code);
-        kexit(exit_code);
-        return 0; // never reaches maybe.
+	int exit_code;
+	get_arg_int(0, &exit_code);
+	kexit(exit_code);
+	return 0; // never reaches maybe.
 }
 
 uint64_t sys_getppid()
 {
-        if (get_task()->parent == NULL && get_task()->pid == 1)
-        {
-                return 0;
-        }
-        return get_task()->parent->pid;
+	if (get_task()->parent == NULL && get_task()->pid == 1) {
+		return 0;
+	}
+	return get_task()->parent->pid;
 }
 
 uint64_t sys_getpid()
 {
-        return get_task()->pid;
+	return get_task()->pid;
 }
 
 uint64_t sys_fork()
 {
-        return kfork();
+	return kfork();
 }
 
 /// @brief 用户态 exec 系统调用
@@ -151,102 +139,95 @@ uint64_t sys_fork()
 /// 因此 kexec 返回后可以安全地 slab_free 所有内核侧分配的字符串副本。
 uint64_t sys_exec()
 {
-        struct task_struct *ts = get_task();
-        char u_path[MAX_PATH_LEN];
-        char *path;
-        char *argv[MAX_ARGS];
-        uint64_t path_addr, argv_addr;
+	struct task_struct* ts = get_task();
+	char u_path[MAX_PATH_LEN];
+	char* path;
+	char* argv[MAX_ARGS];
+	uint64_t path_addr, argv_addr;
 
-        get_arg_addr(0, &path_addr); // a0 = path
-        get_arg_addr(1, &argv_addr); // a1 = argv[]
+	get_arg_addr(0, &path_addr); // a0 = path
+	get_arg_addr(1, &argv_addr); // a1 = argv[]
 
-        // 1. 从用户空间拷贝 path 字符串
-        //    copyinstr 遍历用户页表翻译地址，遇到 \0 停止
-        if (copyinstr(ts->pg, u_path, path_addr, MAX_PATH_LEN) < 0)
-        {
-                return -1;
-        }
+	// 1. 从用户空间拷贝 path 字符串
+	//    copyinstr 遍历用户页表翻译地址，遇到 \0 停止
+	if (copyinstr(ts->pg, u_path, path_addr, MAX_PATH_LEN) < 0) {
+		return -1;
+	}
 
-        /*
-         * do_build_user_path 按 BUFSZ 上限写入结果，
-         * 栈缓冲（MAX_PATH_LEN）放不下，用 slab 缓冲。
-         */
-        path = slab_alloc(BUFSZ);
+	/*
+	 * do_build_user_path 按 BUFSZ 上限写入结果，
+	 * 栈缓冲（MAX_PATH_LEN）放不下，用 slab 缓冲。
+	 */
+	path = slab_alloc(BUFSZ);
 
-        if (path == NULL)
-                return -1;
+	if (path == NULL)
+		return -1;
 
-        do_build_user_path(path, u_path, ts->cwd_path);
+	do_build_user_path(path, u_path, ts->cwd_path);
 
-        if (path[0] == '\0')
-        {
-                // 规范化失败（cwd 未设置或最终路径超长）
-                slab_free(path);
-                return -1;
-        }
+	if (path[0] == '\0') {
+		// 规范化失败（cwd 未设置或最终路径超长）
+		slab_free(path);
+		return -1;
+	}
 
-        // 2. 逐个读取用户空间 argv 数组，把每个字符串拷到内核
-        //    argv_addr 指向用户空间的 char*[]（8 字节指针数组）
-        int argc = 0;
-        int alloc_count = 0; // 已 slab_alloc 的数量，用于失败回滚
+	// 2. 逐个读取用户空间 argv 数组，把每个字符串拷到内核
+	//    argv_addr 指向用户空间的 char*[]（8 字节指针数组）
+	int argc = 0;
+	int alloc_count = 0; // 已 slab_alloc 的数量，用于失败回滚
 
-        while (argc < MAX_ARGS - 1)
-        {
-                // 从用户空间读取一个 char* 指针
-                uint64_t str_addr;
-                if (copyin(ts->pg, (char *)&str_addr,
-                           argv_addr + argc * sizeof(uint64_t),
-                           sizeof(uint64_t)) < 0)
-                {
-                        goto fail;
-                }
+	while (argc < MAX_ARGS - 1) {
+		// 从用户空间读取一个 char* 指针
+		uint64_t str_addr;
+		if (copyin(ts->pg,
+			   (char*)&str_addr,
+			   argv_addr + argc * sizeof(uint64_t),
+			   sizeof(uint64_t)) < 0) {
+			goto fail;
+		}
 
-                if (str_addr == 0)
-                        break; // argv 结束
+		if (str_addr == 0)
+			break; // argv 结束
 
-                // slab_alloc 一块内核内存存放这个字符串
-                argv[argc] = slab_alloc(MAX_PATH_LEN);
-                if (argv[argc] == NULL)
-                {
-                        goto fail;
-                }
-                alloc_count++;
+		// slab_alloc 一块内核内存存放这个字符串
+		argv[argc] = slab_alloc(MAX_PATH_LEN);
+		if (argv[argc] == NULL) {
+			goto fail;
+		}
+		alloc_count++;
 
-                // 从用户空间拷贝字符串到内核
-                if (copyinstr(ts->pg, argv[argc], str_addr, MAX_PATH_LEN) < 0)
-                {
-                        goto fail;
-                }
+		// 从用户空间拷贝字符串到内核
+		if (copyinstr(ts->pg, argv[argc], str_addr, MAX_PATH_LEN) < 0) {
+			goto fail;
+		}
 
-                argc++;
-        }
-        argv[argc] = NULL;
+		argc++;
+	}
+	argv[argc] = NULL;
 
-        // 3. 调用 kexec：替换用户程序
-        //    kexec 内部用 copyout 把 argv 拷到新用户栈，
-        //    替换页表，修改 trapframe，然后正常返回。
-        int ret = kexec(path, argv);
+	// 3. 调用 kexec：替换用户程序
+	//    kexec 内部用 copyout 把 argv 拷到新用户栈，
+	//    替换页表，修改 trapframe，然后正常返回。
+	int ret = kexec(path, argv);
 
-        // 4. kexec 返回后释放所有内核侧字符串副本
-        //    kexec 成功时返回 argc，失败时返回 -1。
-        //    两种情况下内核副本都已无用：
-        //    - 成功：字符串已被 copyout 到新用户栈
-        //    - 失败：kexec 自己恢复了旧页表，直接释放
-        slab_free(path);
+	// 4. kexec 返回后释放所有内核侧字符串副本
+	//    kexec 成功时返回 argc，失败时返回 -1。
+	//    两种情况下内核副本都已无用：
+	//    - 成功：字符串已被 copyout 到新用户栈
+	//    - 失败：kexec 自己恢复了旧页表，直接释放
+	slab_free(path);
 
-        for (int i = 0; i < alloc_count; i++)
-        {
-                slab_free(argv[i]);
-        }
+	for (int i = 0; i < alloc_count; i++) {
+		slab_free(argv[i]);
+	}
 
-        return ret;
+	return ret;
 
 fail:
-        slab_free(path);
+	slab_free(path);
 
-        for (int i = 0; i < alloc_count; i++)
-        {
-                slab_free(argv[i]);
-        }
-        return -1;
+	for (int i = 0; i < alloc_count; i++) {
+		slab_free(argv[i]);
+	}
+	return -1;
 }

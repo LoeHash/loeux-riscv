@@ -20,345 +20,323 @@ extern char _phy_start[];
 // 如果 address_cells == 1，则 base 是 32 位；
 // 如果 == 2，则 base 是 64 位，需从两个 32 位字拼接。
 // 同理，size_cells 决定长度是 32 位还是 64 位。
-int detect_memory_info(const char *name, int depth,
-                       void *node_ptr,
-                       void *data)
+int detect_memory_info(const char* name, int depth, void* node_ptr, void* data)
 {
-        memset(data, 0, mem_buff_size);
+	memset(data, 0, mem_buff_size);
 
-        int res = read_node_prop(node_ptr, "device_type", data, mem_buff_size);
+	int res = read_node_prop(node_ptr, "device_type", data, mem_buff_size);
 
-        if (res <= 0)
-        {
-                return 0;
-        }
+	if (res <= 0) {
+		return 0;
+	}
 
-        if (strcmp(data, "memory") != 0)
-        {
-                return 0;
-        }
+	if (strcmp(data, "memory") != 0) {
+		return 0;
+	}
 
-        memset(data, 0, mem_buff_size);
-        res = read_node_prop(node_ptr, "reg", data, mem_buff_size);
-        if (res <= 0)
-        {
-                return 0;
-        }
+	memset(data, 0, mem_buff_size);
+	res = read_node_prop(node_ptr, "reg", data, mem_buff_size);
+	if (res <= 0) {
+		return 0;
+	}
 
-        // 解析：baseaddress + size
-        printk("the reg length: %d\n", res);
-        printk("THE BASE MEMORY: %#x\n", bte64(data));
-        printk("THE MEMORY SIZE: %lu\n", bte64(data + 8));
+	// 解析：baseaddress + size
+	printk("the reg length: %d\n", res);
+	printk("THE BASE MEMORY: %#x\n", bte64(data));
+	printk("THE MEMORY SIZE: %lu\n", bte64(data + 8));
 
-        mem_info.banks[mem_info.nr_banks].base = bte64(data);
-        mem_info.banks[mem_info.nr_banks].size = bte64(data + 8);
-        mem_info.nr_banks++;
-        return 0;
+	mem_info.banks[mem_info.nr_banks].base = bte64(data);
+	mem_info.banks[mem_info.nr_banks].size = bte64(data + 8);
+	mem_info.nr_banks++;
+	return 0;
 }
 
 void init_memory()
 {
-        init_spinlock(&memory_init_lock);
-        init_spinlock(&memory_lock);
+	init_spinlock(&memory_init_lock);
+	init_spinlock(&memory_lock);
 
-        acquire(&memory_init_lock);
-        if (memory_init_status == 1)
-        {
-                printk("bumped into the gap!\n hart id: %d", get_cpu_id());
-                release(&memory_init_lock);
-                return;
-        }
+	acquire(&memory_init_lock);
+	if (memory_init_status == 1) {
+		printk("bumped into the gap!\n hart id: %d", get_cpu_id());
+		release(&memory_init_lock);
+		return;
+	}
 
-        char mem_buff[mem_buff_size];
-        fdt_walk_nodes((uint64_t)sub_node_base_addr, detect_memory_info, mem_buff);
+	char mem_buff[mem_buff_size];
+	fdt_walk_nodes(
+	    (uint64_t)sub_node_base_addr, detect_memory_info, mem_buff);
 
-        // 接下来对于内存进行分配
-        // 1. 计算出内存大小
-        for (uint32_t i = 0; i < mem_info.nr_banks; i++)
-        {
+	// 接下来对于内存进行分配
+	// 1. 计算出内存大小
+	for (uint32_t i = 0; i < mem_info.nr_banks; i++) {
 
-                MEMORY_SIZE += mem_info.banks[i].size;
-        }
-        printk("init_memory: totoal memory banks: %d\n", mem_info.nr_banks);
+		MEMORY_SIZE += mem_info.banks[i].size;
+	}
+	printk("init_memory: totoal memory banks: %d\n", mem_info.nr_banks);
 
-        struct page *pg = (struct page *)_phy_start, *pre_pg;
-        printk("init_memory: the pg start: %0#x\n", pg);
+	struct page *pg = (struct page*)_phy_start, *pre_pg;
+	printk("init_memory: the pg start: %0#x\n", pg);
 
-        struct bank *b;
-        char *start, *end;
+	struct bank* b;
+	char *start, *end;
 
-        for (size_t i = 0; i < mem_info.nr_banks; i++)
-        {
-                b = &mem_info.banks[i];
+	for (size_t i = 0; i < mem_info.nr_banks; i++) {
+		b = &mem_info.banks[i];
 
-                // 接下来，根据这个内存的起始地址以及size
-                // 去进行分配
-                start = (char *)b->base;
-                end = start + b->size;
+		// 接下来，根据这个内存的起始地址以及size
+		// 去进行分配
+		start = (char*)b->base;
+		end = start + b->size;
 
-                // 4kb对齐
-                start = (char *)ALIGN_UP((uintptr_t)start, PG_4K_SIZE);
-                while (start < end)
-                {
+		// 4kb对齐
+		start = (char*)ALIGN_UP((uintptr_t)start, PG_4K_SIZE);
+		while (start < end) {
 
-                        // 思路: 从现在的对齐内存起始地址开始
-                        //      构建出对应的page
-                        // 先清0
-                        memset(pg, 0, sizeof(struct page));
+			// 思路: 从现在的对齐内存起始地址开始
+			//      构建出对应的page
+			// 先清0
+			memset(pg, 0, sizeof(struct page));
 
-                        pg->paddr = (phys_addr_t)start;
-                        pg->next = 0;
-                        pg->prev = gmd.kernel_tail;
+			pg->paddr = (phys_addr_t)start;
+			pg->next = 0;
+			pg->prev = gmd.kernel_tail;
 
-                        if (gmd.kernel_tail)
-                        {
-                                gmd.kernel_tail->next = pg;
-                        }
-                        else
-                        {
-                                gmd.kernel_head = pg;
-                        }
+			if (gmd.kernel_tail) {
+				gmd.kernel_tail->next = pg;
+			} else {
+				gmd.kernel_head = pg;
+			}
 
-                        gmd.kernel_tail = pg;
-                        gmd.page_length++;
-                        pg++;
-                        start += PG_4K_SIZE;
-                }
-        }
+			gmd.kernel_tail = pg;
+			gmd.page_length++;
+			pg++;
+			start += PG_4K_SIZE;
+		}
+	}
 
-        // 接下来，进行特殊处理
-        // 因为有一些物理内存是opensbi和kernel本身 + page数据所占用的
-        // 同时保留出DMA区域
-        // 所以最终的page结束的位置是在: pg 现在的位置
-        start = (char *)MEMORY_START;
-        end = (char *)pg;
+	// 接下来，进行特殊处理
+	// 因为有一些物理内存是opensbi和kernel本身 + page数据所占用的
+	// 同时保留出DMA区域
+	// 所以最终的page结束的位置是在: pg 现在的位置
+	start = (char*)MEMORY_START;
+	end = (char*)pg;
 
-        while (start < end)
-        {
-                pg = PHY_TO_PAGE(start);
-                pg->flags |= PG_FLAG_RESERVED;
-                start += PG_4K_SIZE;
-        }
+	while (start < end) {
+		pg = PHY_TO_PAGE(start);
+		pg->flags |= PG_FLAG_RESERVED;
+		start += PG_4K_SIZE;
+	}
 
+	gmd.free_tail = gmd.kernel_tail; // 初始化空闲节点
+	gmd.kernel_tail = pg;		 // 保留节点的尾
+	gmd.kernel_tail->next = NULL;	 // 将保留节点的尾部断开
 
+	pg = PHY_TO_PAGE(start);
 
-        gmd.free_tail = gmd.kernel_tail; // 初始化空闲节点
-        gmd.kernel_tail = pg;            // 保留节点的尾
-        gmd.kernel_tail->next = NULL;    // 将保留节点的尾部断开
-        
-        pg = PHY_TO_PAGE(start);
+	// 记录 DMA 区起止 page
+	gmd.dma_head = pg;
+	gmd.dma_tail = pg + (DMA_SIZE / PG_4K_SIZE) - 1; // DMA_SIZE = 16MB
 
-        // 记录 DMA 区起止 page
-        gmd.dma_head = pg;
-        gmd.dma_tail = pg + (DMA_SIZE / PG_4K_SIZE) - 1;   // DMA_SIZE = 16MB
+	gmd.dma_start_at = gmd.dma_head->paddr;
+	gmd.dma_end_at = gmd.dma_tail->paddr;
 
-        gmd.dma_start_at = gmd.dma_head->paddr;
-        gmd.dma_end_at   = gmd.dma_tail->paddr;
+	// 标记 DMA 区所有页为 RESERVED，避免被页分配器拿走
+	{
+		struct page* p = gmd.dma_head;
+		for (int i = 0; i < DMA_SIZE / PG_4K_SIZE; i++, p++) {
+			p->flags |= PG_FLAG_RESERVED;
+		}
+	}
 
-        // 标记 DMA 区所有页为 RESERVED，避免被页分配器拿走
-        {
-        struct page *p = gmd.dma_head;
-        for (int i = 0; i < DMA_SIZE / PG_4K_SIZE; i++, p++) {
-                p->flags |= PG_FLAG_RESERVED;
-        }
-        }
+	// 把 DMA 区从空闲链里断开：free_head 跳到 DMA 区之后
+	pg = gmd.dma_tail->next; // DMA 区后面第一个页
+	gmd.free_head = pg;
+	pg->prev = NULL; // 断开前面的链接
 
-        // 把 DMA 区从空闲链里断开：free_head 跳到 DMA 区之后
-        pg = gmd.dma_tail->next;          // DMA 区后面第一个页
-        gmd.free_head = pg;
-        pg->prev = NULL;                  // 断开前面的链接
+	// DMA 链内部头尾
+	gmd.dma_head->prev = NULL;
+	gmd.dma_tail->next = NULL;
 
-        // DMA 链内部头尾 
-        gmd.dma_head->prev = NULL;
-        gmd.dma_tail->next = NULL;
+	printk("Last not reserved page: addr=%0#x, refcount=%d, flags=%0#x, "
+	       "prev=%0#x, next=%0#x\n",
+	       pg->paddr,
+	       pg->refcount,
+	       pg->flags,
+	       pg->prev,
+	       pg->next);
 
+	// 记录第一个，没有被reserved的pg
+	gmd.free_head = pg;
 
-        printk("Last not reserved page: addr=%0#x, refcount=%d, flags=%0#x, prev=%0#x, next=%0#x\n",
-               pg->paddr,
-               pg->refcount,
-               pg->flags,
-               pg->prev,
-               pg->next);
+	// 现在的free_start 就是绝对意义上的 第一个空闲页
+	gmd.free_start_at = gmd.free_head->paddr;
+	gmd.free_end_at = gmd.free_tail->paddr;
+	// 现在的free_tail 就是绝对意义上的 最后一个空闲页
 
-        // 记录第一个，没有被reserved的pg
-        gmd.free_head = pg;
+	// 将空闲节点的prev断开
+	gmd.free_head->prev = NULL;
+	gmd.free_tail->next = NULL;
 
-        // 现在的free_start 就是绝对意义上的 第一个空闲页
-        gmd.free_start_at = gmd.free_head->paddr;
-        gmd.free_end_at = gmd.free_tail->paddr;
-        // 现在的free_tail 就是绝对意义上的 最后一个空闲页
+	// 接下来，将fdt设备树的page单独从free的位置拿出来
+	// 将设备树地址取出
+	pg = PHY_TO_PAGE(ft_base_addr);
+	struct page* tmp =
+	    PHY_TO_PAGE(PGROUNDDOWN(ft_base_addr + fh_struct.totalsize));
+	// 直接设置
+	gmd.fdt_head = pg;
+	gmd.fdt_tail = tmp;
+	// 然后链接
+	if (pg->prev) // 绝对是true,不做检查
+	{
+		pg->prev->next = tmp->next;
+	}
+	if (tmp->next) // 绝对是true,不做检查
+	{
+		pg->next->prev = pg->prev;
+	}
+	// 然后断开链接
+	pg->prev = NULL;
+	tmp->next = NULL;
 
-        // 将空闲节点的prev断开
-        gmd.free_head->prev = NULL;
-        gmd.free_tail->next = NULL;
+	// 设置所有设备树页的保留标志
+	for (uintptr_t addr = PGROUNDDOWN(ft_base_addr);
+	     addr < PGROUNDUP(ft_base_addr + fh_struct.totalsize);
+	     addr += PG_4K_SIZE) {
+		struct page* p = PHY_TO_PAGE(addr);
+		p->flags |= PG_FLAG_RESERVED;
+		printk("fdt checking: %0#x\n", p->paddr);
+	}
 
-        // 接下来，将fdt设备树的page单独从free的位置拿出来
-        // 将设备树地址取出
-        pg = PHY_TO_PAGE(ft_base_addr);
-        struct page *tmp = PHY_TO_PAGE(PGROUNDDOWN(ft_base_addr + fh_struct.totalsize));
-        // 直接设置
-        gmd.fdt_head = pg;
-        gmd.fdt_tail = tmp;
-        // 然后链接
-        if (pg->prev) // 绝对是true,不做检查
-        {
-                pg->prev->next = tmp->next;
-        }
-        if (tmp->next) // 绝对是true,不做检查
-        {
-                pg->next->prev = pg->prev;
-        }
-        // 然后断开链接
-        pg->prev = NULL;
-        tmp->next = NULL;
+	// printk("After disconnect:\n");
+	// printk("Free head: paddr=%#x, flags=%#x, prev=%p, next=%p\n",
+	//        gmd.free_head->paddr, gmd.free_head->flags,
+	//        gmd.free_head->prev, gmd.free_head->next);
+	// printk("Free tail: paddr=%#x, flags=%#x, prev=%p, next=%p\n",
+	//        gmd.free_tail->paddr, gmd.free_tail->flags,
+	//        gmd.free_tail->prev, gmd.free_tail->next);
+	// test_page_alloc_free();
+	// print_fdt_list();
+	printk("Successfully inited the memory! :)\n");
 
-        // 设置所有设备树页的保留标志
-        for (uintptr_t addr = PGROUNDDOWN(ft_base_addr);
-             addr < PGROUNDUP(ft_base_addr + fh_struct.totalsize);
-             addr += PG_4K_SIZE)
-        {
-                struct page *p = PHY_TO_PAGE(addr);
-                p->flags |= PG_FLAG_RESERVED;
-                printk("fdt checking: %0#x\n", p->paddr);
-        }
-
-        // printk("After disconnect:\n");
-        // printk("Free head: paddr=%#x, flags=%#x, prev=%p, next=%p\n",
-        //        gmd.free_head->paddr, gmd.free_head->flags,
-        //        gmd.free_head->prev, gmd.free_head->next);
-        // printk("Free tail: paddr=%#x, flags=%#x, prev=%p, next=%p\n",
-        //        gmd.free_tail->paddr, gmd.free_tail->flags,
-        //        gmd.free_tail->prev, gmd.free_tail->next);
-        // test_page_alloc_free();
-        // print_fdt_list();
-        printk("Successfully inited the memory! :)\n");
-
-        memory_init_status = 1;
-        release(&memory_init_lock);
+	memory_init_status = 1;
+	release(&memory_init_lock);
 }
 
 // kalloc 与 kfree
 // 整页分配器（4KB），用于页表、内核栈、用户物理页、DMA 缓冲区等需要整页的场景。
 // 小块内存（< 4KB）请使用 slab_alloc / slab_free。
-void *kalloc()
+void* kalloc()
 {
-        return alloc_page();
+	return alloc_page();
 }
 
-int kfree(void *pa)
+int kfree(void* pa)
 {
-        return free_page(pa);
+	return free_page(pa);
 }
 
 // 释放一个物理页：校验合法性后挂回空闲链表尾部。
 // 全程持有 memory_lock；acquire() 内部 push_off 会关闭中断，
 // 因此在系统调用（开中断）上下文中调用也是安全的。
-int free_page(void *pa)
+int free_page(void* pa)
 {
-        if (pa == NULL)
-        {
-                panic(PANIC_ERROR, "free_page: NULL pointer!\n");
-        }
+	if (pa == NULL) {
+		panic(PANIC_ERROR, "free_page: NULL pointer!\n");
+	}
 
-        uintptr_t addr = (uintptr_t)pa;
+	uintptr_t addr = (uintptr_t)pa;
 
-        // 地址合法性：必须 4K 对齐，且落在受管的可分配物理内存范围内
-        // （低于 free_start_at 的是内核/SBI/页元数据保留页，
-        //   FDT 页虽在范围内但带 PG_FLAG_RESERVED 标记）
-        if ((addr & (PG_4K_SIZE - 1)) != 0 ||
-            addr < gmd.free_start_at || addr > gmd.free_end_at)
-        {
-                // TEMP-DIAG: 打印调用者返回地址便于定位野指针来源
-                printk("free_page: bad address %p caller=%p ra2=%p\n",
-                       pa, __builtin_return_address(0), __builtin_return_address(1));
-                panic(PANIC_ERROR, "free_page: bad address %p!\n", pa);
-        }
+	// 地址合法性：必须 4K 对齐，且落在受管的可分配物理内存范围内
+	// （低于 free_start_at 的是内核/SBI/页元数据保留页，
+	//   FDT 页虽在范围内但带 PG_FLAG_RESERVED 标记）
+	if ((addr & (PG_4K_SIZE - 1)) != 0 || addr < gmd.free_start_at ||
+	    addr > gmd.free_end_at) {
+		// TEMP-DIAG: 打印调用者返回地址便于定位野指针来源
+		printk("free_page: bad address %p caller=%p ra2=%p\n",
+		       pa,
+		       __builtin_return_address(0),
+		       __builtin_return_address(1));
+		panic(PANIC_ERROR, "free_page: bad address %p!\n", pa);
+	}
 
-        struct page *pg = PHY_TO_PAGE(pa);
+	struct page* pg = PHY_TO_PAGE(pa);
 
-        acquire(&memory_lock);
+	acquire(&memory_lock);
 
-        if (pg->flags & PG_FLAG_RESERVED)
-        {
-                release(&memory_lock);
-                panic(PANIC_ERROR, "free_page: freeing reserved page %p!\n", pa);
-        }
-        // 页必须处于已分配状态，否则就是双重释放/释放野指针
-        if (!(pg->flags & PG_FLAG_USED))
-        {
-                release(&memory_lock);
-                panic(PANIC_ERROR, "free_page: double free %p!\n", pa);
-        }
+	if (pg->flags & PG_FLAG_RESERVED) {
+		release(&memory_lock);
+		panic(
+		    PANIC_ERROR, "free_page: freeing reserved page %p!\n", pa);
+	}
+	// 页必须处于已分配状态，否则就是双重释放/释放野指针
+	if (!(pg->flags & PG_FLAG_USED)) {
+		release(&memory_lock);
+		panic(PANIC_ERROR, "free_page: double free %p!\n", pa);
+	}
 
-        // 引用计数：当前没有共享页，分配时 refcount=1；
-        // 保留语义以便未来共享页表页使用
-        if (pg->refcount > 0)
-        {
-                pg->refcount--;
-        }
-        if (pg->refcount > 0)
-        {
-                // 仍被引用，不回收
-                release(&memory_lock);
-                return 0;
-        }
+	// 引用计数：当前没有共享页，分配时 refcount=1；
+	// 保留语义以便未来共享页表页使用
+	if (pg->refcount > 0) {
+		pg->refcount--;
+	}
+	if (pg->refcount > 0) {
+		// 仍被引用，不回收
+		release(&memory_lock);
+		return 0;
+	}
 
-        // 摘成干净节点，尾插到空闲链表
-        pg->flags = PG_FLAG_FREE;
-        pg->next = NULL;
-        pg->prev = gmd.free_tail;
-        if (gmd.free_tail)
-        {
-                gmd.free_tail->next = pg;
-        }
-        else
-        {
-                // 链表此前为空，head/tail 都指向该页
-                gmd.free_head = pg;
-        }
-        gmd.free_tail = pg;
+	// 摘成干净节点，尾插到空闲链表
+	pg->flags = PG_FLAG_FREE;
+	pg->next = NULL;
+	pg->prev = gmd.free_tail;
+	if (gmd.free_tail) {
+		gmd.free_tail->next = pg;
+	} else {
+		// 链表此前为空，head/tail 都指向该页
+		gmd.free_head = pg;
+	}
+	gmd.free_tail = pg;
 
-        release(&memory_lock);
+	release(&memory_lock);
 
-        memset((char *)pg->paddr, 0, PG_4K_SIZE);
+	memset((char*)pg->paddr, 0, PG_4K_SIZE);
 
-        return 0;
+	return 0;
 }
 
 // 从空闲链表头部分配一个物理页。
 // 锁内只做链表摘除和元数据更新，清零放锁外以缩短临界区。
-void *alloc_page()
+void* alloc_page()
 {
-        acquire(&memory_lock);
+	acquire(&memory_lock);
 
-        struct page *pg = gmd.free_head;
-        if (pg == NULL)
-        {
-                release(&memory_lock);
-                return NULL;
-        }
+	struct page* pg = gmd.free_head;
+	if (pg == NULL) {
+		release(&memory_lock);
+		return NULL;
+	}
 
-        // 弹出头节点
-        gmd.free_head = pg->next;
-        if (gmd.free_head == NULL)
-        {
-                // 链表取空，tail 必须同步清空，
-                // 否则之后 free 会挂到一个已分配出去的旧尾页上
-                gmd.free_tail = NULL;
-        }
+	// 弹出头节点
+	gmd.free_head = pg->next;
+	if (gmd.free_head == NULL) {
+		// 链表取空，tail 必须同步清空，
+		// 否则之后 free 会挂到一个已分配出去的旧尾页上
+		gmd.free_tail = NULL;
+	}
 
-        pg->next = NULL;
-        pg->prev = NULL;
-        pg->flags = PG_FLAG_USED;
-        // 取得一个引用：空闲链表上的页 refcount 必为 0，
-        // 这里自增后变为 1，与 free_page 中的 refcount-- 配对，
-        // 减到 0 时页才会被挂回空闲链表回收。
-        pg->refcount++;
-        pg->slab = NULL; // 默认分配时所属的slab为NULL
+	pg->next = NULL;
+	pg->prev = NULL;
+	pg->flags = PG_FLAG_USED;
+	// 取得一个引用：空闲链表上的页 refcount 必为 0，
+	// 这里自增后变为 1，与 free_page 中的 refcount-- 配对，
+	// 减到 0 时页才会被挂回空闲链表回收。
+	pg->refcount++;
+	pg->slab = NULL; // 默认分配时所属的slab为NULL
 
-        release(&memory_lock);
+	release(&memory_lock);
 
-        memset((char *)pg->paddr, 0, PG_4K_SIZE);
+	memset((char*)pg->paddr, 0, PG_4K_SIZE);
 
-        return (void *)pg->paddr;
+	return (void*)pg->paddr;
 }

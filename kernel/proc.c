@@ -25,7 +25,7 @@
 
 struct task_struct tasks[NTASKS];
 struct cpu cpus[NCPUS];
-struct task_struct *initask = NULL;
+struct task_struct* initask = NULL;
 static int init_task_startup = 0;
 extern char _trampoline_jump[];
 extern char _trampoline_ret[];
@@ -33,20 +33,22 @@ extern char kernel_trap_vec[];
 static uint64_t pid_counter = 1;
 static spinlock_t pid_lock = {0};
 static uint64_t alloc_pid();
-static int check_elf_header(struct elf64_ehdr *ehdr);
+static int check_elf_header(struct elf64_ehdr* ehdr);
 static void _map_user_stack(page_table pg);
-static int read_phdr(struct file *f, uint64_t off, struct elf64_phdr *ph);
+static int read_phdr(struct file* f, uint64_t off, struct elf64_phdr* ph);
 static int flags_to_pte(uint32_t p_flags);
-static int load_segment(struct file *f, page_table pg, struct elf64_phdr *ph);
-static void exit_fs(struct task_struct *ts);
-static void wake_wait_parent(struct task_struct *p);
-static void do_free_task_heap(page_table pg, uint64_t heap_start,
-    uint64_t heap_history_max);
+static int load_segment(struct file* f, page_table pg, struct elf64_phdr* ph);
+static void exit_fs(struct task_struct* ts);
+static void wake_wait_parent(struct task_struct* p);
+static void do_free_task_heap(page_table pg,
+			      uint64_t heap_start,
+			      uint64_t heap_history_max);
 
 // 初始化用户第一个进程
-void init_user() {
+void init_user()
+{
 
-	struct task_struct *ts;
+	struct task_struct* ts;
 
 	// alloc_task 静默获取ts锁
 	// 同时不会释放
@@ -64,13 +66,12 @@ void init_user() {
 	release(&ts->lk);
 
 	if (set_cwd(ts, "/") == -1) {
-		panic(
-		    PANIC_ERROR,
-		    "init_"
-		    "tasks: "
-		    "set_cwd "
-		    "failed!"
-		    "\n");
+		panic(PANIC_ERROR,
+		      "init_"
+		      "tasks: "
+		      "set_cwd "
+		      "failed!"
+		      "\n");
 	}
 
 	ts->state = RUNNABLE;
@@ -80,10 +81,11 @@ void init_user() {
 /// @param ts 目标进程
 /// @param path 路径
 /// @return 0 成功，-1 失败
-int set_cwd(struct task_struct *ts, const char *path) {
-	char *normalized;
-	struct inode *inode = NULL;
-	struct inode *old;
+int set_cwd(struct task_struct* ts, const char* path)
+{
+	char* normalized;
+	struct inode* inode = NULL;
+	struct inode* old;
 
 	if (ts == NULL || path == NULL)
 		return -1;
@@ -100,36 +102,29 @@ int set_cwd(struct task_struct *ts, const char *path) {
 	if (normalized == NULL)
 		return -1;
 
-	do_build_user_path(normalized, (char *)path,
-	    ts->cwd_path);
+	do_build_user_path(normalized, (char*)path, ts->cwd_path);
 
 	/* 规范化失败（超长等）会得到空串；结果还必须放得进
 	 * cwd_path */
 	if (normalized[0] == '\0' ||
-	    strlen(normalized) >=
-	        sizeof(ts->cwd_path)) {
-		slab_free(
-		    normalized);
+	    strlen(normalized) >= sizeof(ts->cwd_path)) {
+		slab_free(normalized);
 		return -1;
 	}
 
 	if (vfs_lookup(normalized, &inode) < 0) {
-		slab_free(
-		    normalized);
+		slab_free(normalized);
 		return -1;
 	}
 
 	if (inode == NULL) {
-		slab_free(
-		    normalized);
+		slab_free(normalized);
 		return -1;
 	}
 
 	if ((inode->mode & S_IFMT) != S_IFDIR) {
-		inode_put(
-		    inode);
-		slab_free(
-		    normalized);
+		inode_put(inode);
+		slab_free(normalized);
 		return -1;
 	}
 
@@ -138,8 +133,7 @@ int set_cwd(struct task_struct *ts, const char *path) {
 	old = ts->cwd;
 
 	ts->cwd = inode;
-	memcpy(ts->cwd_path, normalized,
-	    strlen(normalized) + 1);
+	memcpy(ts->cwd_path, normalized, strlen(normalized) + 1);
 
 	release(&ts->lk);
 
@@ -153,8 +147,9 @@ int set_cwd(struct task_struct *ts, const char *path) {
 
 /// @brief 所有fork出来的进程
 ///        全部会进入到此函数
-void first_ret() {
-	struct task_struct *ts = get_task();
+void first_ret()
+{
+	struct task_struct* ts = get_task();
 
 	// 来到这里，我们仍然持有
 	// 此进程的锁, 此时状态必然为 running
@@ -163,10 +158,8 @@ void first_ret() {
 	if (!init_task_startup) {
 
 		// 必须要推迟初始化
-		init_task_startup =
-		    1;
-		__atomic_thread_fence(
-		    __ATOMIC_SEQ_CST);
+		init_task_startup = 1;
+		__atomic_thread_fence(__ATOMIC_SEQ_CST);
 
 		// 为 init
 		// 进程建立 std
@@ -187,30 +180,21 @@ void first_ret() {
 		init_vfs_std();
 
 		// exec
-		ts->utf
-		    ->a0 = kexec(
-		    "/init",
-		    (char *[]){
-		        "init",
-		        NULL});
-		if (ts->utf
-		        ->a0 ==
-		    -1) {
-			panic(
-			    PANIC_ERROR,
-			    "inituser: a0 is -1!\n");
+		ts->utf->a0 = kexec("/init", (char*[]){"init", NULL});
+		if (ts->utf->a0 == -1) {
+			panic(PANIC_ERROR, "inituser: a0 is -1!\n");
 		}
 	}
 
 	setup_return_trapframe(ts);
 	uint64_t satp = MAKE_SATP(ts->pg);
 	uint64_t trampoline_userret =
-	    TRAMPOLINE +
-	    (_trampoline_ret - _trampoline_jump);
+	    TRAMPOLINE + (_trampoline_ret - _trampoline_jump);
 	((void (*)(uint64_t))trampoline_userret)(satp);
 }
 
-struct task_struct *get_task() {
+struct task_struct* get_task()
+{
 	// 修复: get_task() 可能在中断开启的上下文（如
 	// syscall 路径）中被调用。 若在 r_tp() 读取 tp
 	// 之后、访问 cpus[tp].ts 之前发生定时器中断，
@@ -222,93 +206,66 @@ struct task_struct *get_task() {
 	// 读取的原子性。
 	int old = intr_get();
 	intr_off();
-	struct task_struct *t = get_cpu()->ts;
+	struct task_struct* t = get_cpu()->ts;
 	if (old)
 		intr_on();
 	return t;
 }
 
-struct cpu *get_cpu() {
+struct cpu* get_cpu()
+{
 	return &cpus[r_tp()];
 }
 
-uint64_t get_cpu_id() {
+uint64_t get_cpu_id()
+{
 	return r_tp();
 }
 
 /// @brief 分配任务结构体
 ///        此方法不会释放进程本身的锁
-struct task_struct *alloc_task() {
-	struct task_struct *ft;
+struct task_struct* alloc_task()
+{
+	struct task_struct* ft;
 
 	for (ft = tasks; ft < &tasks[NTASKS]; ft++) {
-		acquire(
-		    &ft->lk);
-		if (ft->state ==
-		    INITLIZED) {
-			ft->pid =
-			    alloc_pid();
-			ft->state =
-			    USED;
+		acquire(&ft->lk);
+		if (ft->state == INITLIZED) {
+			ft->pid = alloc_pid();
+			ft->state = USED;
 
-			if ((ft->utf =
-			            (struct
-				trapframe
-				    *)
-				kalloc()) ==
-			    NULL) {
-				free_task(
-				    ft);
-				release(
-				    &ft->lk);
+			if ((ft->utf = (struct trapframe*)kalloc()) == NULL) {
+				free_task(ft);
+				release(&ft->lk);
 				return 0;
 			}
 
 			// An empty user page table.
-			ft->pg = create_task_pgtable(
-			    ft);
-			if (ft->pg ==
-			    0) {
-				free_task(
-				    ft);
-				release(
-				    &ft->lk);
+			ft->pg = create_task_pgtable(ft);
+			if (ft->pg == 0) {
+				free_task(ft);
+				release(&ft->lk);
 				return 0;
 			}
 
-			memset(
-			    &ft->ctx,
-			    0,
-			    sizeof(
-			        ft->ctx));
-			ft->ctx
-			    .ra =
-			    (uint64_t)
-			        first_ret;
+			memset(&ft->ctx, 0, sizeof(ft->ctx));
+			ft->ctx.ra = (uint64_t)first_ret;
 			// 槽位复用：清掉上一任残留的
 			// trap 续跑状态，
 			// 否则新任务第一次被时钟打断并
 			// yield 后， kernel trap
 			// 路径会"恢复"上一任遗留的
 			// sepc/sstatus
-			ft->trap_ctx_valid =
-			    0;
-			ft->trap_sepc =
-			    0;
-			ft->trap_sstatus =
-			    0;
-			ft->child_exit_pending =
-			    0;
-			ft->sleep_chan =
-			    0;
+			ft->trap_ctx_valid = 0;
+			ft->trap_sepc = 0;
+			ft->trap_sstatus = 0;
+			ft->child_exit_pending = 0;
+			ft->sleep_chan = 0;
 			// 进程内核栈，而不是cpu调度器栈
-			ft->ctx
-			    .sp =
-			    ft->kstack;
+			ft->ctx.sp = ft->kstack;
 			return ft;
 		} else {
-			release(
-			    &ft->lk);
+			release(&ft->lk);
 		}
 	}
 
@@ -318,14 +275,14 @@ struct task_struct *alloc_task() {
 /// yield 是 进程表明自己可以切换 切换到cpu调度器主循环
 /// yield 加的锁和 调度器加的锁不构成冲突
 /// 这里的锁 是在sched间传递的
-void yield() {
-	struct task_struct *ts = get_task();
+void yield()
+{
+	struct task_struct* ts = get_task();
 
 	// 需要加锁
 	acquire(&ts->lk);
 	if (ts->state != RUNNING) {
-		release(
-		    &ts->lk);
+		release(&ts->lk);
 		return;
 	}
 
@@ -336,35 +293,32 @@ void yield() {
 	release(&ts->lk);
 }
 
-void sched() {
-	struct task_struct *ts = get_task();
+void sched()
+{
+	struct task_struct* ts = get_task();
 	// 是否持有当前进程的锁
 	if (!is_holding(&ts->lk)) {
-		panic(
-		    PANIC_ERROR,
-		    "sched: "
-		    "not a "
-		    "owner!\n");
+		panic(PANIC_ERROR,
+		      "sched: "
+		      "not a "
+		      "owner!\n");
 	}
 	if (ts->state == RUNNING) {
-		panic(
-		    PANIC_ERROR,
-		    "sched "
-		    "RUNNING");
+		panic(PANIC_ERROR,
+		      "sched "
+		      "RUNNING");
 	}
 	if (intr_get())
-		panic(
-		    PANIC_ERROR,
-		    "sched: "
-		    "interrupti"
-		    "ble!");
+		panic(PANIC_ERROR,
+		      "sched: "
+		      "interrupti"
+		      "ble!");
 
 	if (get_cpu()->noff != 1) {
-		panic(
-		    PANIC_ERROR,
-		    "sched: "
-		    "noff != "
-		    "1");
+		panic(PANIC_ERROR,
+		      "sched: "
+		      "noff != "
+		      "1");
 	}
 	// 执行切换
 	// 把当前进程的ctx保存
@@ -396,58 +350,44 @@ void sched() {
 /// 我们永远无法得知进入scheduler之前cpu在执行什么
 /// 但永远谨记 cpu->ctx 是cpu的当前上下文
 /// task_struct->ctx 是进程的在内核态里的上下文
-void scheduler() {
-	struct task_struct *ts;
-	struct cpu *cpu = &cpus[r_tp()];
+void scheduler()
+{
+	struct task_struct* ts;
+	struct cpu* cpu = &cpus[r_tp()];
 	uint8_t found = 0;
 	while (1) {
 		found = 0;
 
 		// 调度
-		for (
-		    ts = tasks;
-		    ts <
-		    &tasks
-		        [NTASKS];
-		    ts++) {
-			if (ts->state !=
-			    RUNNABLE) {
+		for (ts = tasks; ts < &tasks[NTASKS]; ts++) {
+			if (ts->state != RUNNABLE) {
 				continue;
 			}
 
 			// 多个核心，存在竞争条件
 			// 进程必须在退出内核态前
 			// 释放掉自身的锁
-			acquire(
-			    &ts->lk);
+			acquire(&ts->lk);
 
-			if (ts->state !=
-			    RUNNABLE) {
-				release(
-				    &ts->lk);
+			if (ts->state != RUNNABLE) {
+				release(&ts->lk);
 				continue;
 			}
 			// 首先切换状态
-			ts->state =
-			    RUNNING;
+			ts->state = RUNNING;
 			MEMORY_FENCE;
-			found =
-			    1;
+			found = 1;
 
 			// 接下来，尽快切换
 			// 传入当前cpu上下文的存储位置
 			// 同时传入要切换的进程的ctx内核上下文
 			// 同时我们要释放锁
-			cpu->ts =
-			    ts;
+			cpu->ts = ts;
 
 			// 当前的cpu
-			ts->utf
-			    ->kernel_hartid =
-			    get_cpu_id();
+			ts->utf->kernel_hartid = get_cpu_id();
 
-			task_restore_stvec(
-			    ts);
+			task_restore_stvec(ts);
 
 			// printk("SCHED -> TASK:
 			// hart=%d pid=%d "
@@ -463,9 +403,7 @@ void scheduler() {
 			//        ts->utf->sepc,
 			//        r_stvec(),
 			//        r_sstatus());
-			swtch(
-			    &(cpu->ctx),
-			    &ts->ctx);
+			swtch(&(cpu->ctx), &ts->ctx);
 			// printk("SCHED <- TASK:
 			// hart=%d pid=%d "
 			//        "state=%d ctx.ra=%lx
@@ -483,13 +421,9 @@ void scheduler() {
 			//        r_sstatus());
 			// swtch后，说明用户程序的时间片已经
 			// 用完了，此时需要调度其他的
-			cpu->ts =
-			    0;
-			w_stvec(
-			    (uint64_t)
-			        kernel_trap_vec);
-			release(
-			    &ts->lk);
+			cpu->ts = 0;
+			w_stvec((uint64_t)kernel_trap_vec);
+			release(&ts->lk);
 		}
 
 		if (!found) {
@@ -498,19 +432,17 @@ void scheduler() {
 			// printk("no process available!
 			// end with hart id: %d\n",
 			// get_cpu_id());
-			w_stvec(
-			    (uint64_t)
-			        kernel_trap_vec);
+			w_stvec((uint64_t)kernel_trap_vec);
 			intr_on();
-			asm volatile(
-			    "wfi");
+			asm volatile("wfi");
 			intr_off();
 		}
 	}
 }
 
-void init_cpu() {
-	struct cpu *now = get_cpu();
+void init_cpu()
+{
+	struct cpu* now = get_cpu();
 	// now->ctx = 0;
 	now->ts = NULL;
 	now->hart_id = r_tp();
@@ -519,9 +451,10 @@ void init_cpu() {
 }
 
 // 初始化任务
-void init_tasks() {
-	struct task_struct *ts;
-	char *kstack;
+void init_tasks()
+{
+	struct task_struct* ts;
+	char* kstack;
 
 	for (ts = tasks; ts < &tasks[NTASKS]; ts++) {
 
@@ -529,64 +462,45 @@ void init_tasks() {
 		// 映射内核栈
 		// 初始化自旋锁
 		// 在内核页表中映射内核栈
-		kstack =
-		    alloc_page();
+		kstack = alloc_page();
 
-		if (kstack ==
-		    NULL) {
-			panic(
-			    PANIC_ERROR,
-			    "init_tasks: can not "
-			    "alloc page!\n");
+		if (kstack == NULL) {
+			panic(PANIC_ERROR,
+			      "init_tasks: can not "
+			      "alloc page!\n");
 		}
 
-		if (kvminit(
-		        kernel_pt,
-		        TASK_KERNEL_STACK(
-		            ts -
-		            tasks),
-		        (phys_addr_t)
-		            kstack,
-		        1,
-		        PTE_V |
-		            PTE_R |
-		            PTE_W,
-		        0) ==
-		    0) {
-			panic(
-			    PANIC_ERROR,
-			    "init_tasks:kvminit() "
-			    "error!\n");
+		if (kvminit(kernel_pt,
+			    TASK_KERNEL_STACK(ts - tasks),
+			    (phys_addr_t)kstack,
+			    1,
+			    PTE_V | PTE_R | PTE_W,
+			    0) == 0) {
+			panic(PANIC_ERROR,
+			      "init_tasks:kvminit() "
+			      "error!\n");
 		}
 
-		init_spinlock(
-		    &(ts->lk));
+		init_spinlock(&(ts->lk));
 
-		ts->state =
-		    INITLIZED;
-		ts->kstack =
-		    TASK_KERNEL_STACK(
-		        ts -
-		        tasks);
-		ts->stvec = (uint64_t)
-		    kernel_trap_vec; // task 第一次运行时处于
-			     // kernel
-		ts->trap_sepc =
-		    0; // 初始没有
-		       // kernel
-		       // trap
-		ts->trap_sstatus =
-		    0; // 初始没有
-		       // kernel
-		       // trap
-		ts->trap_ctx_valid =
-		    0; // 初始没有
-		       // kernel
-		       // trap
+		ts->state = INITLIZED;
+		ts->kstack = TASK_KERNEL_STACK(ts - tasks);
+		ts->stvec = (uint64_t)kernel_trap_vec; // task 第一次运行时处于
+						       // kernel
+		ts->trap_sepc = 0;		       // 初始没有
+						       // kernel
+						       // trap
+		ts->trap_sstatus = 0;		       // 初始没有
+						       // kernel
+						       // trap
+		ts->trap_ctx_valid = 0;		       // 初始没有
+						       // kernel
+						       // trap
 	}
 }
 
-static uint64_t alloc_pid() {
+static uint64_t alloc_pid()
+{
 	uint64_t tmp;
 	acquire(&pid_lock);
 	tmp = pid_counter;
@@ -595,25 +509,19 @@ static uint64_t alloc_pid() {
 	return tmp;
 }
 
-void free_task(struct task_struct *t) {
+void free_task(struct task_struct* t)
+{
 	exit_fs(t);
 
 	if (t->utf)
-		kfree(
-		    (void *)
-		        t->utf);
+		kfree((void*)t->utf);
 	t->utf = 0;
 	if (t->pg) {
-		free_task_pgtable(
-		    t->pg,
-		    t->size);
+		free_task_pgtable(t->pg, t->size);
 		// 选择性释放堆
-		if (t->heap_start &&
-		    t->heap_history_max) {
+		if (t->heap_start && t->heap_history_max) {
 			do_free_task_heap(
-			    t->pg,
-			    t->heap_start,
-			    t->heap_history_max);
+			    t->pg, t->heap_start, t->heap_history_max);
 		}
 	}
 	t->pg = 0;
@@ -632,7 +540,8 @@ void free_task(struct task_struct *t) {
 /// 此函数只会释放用户程序的代码段，trampoline，trapframe映射
 /// @param pagetable
 /// @param sz 进程内存大小从 0x1000 开始算的 用户映射长度
-void free_task_pgtable(page_table pagetable, uint64_t sz) {
+void free_task_pgtable(page_table pagetable, uint64_t sz)
+{
 	// TRAMPOLINE 取消映射
 	// TRAPFRAME_MAPPING 取消映射
 	// 但不释放对应物理页
@@ -644,65 +553,59 @@ void free_task_pgtable(page_table pagetable, uint64_t sz) {
 	// vmprint(pagetable);
 }
 
-static void do_free_task_heap(page_table pg, uint64_t heap_start,
-    uint64_t heap_history_max) {
+static void
+do_free_task_heap(page_table pg, uint64_t heap_start, uint64_t heap_history_max)
+{
 	if (heap_start == 0)
 		return;
-	pg_unmap(pg, heap_start,
-	    heap_history_max -
-	        heap_start / PG_4K_SIZE,
-	    1);
+	pg_unmap(pg, heap_start, heap_history_max - heap_start / PG_4K_SIZE, 1);
 }
 
 /// @brief 映射进程的页表, 基本映射：仅包含蹦床页和trapframe映射
 /// @param ts
 /// @return
-page_table create_task_pgtable(struct task_struct *ts) {
+page_table create_task_pgtable(struct task_struct* ts)
+{
 	page_table pg;
 	pg = pg_create();
 	if (pg == 0) {
 		return 0;
 	}
 
-	if (mappages(pg, TRAMPOLINE, PG_4K_SIZE,
-	        (uint64_t)_trampoline_jump,
-	        PTE_V | PTE_R | PTE_X) < 0) {
-		pg_user_vmfree(
-		    pg, 0);
+	if (mappages(pg,
+		     TRAMPOLINE,
+		     PG_4K_SIZE,
+		     (uint64_t)_trampoline_jump,
+		     PTE_V | PTE_R | PTE_X) < 0) {
+		pg_user_vmfree(pg, 0);
 		return 0;
 	}
 	// printk("trapframe: %0#lx\n",
 	// TRAPFRAME_MAPPING);
-	if (mappages(pg, TRAPFRAME_MAPPING, PG_4K_SIZE,
-	        (uint64_t)(ts->utf),
-	        PTE_R | PTE_W) < 0) {
-		pg_unmap(
-		    pg,
-		    TRAMPOLINE,
-		    1, 0);
-		pg_user_vmfree(
-		    pg, 0);
+	if (mappages(pg,
+		     TRAPFRAME_MAPPING,
+		     PG_4K_SIZE,
+		     (uint64_t)(ts->utf),
+		     PTE_R | PTE_W) < 0) {
+		pg_unmap(pg, TRAMPOLINE, 1, 0);
+		pg_user_vmfree(pg, 0);
 		return 0;
 	}
 
 	return pg;
 }
-static void exit_fs(struct task_struct *ts) {
+static void exit_fs(struct task_struct* ts)
+{
 	for (int i = 0; i < NOFILE; i++) {
-		struct file *f =
-		    ts->ofile
-		        [i];
-		ts->ofile[i] =
-		    NULL;
+		struct file* f = ts->ofile[i];
+		ts->ofile[i] = NULL;
 
 		if (f)
-			file_put(
-			    f);
+			file_put(f);
 	}
 
 	if (ts->cwd) {
-		inode_put(
-		    ts->cwd);
+		inode_put(ts->cwd);
 		ts->cwd = NULL;
 	}
 
@@ -717,13 +620,12 @@ static void exit_fs(struct task_struct *ts) {
 ///        那类任务挂在睡眠锁的等待队列上，由 release_sleep 负责
 ///        摘链唤醒，提前置 RUNNABLE 会让它的 sleep_node 残留在
 ///        队列里，之后 wakeup 摘链时会访问已脱队的节点、损坏链表。
-static void wake_wait_parent(struct task_struct *p) {
+static void wake_wait_parent(struct task_struct* p)
+{
 	acquire(&p->lk);
 	p->child_exit_pending = 1;
-	if (p->state == SLEEP &&
-	    p->sleep_chan == SLEEP_CHAN_CHILD) {
-		p->state =
-		    RUNNABLE;
+	if (p->state == SLEEP && p->sleep_chan == SLEEP_CHAN_CHILD) {
+		p->state = RUNNABLE;
 	}
 	release(&p->lk);
 }
@@ -732,22 +634,19 @@ static void wake_wait_parent(struct task_struct *p) {
 /// @param pid 要等待的子进程 pid；-1 表示等待任意子进程
 /// @param status 接收子进程退出码的指针，NULL 则丢弃
 /// @return 成功返回被回收的 pid；无子进程返回 -1
-pid_t waitpid(pid_t pid, int *status) {
-	struct task_struct *ts = get_task();
+pid_t waitpid(pid_t pid, int* status)
+{
+	struct task_struct* ts = get_task();
 	if (ts == NULL) {
-		panic(
-		    PANIC_ERROR,
-		    "waitpid: "
-		    "ts is "
-		    "NULL!\n");
+		panic(PANIC_ERROR,
+		      "waitpid: "
+		      "ts is "
+		      "NULL!\n");
 	}
 
 	while (1) {
-		struct task_struct
-		    *zombie =
-		        NULL;
-		int child_count =
-		    0;
+		struct task_struct* zombie = NULL;
+		int child_count = 0;
 
 		// 扫描所有任务，寻找当前进程的
 		// ZOMBIE
@@ -760,89 +659,46 @@ pid_t waitpid(pid_t pid, int *status) {
 		// child 的锁，
 		// 与 kexit
 		// 的持锁顺序不构成循环等待。
-		for (
-		    struct
-		    task_struct
-		        *child =
-		            tasks;
-		    child <
-		    &tasks
-		        [NTASKS];
-		    child++) {
-			acquire(
-			    &child
-			        ->lk);
-			if (child
-			        ->parent ==
-			    ts) {
-				if (pid ==
-				        -1 ||
-				    child->pid ==
-				        pid) {
-					if (child
-					        ->state ==
-					    ZOMBIE) {
-						zombie =
-						    child;
+		for (struct task_struct* child = tasks; child < &tasks[NTASKS];
+		     child++) {
+			acquire(&child->lk);
+			if (child->parent == ts) {
+				if (pid == -1 || child->pid == pid) {
+					if (child->state == ZOMBIE) {
+						zombie = child;
 						break; // 持锁跳出，回收在锁内完成
 					}
 					child_count++;
 				}
 			}
-			release(
-			    &child
-			        ->lk);
+			release(&child->lk);
 		}
 
-		if (zombie !=
-		    NULL) {
-			pid_t reaped =
-			    zombie
-			        ->pid;
+		if (zombie != NULL) {
+			pid_t reaped = zombie->pid;
 			if (status)
-				*status =
-				    zombie
-				        ->return_val;
+				*status = zombie->return_val;
 
 			// 回收 ZOMBIE 剩余资源
 			// （页表/用户内存已由 kexit
 			// 释放，这里回收 trapframe 页）
-			kfree(
-			    (void
-			            *)zombie
-			        ->utf);
-			zombie
-			    ->utf =
-			    0;
-			zombie
-			    ->pid =
-			    0;
-			zombie
-			    ->parent =
-			    0;
-			zombie
-			    ->name
-			        [0] =
-			    0;
-			zombie
-			    ->dead =
-			    0;
+			kfree((void*)zombie->utf);
+			zombie->utf = 0;
+			zombie->pid = 0;
+			zombie->parent = 0;
+			zombie->name[0] = 0;
+			zombie->dead = 0;
 
 			// trampoline是共享的,
 			// 不需要回收
-			zombie
-			    ->state =
-			    INITLIZED;
-			release(
-			    &zombie
-			        ->lk);
+			zombie->state = INITLIZED;
+			release(&zombie->lk);
 			return reaped;
 		}
 
 		// 如果没有匹配的子进程，直接返回
 		// -1
-		if (child_count ==
-		    0) {
+		if (child_count == 0) {
 			return -1;
 		}
 
@@ -852,43 +708,37 @@ pid_t waitpid(pid_t pid, int *status) {
 		// 检查与 SLEEP
 		// 置位必须在同一临界区内完成，
 		// 否则子进程恰好在这两步之间退出会造成丢失唤醒
-		acquire(
-		    &ts->lk);
+		acquire(&ts->lk);
 		if (ts->child_exit_pending) {
-			ts->child_exit_pending =
-			    0;
-			release(
-			    &ts->lk);
+			ts->child_exit_pending = 0;
+			release(&ts->lk);
 			continue; // 有子进程刚退出，重新扫描
 		}
-		ts->sleep_chan =
-		    SLEEP_CHAN_CHILD;
-		ts->state =
-		    SLEEP;
+		ts->sleep_chan = SLEEP_CHAN_CHILD;
+		ts->state = SLEEP;
 		sched(); // 切出；调度器切回时已重新持有
-		         // ts->lk
-		ts->sleep_chan =
-		    0;
-		release(
-		    &ts->lk);
+			 // ts->lk
+		ts->sleep_chan = 0;
+		release(&ts->lk);
 	}
 }
 
 /// @brief 等待任意子进程退出（waitpid 的便捷包装）
-pid_t wait(int *status) {
+pid_t wait(int* status)
+{
 	return waitpid(-1, status);
 }
 
 /// @brief 退出当前进程
 /// @return
-int kexit(int exit_code) {
-	struct task_struct *ts = get_task();
+int kexit(int exit_code)
+{
+	struct task_struct* ts = get_task();
 	if (ts == NULL) {
-		panic(
-		    PANIC_ERROR,
-		    "kexit: ts "
-		    "is "
-		    "NULL!\n");
+		panic(PANIC_ERROR,
+		      "kexit: ts "
+		      "is "
+		      "NULL!\n");
 	}
 
 	// init 进程是所有孤儿的最终收容者，绝不允许退出
@@ -914,8 +764,7 @@ int kexit(int exit_code) {
 	// 3. 释放所有页表内存和物理页, 以及用户栈
 	//    同时释放堆内存
 	free_task_pgtable(ts->pg, ts->size);
-	do_free_task_heap(ts->pg, ts->heap_start,
-	    ts->heap_history_max);
+	do_free_task_heap(ts->pg, ts->heap_start, ts->heap_history_max);
 
 	ts->pg = 0;
 	ts->size = 0;
@@ -932,26 +781,20 @@ int kexit(int exit_code) {
 	//    存活子进程计数，不会提前回收。
 	release(&ts->lk);
 	uint8_t orphan_zombie = 0;
-	for (struct task_struct *c = tasks;
-	    c < &tasks[NTASKS]; c++) {
+	for (struct task_struct* c = tasks; c < &tasks[NTASKS]; c++) {
 		acquire(&c->lk);
-		if (c->parent ==
-		    ts) {
-			c->parent =
-			    initask;
-			if (c->state ==
-			    ZOMBIE) {
-				orphan_zombie =
-				    1; // 有孤儿已是僵尸，通知
-				       // init
-				       // 回收
+		if (c->parent == ts) {
+			c->parent = initask;
+			if (c->state == ZOMBIE) {
+				orphan_zombie = 1; // 有孤儿已是僵尸，通知
+						   // init
+						   // 回收
 			}
 		}
 		release(&c->lk);
 	}
 	if (orphan_zombie) {
-		wake_wait_parent(
-		    initask);
+		wake_wait_parent(initask);
 	}
 	acquire(&ts->lk);
 
@@ -970,33 +813,30 @@ int kexit(int exit_code) {
 
 	// 6. 唤醒正在 wait() 的父进程
 	if (ts->parent != NULL) {
-		wake_wait_parent(
-		    ts->parent);
+		wake_wait_parent(ts->parent);
 	}
 
 	// 7. 切出，永不返回
 	sched();
 
 	// 8. should never reach here
-	panic(PANIC_ERROR,
-	    "kexit: sched() error! exit_code: %d!\n",
-	    exit_code);
+	panic(PANIC_ERROR, "kexit: sched() error! exit_code: %d!\n", exit_code);
 }
 
 /// @brief  创建一个子进程
 /// @return 子进程的 pid
-int kfork() {
+int kfork()
+{
 	pid_t new_pid, parent_pid;
 	struct task_struct *new_ts, *father_ts;
 	father_ts = get_task();
 
 	if (father_ts == NULL) {
-		panic(
-		    PANIC_ERROR,
-		    "kfork: "
-		    "father_ts "
-		    "is "
-		    "NULL!\n");
+		panic(PANIC_ERROR,
+		      "kfork: "
+		      "father_ts "
+		      "is "
+		      "NULL!\n");
 	}
 
 	if ((new_ts = alloc_task()) == NULL) {
@@ -1006,11 +846,11 @@ int kfork() {
 	// 目前我们持有new_ts的锁
 	// 1. 复制父进程页表的所有内容
 	//    26-9-17 修复remap
-	if ((vm_pagetbl_copy_asign(
-	        father_ts->pg, new_ts->pg,
-	        USER_BASE_PROG_ADDR,
-	        father_ts->size -
-	            USER_BASE_PROG_ADDR)) == -1) {
+	if ((vm_pagetbl_copy_asign(father_ts->pg,
+				   new_ts->pg,
+				   USER_BASE_PROG_ADDR,
+				   father_ts->size - USER_BASE_PROG_ADDR)) ==
+	    -1) {
 		// 失败路径必须释放锁，否则
 		// free_task
 		// 之后该槽位被复用，
@@ -1018,38 +858,28 @@ int kfork() {
 		// 会触发
 		// reacquire
 		// panic。
-		release(
-		    &new_ts
-		        ->lk);
-		free_task(
-		    new_ts);
+		release(&new_ts->lk);
+		free_task(new_ts);
 		return -1;
 	}
 
 	// 2. 映射用户栈
 	if ((vm_pagetbl_copy_asign(
-	        father_ts->pg, new_ts->pg,
-	        USER_STACK_BASE, USER_STACK_SIZE)) ==
+		father_ts->pg, new_ts->pg, USER_STACK_BASE, USER_STACK_SIZE)) ==
 	    -1) {
-		release(
-		    &new_ts
-		        ->lk);
-		free_task(
-		    new_ts);
+		release(&new_ts->lk);
+		free_task(new_ts);
 		return -1;
 	}
 
 	// 3.  映射堆内存
 	if ((vm_pagetbl_copy_asign(
-	        father_ts->pg, new_ts->pg,
-	        father_ts->heap_start,
-	        (father_ts->heap_history_max -
-	            father_ts->heap_start))) == -1) {
-		release(
-		    &new_ts
-		        ->lk);
-		free_task(
-		    new_ts);
+		father_ts->pg,
+		new_ts->pg,
+		father_ts->heap_start,
+		(father_ts->heap_history_max - father_ts->heap_start))) == -1) {
+		release(&new_ts->lk);
+		free_task(new_ts);
 		return -1;
 	}
 
@@ -1058,8 +888,7 @@ int kfork() {
 	new_ts->parent = father_ts;
 	new_ts->heap_start = father_ts->heap_start;
 	new_ts->heap_brk = father_ts->heap_brk;
-	new_ts->heap_history_max =
-	    father_ts->heap_history_max;
+	new_ts->heap_history_max = father_ts->heap_history_max;
 
 	// 4. 复制name和cwd
 	strcpy(new_ts->name, father_ts->name);
@@ -1082,9 +911,7 @@ int kfork() {
 	new_ts->cwd = father_ts->cwd;
 
 	if (new_ts->cwd) {
-		inode_get(
-		    new_ts
-		        ->cwd);
+		inode_get(new_ts->cwd);
 	}
 
 	// 5. 设置子进程的trapframe
@@ -1100,23 +927,13 @@ int kfork() {
 	//    避免与对方的 fork/close 竞争。
 
 	for (int i = 0; i < NOFILE; i++) {
-		struct file *f =
-		    father_ts
-		        ->ofile
-		            [i];
+		struct file* f = father_ts->ofile[i];
 
 		if (f) {
-			file_get(
-			    f);
-			new_ts
-			    ->ofile
-			        [i] =
-			    f;
+			file_get(f);
+			new_ts->ofile[i] = f;
 		} else {
-			new_ts
-			    ->ofile
-			        [i] =
-			    NULL;
+			new_ts->ofile[i] = NULL;
 		}
 	}
 
@@ -1129,12 +946,13 @@ int kfork() {
 	return new_ts->pid;
 }
 
-int kexec(char *path, char **argv) {
+int kexec(char* path, char** argv)
+{
 	struct elf64_ehdr ehdr;
 	struct elf64_phdr phdr;
 
 	// 获取当前task
-	struct task_struct *t = get_task();
+	struct task_struct* t = get_task();
 
 	page_table new_page = 0, old_page = t->pg;
 	uint64_t user_argv_ptr[MAX_ARG_NUM];
@@ -1143,9 +961,8 @@ int kexec(char *path, char **argv) {
 	// 因此提到最前面声明，保证任何 goto out
 	// 都可见。
 	uint64_t old_size = t->size, new_size = 0,
-	         old_heap_start = t->heap_start,
-	         old_heap_history_max =
-	             t->heap_history_max;
+		 old_heap_start = t->heap_start,
+		 old_heap_history_max = t->heap_history_max;
 
 	// ret 默认
 	// -1（失败）；仅在真正提交（替换页表）时改写为
@@ -1153,8 +970,8 @@ int kexec(char *path, char **argv) {
 	// 里据此安全释放。
 	int ret = -1;
 	int fd = -1;
-	char *buf = NULL;
-	struct file *ef = NULL;
+	char* buf = NULL;
+	struct file* ef = NULL;
 
 	fd = vfs_open(path, O_RDONLY);
 	if (fd == -1) {
@@ -1174,10 +991,9 @@ int kexec(char *path, char **argv) {
 		// OOM
 		// 属于不可恢复错误，保留
 		// panic
-		panic(
-		    PANIC_ERROR,
-		    "kexec: "
-		    "oom!\n");
+		panic(PANIC_ERROR,
+		      "kexec: "
+		      "oom!\n");
 	}
 
 	// 先读取64字节
@@ -1194,14 +1010,13 @@ int kexec(char *path, char **argv) {
 		// 这里必须优雅失败（返回
 		// -1），调用者才能继续尝试下一个候选，
 		// 否则一个坏文件就能把整个内核带崩。
-		printk(
-		    "kexec: %s "
-		    "not a "
-		    "valid elf "
-		    "(err "
-		    "%d)\n",
-		    path,
-		    errcod);
+		printk("kexec: %s "
+		       "not a "
+		       "valid elf "
+		       "(err "
+		       "%d)\n",
+		       path,
+		       errcod);
 		goto out;
 	}
 
@@ -1230,34 +1045,22 @@ int kexec(char *path, char **argv) {
 		// read_phdr
 		// 的返回值，段表读失败会带着脏
 		// phdr 继续跑
-		if (read_phdr(
-		        ef,
-		        ehdr.e_phoff +
-		            i * ehdr.e_phentsize,
-		        &phdr) <
+		if (read_phdr(ef, ehdr.e_phoff + i * ehdr.e_phentsize, &phdr) <
 		    0) {
 			goto out;
 		}
-		if (phdr.p_type ==
-		    PT_LOAD) {
+		if (phdr.p_type == PT_LOAD) {
 			// 加载这个段
 			// 同时记录大小
-			seg_size_tmp = load_segment(
-			    ef,
-			    new_page,
-			    &phdr);
-			if (seg_size_tmp <
-			    0) {
+			seg_size_tmp = load_segment(ef, new_page, &phdr);
+			if (seg_size_tmp < 0) {
 				goto out;
 			}
 
-			uint64_t seg_end = PGROUNDUP(
-			    phdr.p_vaddr +
-			    phdr.p_memsz);
-			if (seg_end >
-			    new_size) {
-				new_size =
-				    seg_end;
+			uint64_t seg_end =
+			    PGROUNDUP(phdr.p_vaddr + phdr.p_memsz);
+			if (seg_end > new_size) {
+				new_size = seg_end;
 			}
 		}
 	}
@@ -1273,20 +1076,14 @@ int kexec(char *path, char **argv) {
 	// 映射参数
 	int argc = 0;
 	while (argv[argc]) {
-		if (argc >=
-		    MAX_ARG_NUM) {
+		if (argc >= MAX_ARG_NUM) {
 			goto out;
 		}
 
-		new_sp -=
-		    strlen(
-		        argv[argc]) +
-		    1;
-		new_sp -=
-		    new_sp % 16;
+		new_sp -= strlen(argv[argc]) + 1;
+		new_sp -= new_sp % 16;
 
-		if (new_sp <
-		    USER_STACK_BASE) {
+		if (new_sp < USER_STACK_BASE) {
 			// VERY FUCKING BAD!
 			// BUT ALMOST NEVER HAPPENS.
 			goto out;
@@ -1294,19 +1091,12 @@ int kexec(char *path, char **argv) {
 
 		// 将当前数据拷贝出去
 		if (copyout(
-		        new_page,
-		        new_sp,
-		        argv[argc],
-		        strlen(
-		            argv[argc]) +
-		            1) <
+			new_page, new_sp, argv[argc], strlen(argv[argc]) + 1) <
 		    0) {
 			goto out;
 		}
 
-		user_argv_ptr
-		    [argc] =
-		        new_sp;
+		user_argv_ptr[argc] = new_sp;
 		argc++;
 	}
 	user_argv_ptr[argc] = 0;
@@ -1316,9 +1106,10 @@ int kexec(char *path, char **argv) {
 	if (new_sp < USER_STACK_BASE) {
 		goto out;
 	}
-	if (copyout(
-	        new_page, new_sp, (char *)user_argv_ptr,
-	        (argc + 1) * sizeof(uint64_t)) < 0) {
+	if (copyout(new_page,
+		    new_sp,
+		    (char*)user_argv_ptr,
+		    (argc + 1) * sizeof(uint64_t)) < 0) {
 		goto out;
 	}
 
@@ -1327,13 +1118,10 @@ int kexec(char *path, char **argv) {
 	char *last, *s;
 	for (last = s = path; *s; s++) {
 		if (*s == '/') {
-			last =
-			    s +
-			    1;
+			last = s + 1;
 		}
 	}
-	strcpy_with_terminate(t->name, last,
-	    sizeof(t->name));
+	strcpy_with_terminate(t->name, last, sizeof(t->name));
 
 	// 只有走到这里，用户可见状态才被替换。
 	// 在此之前的任何失败都不会破坏当前进程（页表尚未切换）。
@@ -1341,7 +1129,7 @@ int kexec(char *path, char **argv) {
 	t->size = new_size;
 	t->utf->sp = new_sp;
 	t->utf->a0 = argc; // crt0 的 _start 直接 call
-		   // main，main 从 a0 读 argc
+			   // main，main 从 a0 读 argc
 	t->utf->sepc = ehdr.e_entry;
 
 	t->heap_start = PGROUNDUP(new_size);
@@ -1354,8 +1142,7 @@ int kexec(char *path, char **argv) {
 
 	free_task_pgtable(old_page, old_size);
 
-	do_free_task_heap(old_page, old_heap_start,
-	    old_heap_history_max);
+	do_free_task_heap(old_page, old_heap_start, old_heap_history_max);
 
 	ret = argc;
 out:
@@ -1375,26 +1162,23 @@ out:
 		fd_close(fd);
 	}
 	if (new_page) {
-		free_task_pgtable(
-		    new_page,
-		    new_size);
+		free_task_pgtable(new_page, new_size);
 	}
 	return ret;
 }
 
 // 加载
-static int load_segment(struct file *f, page_table pg, struct elf64_phdr *ph) {
+static int load_segment(struct file* f, page_table pg, struct elf64_phdr* ph)
+{
 	// 无聊的检查..
 	if (ph == NULL) {
 		return -1;
 	}
 
-	char *pa;
+	char* pa;
 
-	uint64_t start =
-	    PGROUNDDOWN(ph->p_vaddr); // 段起始页
-	uint64_t end = PGROUNDUP(
-	    ph->p_vaddr + ph->p_memsz); // 段结束页
+	uint64_t start = PGROUNDDOWN(ph->p_vaddr);	     // 段起始页
+	uint64_t end = PGROUNDUP(ph->p_vaddr + ph->p_memsz); // 段结束页
 
 	// BSS 边界：p_memsz > p_filesz 时，超出 filesz
 	// 的部分是 BSS（零填充、可写）。 链接器可能把
@@ -1405,63 +1189,36 @@ static int load_segment(struct file *f, page_table pg, struct elf64_phdr *ph) {
 	// 从该页起（含）需要加 PTE_W——因为该页内
 	// file_end 之后就是 BSS。
 	uint64_t file_end = ph->p_vaddr + ph->p_filesz;
-	uint64_t bss_page_start =
-	    PGROUNDDOWN(file_end); // 第一个含 BSS 的页
+	uint64_t bss_page_start = PGROUNDDOWN(file_end); // 第一个含 BSS 的页
 
 	int seg_size = 0;
-	for (uint64_t va = start; va < end;
-	    va += PG_4K_SIZE) {
+	for (uint64_t va = start; va < end; va += PG_4K_SIZE) {
 		// 分配一个物理页
 		pa = kalloc();
-		if (pa ==
-		    NULL) {
+		if (pa == NULL) {
 			return -2;
 		}
-		memset(
-		    pa, 0,
-		    PG_4K_SIZE); // 清零
+		memset(pa, 0,
+		       PG_4K_SIZE); // 清零
 
 		// 计算这个页内哪些部分需要从文件读
-		uint64_t page_start =
-		    MAX(va,
-		        ph->p_vaddr);
-		uint64_t page_end =
-		    MIN(va +
-		            PG_4K_SIZE,
-		        file_end);
+		uint64_t page_start = MAX(va, ph->p_vaddr);
+		uint64_t page_end = MIN(va + PG_4K_SIZE, file_end);
 
-		if (page_start <
-		    page_end) {
+		if (page_start < page_end) {
 			// 这个页内有文件数据
 			uint64_t file_off =
-			    ph->p_offset +
-			    (page_start -
-			        ph->p_vaddr);
-			uint64_t len =
-			    page_end -
-			    page_start;
-			uint64_t pa_off =
-			    page_start -
-			    va;
+			    ph->p_offset + (page_start - ph->p_vaddr);
+			uint64_t len = page_end - page_start;
+			uint64_t pa_off = page_start - va;
 
-			if (vfs_seek(
-			        f,
-			        file_off,
-			        SEEK_SET) <
-			    0) {
-				free_page(
-				    pa);
+			if (vfs_seek(f, file_off, SEEK_SET) < 0) {
+				free_page(pa);
 				return -1;
 			}
 
-			if (vfs_read(
-			        f,
-			        pa +
-			            pa_off,
-			        len) !=
-			    len) {
-				free_page(
-				    pa);
+			if (vfs_read(f, pa + pa_off, len) != len) {
+				free_page(pa);
 				return -1;
 			}
 		}
@@ -1472,39 +1229,27 @@ static int load_segment(struct file *f, page_table pg, struct elf64_phdr *ph) {
 		// bss_page_start）必须可写
 		// -
 		// 纯文件数据页用段原始权限
-		int pte_flags =
-		    flags_to_pte(
-		        ph->p_flags);
-		if (ph->p_memsz >
-		        ph->p_filesz &&
-		    va >=
-		        bss_page_start) {
-			pte_flags |=
-			    PTE_W;
+		int pte_flags = flags_to_pte(ph->p_flags);
+		if (ph->p_memsz > ph->p_filesz && va >= bss_page_start) {
+			pte_flags |= PTE_W;
 		}
 
-		mappages(
-		    pg, va,
-		    PG_4K_SIZE,
-		    (uint64_t)
-		        pa,
-		    pte_flags);
-		seg_size +=
-		    PG_4K_SIZE;
+		mappages(pg, va, PG_4K_SIZE, (uint64_t)pa, pte_flags);
+		seg_size += PG_4K_SIZE;
 	}
 	return seg_size;
 }
 
 // 从文件偏移 off 处读取一个 Program Header
 // 成功返回 0，失败返回 -1
-static int read_phdr(struct file *f, uint64_t off, struct elf64_phdr *ph) {
+static int read_phdr(struct file* f, uint64_t off, struct elf64_phdr* ph)
+{
 	// 跳到指定偏移
 	if (vfs_seek(f, off, SEEK_SET) < 0)
 		return -1;
 
 	// 读一个 Program Header（56 字节）
-	if (vfs_read(f, ph,
-	        sizeof(struct elf64_phdr)) !=
+	if (vfs_read(f, ph, sizeof(struct elf64_phdr)) !=
 	    sizeof(struct elf64_phdr))
 		return -1;
 
@@ -1514,7 +1259,8 @@ static int read_phdr(struct file *f, uint64_t off, struct elf64_phdr *ph) {
 /// @brief 检查elf头
 /// @param ehdr
 /// @return
-static int check_elf_header(struct elf64_ehdr *ehdr) {
+static int check_elf_header(struct elf64_ehdr* ehdr)
+{
 	int magic = ELF_MAGIC;
 	if (memcmp(ehdr, &magic, 4) != 0) {
 		return -1;
@@ -1531,20 +1277,17 @@ static int check_elf_header(struct elf64_ehdr *ehdr) {
 	}
 
 	// 检查端序
-	if (ehdr->e_ident[EI_DATA_OFFSET] !=
-	    EI_DATA_VAL) {
+	if (ehdr->e_ident[EI_DATA_OFFSET] != EI_DATA_VAL) {
 		return -3;
 	}
 
 	// 检查class
-	if (ehdr->e_ident[EI_CLASS_OFFSET] !=
-	    EI_CLASS_VAL) {
+	if (ehdr->e_ident[EI_CLASS_OFFSET] != EI_CLASS_VAL) {
 		return -2;
 	}
 
 	// 检查版本
-	if (ehdr->e_ident[EI_VERSION_OFFSET] !=
-	    EI_VERSION_VAL) {
+	if (ehdr->e_ident[EI_VERSION_OFFSET] != EI_VERSION_VAL) {
 		return -4;
 	}
 
@@ -1570,7 +1313,8 @@ static int check_elf_header(struct elf64_ehdr *ehdr) {
 	return 0;
 }
 
-static int flags_to_pte(uint32_t p_flags) {
+static int flags_to_pte(uint32_t p_flags)
+{
 	int perm = PTE_U; // 用户态可访问
 
 	if (p_flags & 1) // PF_X：可执行
@@ -1583,22 +1327,21 @@ static int flags_to_pte(uint32_t p_flags) {
 	return perm;
 }
 
-static void _map_user_stack(page_table pg) {
-	for (uint64_t i = USER_STACK_BASE;
-	    i < USER_STACK_TOP; i += PG_4K_SIZE) {
-		mappages(
-		    pg, i,
-		    PG_4K_SIZE,
-		    (uint64_t)
-		        kalloc(),
-		    PTE_R |
-		        PTE_W |
-		        PTE_U);
+static void _map_user_stack(page_table pg)
+{
+	for (uint64_t i = USER_STACK_BASE; i < USER_STACK_TOP;
+	     i += PG_4K_SIZE) {
+		mappages(pg,
+			 i,
+			 PG_4K_SIZE,
+			 (uint64_t)kalloc(),
+			 PTE_R | PTE_W | PTE_U);
 	}
 	uint64_t new_sp = USER_STACK_TOP;
 }
 
-void to_kill(struct task_struct *t) {
+void to_kill(struct task_struct* t)
+{
 	acquire(&t->lk);
 	t->dead = 1;
 	release(&t->lk);
@@ -1613,8 +1356,9 @@ void to_kill(struct task_struct *t) {
 /// 返回后：调用方持有 lock 和 t->lk，继续在 lock 内检查条件。
 /// @param chan 睡眠通道，wakeup 用同样的 chan 唤醒。
 /// @param lock 保护调用方条件的锁。调用时已持有，返回时已重获。
-void sleep_locked(void *chan, spinlock_t *lock) {
-	struct task_struct *t = get_task();
+void sleep_locked(void* chan, spinlock_t* lock)
+{
+	struct task_struct* t = get_task();
 
 	// 调用方已经持有 t->lk
 	t->sleep_chan = chan;
@@ -1636,22 +1380,22 @@ void sleep_locked(void *chan, spinlock_t *lock) {
 ///        只在进程上下文调用，调用时当前进程一定持有自己的 t->lk，
 ///        因此遍历到自己时跳过，避免自死锁。
 /// @param chan 睡眠通道。
-void _wakeup(void *chan)
+void _wakeup(void* chan)
 {
-    struct task_struct *self = get_task();
-    struct task_struct *t;
+	struct task_struct* self = get_task();
+	struct task_struct* t;
 
-    for (t = tasks; t < &tasks[NTASKS]; t++) {
-        if (t == self)
-            continue;
+	for (t = tasks; t < &tasks[NTASKS]; t++) {
+		if (t == self)
+			continue;
 
-        acquire(&t->lk);
+		acquire(&t->lk);
 
-        if (t->state == SLEEP && t->sleep_chan == chan) {
-            t->state      = RUNNABLE;
-            t->sleep_chan = NULL;
-        }
+		if (t->state == SLEEP && t->sleep_chan == chan) {
+			t->state = RUNNABLE;
+			t->sleep_chan = NULL;
+		}
 
-        release(&t->lk);
-    }
+		release(&t->lk);
+	}
 }
