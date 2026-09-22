@@ -12,7 +12,7 @@
 	gpu_tty 终端设备驱动
 		实现了 gpu tty 的基本功能，包括字符绘制、光标移动、换行等。
 		注意: 这玩意是一套驱动的集合体，如终端输出是用 kgfx->virtio_gpu
-驱动 而读取输入，会通过键盘驱动来实现
+驱动 驱动 而读取输入，会通过键盘驱动来实现
 		     同时这个终端设备也需要视觉反馈，并非像以前的uart tty
 那样直接输出到宿主机终端 这也为未来脱离宿主机，真正的运行在物理机上提供了可能！
 **/
@@ -23,17 +23,15 @@ static void gpu_tty_erase_cursor(struct gpu_tty_state* st);
 static void gpu_tty_draw_cursor(struct gpu_tty_state* st);
 
 /*
- * 光标擦/画只写后端 fb 并标脏，不主动刷屏。
- * 真正的 GPU 传输统一由 gpu_tty_flush 完成：
- * 一次批量输出只产生一次 TRANSFER_TO_HOST_2D + RESOURCE_FLUSH，
- * 避免 QEMU 端每个字符都做一次窗口重绘（这是之前卡顿的根源）。
+ * 光标擦/画用 nodirty 路径：putc 末尾一次性 mark_dirty，
+ * 3 次锁→1 次，热路径锁开销降 2/3。
  */
 static void gpu_tty_draw_cursor(struct gpu_tty_state* st)
 {
 	if (st->cursor_drawn)
 		return;
 
-	kgfx_fill_rect(
+	kgfx_fill_rect_nodirty(
 	    st->gpu, st->cur_x, st->cur_y + 14, ASCII8X16_W, 2, 0xFFFFFFFF);
 	st->cursor_drawn = 1;
 }
@@ -43,7 +41,7 @@ static void gpu_tty_erase_cursor(struct gpu_tty_state* st)
 	if (!st->cursor_drawn)
 		return;
 
-	kgfx_fill_rect(
+	kgfx_fill_rect_nodirty(
 	    st->gpu, st->cur_x, st->cur_y + 14, ASCII8X16_W, 2, st->bg);
 	st->cursor_drawn = 0;
 }
@@ -72,6 +70,7 @@ static int gpu_tty_putc(struct tty* tty, char c)
 	struct gpu_tty_state* st = tty->priv;
 	struct virtio_gpu_device* gpu = st->gpu;
 
+	/* 先擦光标（nodirty） */
 	gpu_tty_erase_cursor(st);
 
 	if (c == '\r') {
@@ -85,12 +84,18 @@ static int gpu_tty_putc(struct tty* tty, char c)
 		if (st->cur_x + ASCII8X16_W > gpu->width)
 			gpu_tty_advance_line(st);
 
-		kgfx_draw_char(gpu, c, st->cur_x, st->cur_y, st->fg, st->bg);
+		/* nodirty 画字符 */
+		kgfx_draw_char_nodirty(
+		    gpu, c, st->cur_x, st->cur_y, st->fg, st->bg);
 		st->cur_x += ASCII8X16_W;
 	}
 
+	/* 画光标（nodirty） */
 	if (st->cursor_visible)
 		gpu_tty_draw_cursor(st);
+
+	/* 一次性标脏整个字符区域（含光标行） */
+	kgfx_mark_dirty_screen(st->cur_x, st->cur_y, ASCII8X16_W, ASCII8X16_H);
 
 	return 0;
 }
@@ -136,8 +141,6 @@ static const struct tty_ops gpu_tty_ops = {
 static struct tty gpu0_tty;
 static struct gpu_tty_state gpu0_tty_state;
 
-#define BLINK_INTERVAL 50 /* 100Hz × 50 = 500ms */
-
 void gpu_tty_tick()
 {
 	struct tty* tty = &gpu0_tty;
@@ -150,10 +153,13 @@ void gpu_tty_tick()
 	st->blink_counter = 0;
 	st->cursor_visible = !st->cursor_visible;
 
+	/* nodirty 擦/画 + 一次 mark_dirty：只标 8x2 条带 */
 	if (st->cursor_visible)
 		gpu_tty_draw_cursor(st);
 	else
 		gpu_tty_erase_cursor(st);
+
+	kgfx_mark_dirty_screen(st->cur_x, st->cur_y + 14, ASCII8X16_W, 2);
 }
 
 void init_gpu_tty()

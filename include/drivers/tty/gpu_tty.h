@@ -3,7 +3,7 @@
 #include <type.h>
 #include <tty.h>
 #include <virtio_gpu.h>
-#define BLINK_INTERVAL 50   
+#define BLINK_INTERVAL 100 
 
 // 当前tty相关信息
 struct gpu_tty_state {
