@@ -11,7 +11,7 @@ static struct virtio_input_device root_keyboard_device = {0};
 static int keyboard_device_count = 0;
 /* 保护字符环形缓冲（head/tail/buf），供多核并发读写 */
 static spinlock_t kb_buf_lk = {0};
-
+static int pushback = -1;
 static struct virtio_input_device* keyboard_get_last(void);
 static int virtio_keyboard_init(struct virtio_input_device* kb);
 static void virtio_keyboard_handshake(uintptr_t base);
@@ -324,21 +324,62 @@ int keyboard_has_input(void)
 	return has;
 }
 
+static void buf_push_n(struct virtio_input_device* kb, const char* s, int n)
+{
+	acquire(&kb_buf_lk);
+	for (int i = 0; i < n; i++) {
+		if (buf_full(kb))
+			break;
+		kb->buf[kb->tail] = s[i];
+		kb->tail = (kb->tail + 1) % INPUT_CHAR_BUF_SIZE;
+	}
+	release(&kb_buf_lk);
+}
+
 static void
 handle_key(struct virtio_input_device* kb, uint16_t code, uint32_t value)
 {
-	if (code == KEY_LEFTSHIFT) {
+	if (code == KEY_LEFTSHIFT || code == KEY_RIGHTSHIFT) {
 		kb->shift = (value == 1);
+		return;
+	}
+
+	if (code == KEY_LEFTCTRL || code == KEY_RIGHTCTRL) {
+		kb->ctrl = (value == 1);
 		return;
 	}
 
 	if (value != 1)
 		return;
 
+	// 方向键
+	switch (code) {
+	case KEY_UP:
+		buf_push_n(kb, "\033[A", 3);
+		return;
+	case KEY_DOWN:
+		buf_push_n(kb, "\033[B", 3);
+		return;
+	case KEY_LEFT:
+		buf_push_n(kb, "\033[D", 3);
+		return;
+	case KEY_RIGHT:
+		buf_push_n(kb, "\033[C", 3);
+		return;
+	}
+
 	if (code >= 128)
 		return;
 
+	/*
+	 * Ctrl 组合键：Ctrl + 字母 → 0x01..0x1A（Ctrl+A=1 ... Ctrl+Z=26）。
+	 * 用 keymap_lo 取小写字母再减 'a'+1。非字母键忽略 Ctrl。
+	 */
 	char c = kb->shift ? keymap_hi[code] : keymap_lo[code];
+	if (kb->ctrl && c >= 'a' && c <= 'z') {
+		buf_push(kb, c - 'a' + 1);
+		return;
+	}
 	if (c)
 		buf_push(kb, c);
 }

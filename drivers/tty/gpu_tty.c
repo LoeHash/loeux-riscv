@@ -21,6 +21,126 @@ static void gpu_tty_advance_line(struct gpu_tty_state* st);
 static void gpu_tty_test(void);
 static void gpu_tty_erase_cursor(struct gpu_tty_state* st);
 static void gpu_tty_draw_cursor(struct gpu_tty_state* st);
+static void parse_two(const char* s, int* a, int* b, int da, int db);
+static void
+gpu_tty_handle_csi(struct gpu_tty_state* st, char final, const char* args);
+
+static void parse_two(const char* s, int* a, int* b, int da, int db)
+{
+	int v = 0, first = 1, has = 0;
+	*a = da;
+	*b = db;
+	for (; *s; s++) {
+		if (*s >= '0' && *s <= '9') {
+			v = v * 10 + (*s - '0');
+			has = 1;
+		} else if (*s == ';') {
+			if (first) {
+				*a = has ? v : da;
+				first = 0;
+			}
+			v = 0;
+			has = 0;
+		}
+	}
+	if (first) {
+		if (has)
+			*a = v;
+	} else {
+		if (has)
+			*b = v;
+	}
+}
+
+static void
+gpu_tty_handle_csi(struct gpu_tty_state* st, char final, const char* args)
+{
+	struct virtio_gpu_device* gpu = st->gpu;
+
+	switch (final) {
+	case 'J': {
+		int mode = 0;
+		if (args[0] >= '0' && args[0] <= '9')
+			mode = args[0] - '0';
+		if (mode == 2) {
+			/* 全屏清成背景色，光标归零 */
+			kgfx_fill_rect_nodirty(
+			    gpu, 0, 0, gpu->width, gpu->height, st->bg);
+			st->cur_x = 0;
+			st->cur_y = 0;
+			st->cursor_drawn = 0;
+			kgfx_mark_dirty_screen(0, 0, gpu->width, gpu->height);
+			if (st->cursor_visible)
+				gpu_tty_draw_cursor(st);
+		}
+		break;
+	}
+	case 'H':
+	case 'f': {
+		int row = 1, col = 1;
+		parse_two(args, &row, &col, 1, 1);
+		if (row < 1)
+			row = 1;
+		if (col < 1)
+			col = 1;
+		uint32_t nx = (uint32_t)(col - 1) * ASCII8X16_W;
+		uint32_t ny = (uint32_t)(row - 1) * ASCII8X16_H;
+		if (nx + ASCII8X16_W > gpu->width)
+			nx = gpu->width - ASCII8X16_W;
+		if (ny + ASCII8X16_H > gpu->height)
+			ny = gpu->height - ASCII8X16_H;
+		gpu_tty_erase_cursor(st);
+		st->cur_x = nx;
+		st->cur_y = ny;
+		if (st->cursor_visible)
+			gpu_tty_draw_cursor(st);
+		kgfx_mark_dirty_screen(nx, ny, ASCII8X16_W, ASCII8X16_H);
+		break;
+	}
+	case 'K': {
+		int mode = 0;
+		if (args[0] >= '0' && args[0] <= '9')
+			mode = args[0] - '0';
+		uint32_t x0 = st->cur_x;
+		uint32_t x1 = gpu->width;
+		if (mode == 1) {
+			x0 = 0;
+			x1 = st->cur_x + ASCII8X16_W;
+		} else if (mode == 2) {
+			x0 = 0;
+			x1 = gpu->width;
+		}
+		if (x1 > x0) {
+			gpu_tty_erase_cursor(st);
+			kgfx_fill_rect_nodirty(
+			    gpu, x0, st->cur_y, x1 - x0, ASCII8X16_H, st->bg);
+			kgfx_mark_dirty_screen(
+			    x0, st->cur_y, x1 - x0, ASCII8X16_H);
+			if (st->cursor_visible)
+				gpu_tty_draw_cursor(st);
+		}
+		break;
+	}
+	case 'l':
+	case 'h': {
+		/* \033[?25l / \033[?25h */
+		if (args[0] == '?' && args[1] == '2' && args[2] == '5') {
+			if (final == 'l') {
+				gpu_tty_erase_cursor(st);
+				st->cursor_visible = 0;
+			} else {
+				st->cursor_visible = 1;
+				gpu_tty_draw_cursor(st);
+			}
+			kgfx_mark_dirty_screen(
+			    st->cur_x, st->cur_y + 14, ASCII8X16_W, 2);
+		}
+		break;
+	}
+	default:
+		break;
+	}
+}
 
 /*
  * 光标擦/画用 nodirty 路径：putc 末尾一次性 mark_dirty，
@@ -70,10 +190,33 @@ static int gpu_tty_putc(struct tty* tty, char c)
 	struct gpu_tty_state* st = tty->priv;
 	struct virtio_gpu_device* gpu = st->gpu;
 
-	/* 先擦光标（nodirty）——光标擦除也需要后续标脏 */
-	gpu_tty_erase_cursor(st);
+	if (st->esc_state) {
+		if (st->esc_state == 1) {
+			if (c == '[') {
+				st->esc_state = 2;
+				st->esc_len = 0;
+				return 0;
+			}
+			st->esc_state = 0;
+		} else {
+			if ((c >= '0' && c <= '9') || c == ';' || c == '?') {
+				if (st->esc_len < 15)
+					st->esc_buf[st->esc_len++] = c;
+				return 0;
+			}
+			st->esc_buf[st->esc_len] = '\0';
+			gpu_tty_handle_csi(st, c, st->esc_buf);
+			st->esc_state = 0;
+			return 0;
+		}
+	}
+	if (c == '\033') {
+		st->esc_state = 1;
+		return 0;
+	}
+	/* ---- 原有逻辑 ---- */
 
-	/* 保存擦光标前的位置，用于后续标脏覆盖字符区域 + 光标区域 */
+	gpu_tty_erase_cursor(st);
 	uint32_t draw_x = st->cur_x;
 	uint32_t draw_y = st->cur_y;
 
@@ -87,8 +230,6 @@ static int gpu_tty_putc(struct tty* tty, char c)
 	} else {
 		if (st->cur_x + ASCII8X16_W > gpu->width)
 			gpu_tty_advance_line(st);
-
-		/* nodirty 画字符 */
 		kgfx_draw_char_nodirty(
 		    gpu, c, st->cur_x, st->cur_y, st->fg, st->bg);
 		st->cur_x += ASCII8X16_W;
@@ -104,12 +245,6 @@ static int gpu_tty_putc(struct tty* tty, char c)
 		st->cursor_drawn = 1;
 	}
 
-	/*
-	 * 标脏：覆盖【擦光标前的位置】到【画光标后的位置】的整个区域。
-	 * 不能用 st->cur_x 直接标脏——画字符后 cur_x 已 +8 前移到下一个
-	 * 位置，如果直接用新 cur_x 标脏就漏标了刚画的字符区域，导致
-	 * 字符不回显、只有光标闪烁。这是一个位置错位 bug。
-	 */
 	uint32_t x0 = draw_x;
 	uint32_t x1 = st->cur_x + ASCII8X16_W;
 	uint32_t y0 = draw_y;
@@ -192,6 +327,8 @@ void init_gpu_tty()
 	gpu0_tty_state.cursor_visible = 1;
 	gpu0_tty_state.cursor_drawn = 0;
 	gpu0_tty_state.blink_counter = 0;
+	gpu0_tty_state.esc_state = 0;
+	gpu0_tty_state.esc_len = 0;
 
 	/* 注册给 kgfx，之后屏幕刷新由 100Hz 时钟节拍统一合并驱动 */
 	kgfx_attach(gpu0_tty_state.gpu);

@@ -27,7 +27,6 @@ IMAGE := ../loeux.img
 MOUNT_POINT := /media/loe
 
 # 用户库
-# ============================================================
 
 LIB_SRCS ?= ulib.c stdio.c malloc.c
 LIB_OBJS := $(LIB_SRCS:.c=.o)

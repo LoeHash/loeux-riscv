@@ -135,6 +135,23 @@ tty_cdev_read(void* priv, void* buf, uint64_t count, uint64_t* out_len)
 	char* p = (char*)buf;
 	uint64_t i = 0;
 
+	/*
+	 * 原始模式：count==1 时直接返回单个原始字符，不经过行规则
+	 * （不回显、不缓冲行、不等回车）。供 vim 等全屏编辑器使用——
+	 * 编辑器需要逐字符读入方向键/Ctrl 组合键，并自行控制回显。
+	 * 普通 shell 用大缓冲区 read 仍走行模式，互不干扰。
+	 */
+	if (count == 1) {
+		char c;
+		if (tty->ops->getc(tty, &c) < 0) {
+			*out_len = 0;
+			return -1;
+		}
+		p[0] = c;
+		*out_len = 1;
+		return 0;
+	}
+
 	while (i < count) {
 		/* 如果行已就绪，直接取走 */
 		acquire(&tty->read_lock);
