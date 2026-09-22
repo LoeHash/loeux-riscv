@@ -113,22 +113,19 @@ void kgfx_scroll_up(struct virtio_gpu_device* gpu, uint32_t line_h, uint32_t bg)
 	 * 全部内存改动 + pan 更新 + 标脏都在 dirty_lock 内完成，
 	 * 避免定时器中断在"已标脏但像素还没写完"的窗口里把半帧刷走。
 	 * 持锁会关本核中断：常规帧只填 20KB 条带；回绕帧一次 4MB
-	 * memmove（每 H/line_h 行才一次），可接受。
 	 */
 	acquire(&dirty_lock);
 
 	if (pan_y + H + line_h > FBH) {
 		/*
-		 * 窗口已到底（pan_y==H），无法再下移：
+		 * 窗口已到底（pan_y==H）
 		 * 把当前窗口 [H,2H) 的内容整块搬到 [0,H)，窗口归零，
 		 * 然后整屏重传一次。每滚 H/line_h 行才发生一次。
 		 */
 		memmove(fb, fb + screen_px, screen_px * sizeof(uint32_t));
 		pan_y = 0;
 	} else {
-		/*
-		 * 常规 panning：窗口下移一行，旧像素零搬运。
-		 */
+		// 旧像素零搬运。
 		pan_y += line_h;
 	}
 
@@ -148,7 +145,6 @@ void kgfx_scroll_up(struct virtio_gpu_device* gpu, uint32_t line_h, uint32_t bg)
 	 * 回绕帧：memmove 后旧坐标内容已失效，且旧脏区（擦光标等）
 	 * 落在 backing 高位、不在新窗口内——脏区直接重置为单屏，
 	 * 不能 union，否则会 union 出覆盖整块 2H backing 的脏矩形，
-	 * 平白多传 4MB。常规帧只脏新露出的底部条带。
 	 */
 	if (pan_y == 0) {
 		dirty_valid = 1;
@@ -198,8 +194,8 @@ void kgfx_fill_rect_nodirty(struct virtio_gpu_device* gpu,
 	uint64_t pair = (uint64_t)color | ((uint64_t)color << 32);
 
 	for (uint32_t row = y; row < y1; row++) {
-		uint32_t* line = (uint32_t*)gpu->fb +
-				 (uint64_t)(row + pan) * gpu->width + x;
+		uint32_t* line =
+		    (uint32_t*)gpu->fb + (uint64_t)(row + pan) * gpu->width + x;
 		uint64_t* p64 = (uint64_t*)line;
 		for (uint32_t i = 0; i < pairs; i++)
 			p64[i] = pair;
@@ -235,9 +231,8 @@ static void draw_char_raw(struct virtio_gpu_device* gpu,
 		uint64_t* line64 =
 		    (uint64_t*)(fb + (uint64_t)(sy + pan) * W + x);
 
-		/* 8 像素 = 4 个 uint64（每 2 像素一次） */
 		for (int i = 0; i < 4; i++) {
-			uint8_t b = bits >> (6 - i * 2);
+			uint8_t b = bits << (i * 2);
 			uint64_t p = (b & 0x80) ? fg : bg;
 			p |= (uint64_t)((b & 0x40) ? fg : bg) << 32;
 			line64[i] = p;
@@ -246,11 +241,11 @@ static void draw_char_raw(struct virtio_gpu_device* gpu,
 }
 
 void kgfx_draw_char_nodirty(struct virtio_gpu_device* gpu,
-			   char c,
-			   uint32_t x,
-			   uint32_t y,
-			   uint32_t fg,
-			   uint32_t bg)
+			    char c,
+			    uint32_t x,
+			    uint32_t y,
+			    uint32_t fg,
+			    uint32_t bg)
 {
 	if (gpu == NULL || gpu->fb == NULL)
 		return;
@@ -341,8 +336,7 @@ void kgfx_draw_string(struct virtio_gpu_device* gpu,
 	}
 
 	if (x > start_x)
-		kgfx_mark_dirty_screen(start_x, y, x - start_x,
-				       ASCII8X16_H);
+		kgfx_mark_dirty_screen(start_x, y, x - start_x, ASCII8X16_H);
 }
 
 /*
@@ -392,7 +386,6 @@ void kgfx_flush_now(void)
 	if (!kgfx_take_frame(&x0, &y0, &x1, &y1, &rescan, &sy))
 		return;
 
-	/* 锁外发命令：慢操作，不占 dirty_lock */
 	virtio_gpu_present(gpu, x0, y0, x1 - x0, y1 - y0, rescan, sy);
 	last_flush_tick = get_sys_timer_tick();
 }
@@ -470,8 +463,7 @@ void kgfx_draw_line(struct virtio_gpu_device* gpu,
 	int32_t maxy = max(y0, y1);
 
 	while (1) {
-		if (x0 >= 0 && x0 < (int32_t)W &&
-		    y0 >= 0 && y0 < (int32_t)H) {
+		if (x0 >= 0 && x0 < (int32_t)W && y0 >= 0 && y0 < (int32_t)H) {
 			fb[(uint64_t)(y0 + pan) * W + x0] = color;
 		}
 
@@ -490,8 +482,7 @@ void kgfx_draw_line(struct virtio_gpu_device* gpu,
 	}
 
 	// 标脏：线的包围盒（resource 绝对坐标）
-	if (maxx >= 0 && minx < (int32_t)W &&
-	    maxy >= 0 && miny < (int32_t)H) {
+	if (maxx >= 0 && minx < (int32_t)W && maxy >= 0 && miny < (int32_t)H) {
 		uint32_t cx0 = max(minx, 0);
 		uint32_t cy0 = max(miny, 0) + pan;
 		uint32_t cx1 = min(maxx, (int32_t)W - 1);
