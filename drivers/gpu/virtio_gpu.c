@@ -31,16 +31,15 @@ static struct virtio_gpu_device* gpu_get_last();
 
 /*
  * flush 热路径的命令/响应缓冲。
- * 用静态 BSS（内核恒等映射，物理地址 == 虚拟地址，与键盘 ev_bufs 同理），
- * 避免每次 flush 两次 slab 分配/释放；gpu_flush_lock 串行化使用。
+ * T2D 和 FLUSH 各用独立缓冲，virtqueue_send_dual 可同时提交，
+ * 一次 NOTIFY 处理两条命令，QEMU 同步往返减半。
  */
-static union {
-	struct virtio_gpu_transfer_to_host_2d t2d;
-	struct virtio_gpu_resource_flush fl;
-	struct virtio_gpu_set_scanout ss;
-	uint8_t pad[64];
-} flush_cmd __attribute__((aligned(16)));
-static struct virtio_gpu_ctrl_hdr flush_resp __attribute__((aligned(16)));
+static struct virtio_gpu_transfer_to_host_2d flush_t2d
+    __attribute__((aligned(16)));
+static struct virtio_gpu_resource_flush flush_fl __attribute__((aligned(16)));
+static struct virtio_gpu_set_scanout flush_ss __attribute__((aligned(16)));
+static struct virtio_gpu_ctrl_hdr flush_resp1 __attribute__((aligned(16)));
+static struct virtio_gpu_ctrl_hdr flush_resp2 __attribute__((aligned(16)));
 static spinlock_t gpu_flush_lock = {0};
 
 static void dump_gpu(struct virtio_gpu_device* gpu);
@@ -588,11 +587,11 @@ static void dump_gpu(struct virtio_gpu_device* gpu)
 }
 
 /* 发一条无数据响应的控制命令；成功 0 失败 -1 */
-static int
-gpu_send_ctrl(struct virtio_gpu_device* gpu, void* cmd, uint32_t cmd_len)
+static int gpu_send_ctrl(struct virtio_gpu_device* gpu,
+			 void* cmd,
+			 uint32_t cmd_len,
+			 struct virtio_gpu_ctrl_hdr* resp)
 {
-	struct virtio_gpu_ctrl_hdr* resp = &flush_resp;
-
 	memset(resp, 0, sizeof(*resp));
 	if (virtqueue_send(gpu->controlq, cmd, cmd_len, resp, sizeof(*resp)) !=
 	    0)
@@ -602,10 +601,10 @@ gpu_send_ctrl(struct virtio_gpu_device* gpu, void* cmd, uint32_t cmd_len)
 
 /*
  * 上屏一帧脏矩形（坐标为 resource 绝对坐标）。
- *   1) TRANSFER_TO_HOST_2D：只传脏矩形像素（滚屏时仅新露出的条带）
- *   2) rescan 时 SET_SCANOUT：把屏幕窗口平移到 resource 内
- *      (0, scanout_y)，旧行无需重传——滚屏比整屏搬运省 ~200 倍 DMA
- *   3) RESOURCE_FLUSH：重绘脏矩形
+ *   rescan=0（常态）：T2D + FLUSH 用 virtqueue_send_dual 一次 NOTIFY 提交，
+ *                    QEMU 同步处理往返从 2 次减为 1 次。
+ *   rescan=1（panning 滚屏）：T2D 先单独提交，SET_SCANOUT + FLUSH 再
+ *                    一次 NOTIFY 批量提交（3 次→2 次往返）。
  */
 int virtio_gpu_present(struct virtio_gpu_device* gpu,
 		       uint32_t x,
@@ -620,65 +619,85 @@ int virtio_gpu_present(struct virtio_gpu_device* gpu,
 	if (w == 0 || h == 0)
 		return 0;
 
-	/* 命令缓冲是静态共享的，且同一 controlq 不允许并发提交 */
 	acquire(&gpu_flush_lock);
 
-	/* backing 内源数据的字节偏移：第 y 行第 x 个像素（跨距是整幅宽） */
 	uint64_t offset = ((uint64_t)y * gpu->width + x) * 4;
 
-	/* 1) TRANSFER_TO_HOST_2D */
-	{
-		struct virtio_gpu_transfer_to_host_2d* cmd = &flush_cmd.t2d;
+	/* 构造 T2D */
+	memset(&flush_t2d, 0, sizeof(flush_t2d));
+	flush_t2d.hdr.type = VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D;
+	flush_t2d.r.x = x;
+	flush_t2d.r.y = y;
+	flush_t2d.r.width = w;
+	flush_t2d.r.height = h;
+	flush_t2d.offset = offset;
+	flush_t2d.resource_id = gpu->resource_id;
 
-		memset(cmd, 0, sizeof(*cmd));
-		cmd->hdr.type = VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D;
-		cmd->r.x = x;
-		cmd->r.y = y;
-		cmd->r.width = w;
-		cmd->r.height = h;
-		cmd->offset = offset;
-		cmd->resource_id = gpu->resource_id;
+	/* 构造 FLUSH */
+	memset(&flush_fl, 0, sizeof(flush_fl));
+	flush_fl.hdr.type = VIRTIO_GPU_CMD_RESOURCE_FLUSH;
+	flush_fl.r.x = x;
+	flush_fl.r.y = y;
+	flush_fl.r.width = w;
+	flush_fl.r.height = h;
+	flush_fl.resource_id = gpu->resource_id;
 
-		ret = gpu_send_ctrl(gpu, cmd, sizeof(*cmd));
-		if (ret) {
-			release(&gpu_flush_lock);
-			return ret;
-		}
-	}
-
-	/* 2) 可选：scanout 窗口平移（panning） */
 	if (rescan) {
-		struct virtio_gpu_set_scanout* cmd = &flush_cmd.ss;
-
-		memset(cmd, 0, sizeof(*cmd));
-		cmd->hdr.type = VIRTIO_GPU_CMD_SET_SCANOUT;
-		cmd->r.x = 0;
-		cmd->r.y = scanout_y;
-		cmd->r.width = gpu->width;
-		cmd->r.height = gpu->height;
-		cmd->scanout_id = gpu->scanout_id;
-		cmd->resource_id = gpu->resource_id;
-
-		ret = gpu_send_ctrl(gpu, cmd, sizeof(*cmd));
+		/* panning：先提交 T2D */
+		ret = gpu_send_ctrl(
+		    gpu, &flush_t2d, sizeof(flush_t2d), &flush_resp1);
 		if (ret) {
 			release(&gpu_flush_lock);
 			return ret;
 		}
-	}
 
-	/* 3) RESOURCE_FLUSH */
-	{
-		struct virtio_gpu_resource_flush* cmd = &flush_cmd.fl;
+		/* SET_SCANOUT */
+		memset(&flush_ss, 0, sizeof(flush_ss));
+		flush_ss.hdr.type = VIRTIO_GPU_CMD_SET_SCANOUT;
+		flush_ss.r.x = 0;
+		flush_ss.r.y = scanout_y;
+		flush_ss.r.width = gpu->width;
+		flush_ss.r.height = gpu->height;
+		flush_ss.scanout_id = gpu->scanout_id;
+		flush_ss.resource_id = gpu->resource_id;
 
-		memset(cmd, 0, sizeof(*cmd));
-		cmd->hdr.type = VIRTIO_GPU_CMD_RESOURCE_FLUSH;
-		cmd->r.x = x;
-		cmd->r.y = y;
-		cmd->r.width = w;
-		cmd->r.height = h;
-		cmd->resource_id = gpu->resource_id;
-
-		ret = gpu_send_ctrl(gpu, cmd, sizeof(*cmd));
+		/* SET_SCANOUT + FLUSH 批量提交 */
+		ret = virtqueue_send_dual(gpu->controlq,
+					  &flush_ss,
+					  sizeof(flush_ss),
+					  &flush_resp1,
+					  sizeof(flush_resp1),
+					  &flush_fl,
+					  sizeof(flush_fl),
+					  &flush_resp2,
+					  sizeof(flush_resp2));
+		if (ret) {
+			release(&gpu_flush_lock);
+			return ret;
+		}
+		ret = (flush_resp1.type == VIRTIO_GPU_RESP_OK_NODATA &&
+		       flush_resp2.type == VIRTIO_GPU_RESP_OK_NODATA)
+			  ? 0
+			  : -1;
+	} else {
+		/* 常态：T2D + FLUSH 一次 NOTIFY */
+		ret = virtqueue_send_dual(gpu->controlq,
+					  &flush_t2d,
+					  sizeof(flush_t2d),
+					  &flush_resp1,
+					  sizeof(flush_resp1),
+					  &flush_fl,
+					  sizeof(flush_fl),
+					  &flush_resp2,
+					  sizeof(flush_resp2));
+		if (ret) {
+			release(&gpu_flush_lock);
+			return ret;
+		}
+		ret = (flush_resp1.type == VIRTIO_GPU_RESP_OK_NODATA &&
+		       flush_resp2.type == VIRTIO_GPU_RESP_OK_NODATA)
+			  ? 0
+			  : -1;
 	}
 
 	release(&gpu_flush_lock);
