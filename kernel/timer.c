@@ -2,6 +2,7 @@
 #include <spinlock.h>
 #include <panic.h>
 #include <printk.h>
+#include <riscv.h>
 #include <drivers/tty/gpu_tty.h>
 #include <drivers/gpu/kgfx.h>
 
@@ -29,14 +30,16 @@ void do_timer_tick()
 	acquire(&timer_lock);
 	sys_timer_tick++;
 	__atomic_thread_fence(__ATOMIC_SEQ_CST);
-	// printk("the time tick: %lu\n", sys_timer_tick);
 	release(&timer_lock);
 
 	/*
-	 * 时钟驱动的屏幕刷新：把这一拍内累积的脏区合并成一次
-	 * GPU 传输 放锁外执行，慢 IO 不占 timer_lock。
-	 * kgfx 内部自带锁且 attach 前直接返回。
+	 * GPU 刷新 + 光标闪烁只在 hart 0 执行，避免 4 核竞争导致
+	 * blink_counter 增长 4 倍速
+	 * sys_timer_tick 在 timer_lock 内递增，4 核每 tick 各加一次
 	 */
+	if (r_tp() != 0)
+		return;
+
 	gpu_tty_tick();
 	kgfx_timer_tick();
 }
