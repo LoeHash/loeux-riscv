@@ -31,15 +31,12 @@ static struct virtio_gpu_device* gpu_get_last();
 
 /*
  * flush 热路径的命令/响应缓冲。
- * T2D 和 FLUSH 各用独立缓冲，virtqueue_send_dual 可同时提交，
- * 一次 NOTIFY 处理两条命令，QEMU 同步往返减半。
  */
 static struct virtio_gpu_transfer_to_host_2d flush_t2d
     __attribute__((aligned(16)));
 static struct virtio_gpu_resource_flush flush_fl __attribute__((aligned(16)));
 static struct virtio_gpu_set_scanout flush_ss __attribute__((aligned(16)));
-static struct virtio_gpu_ctrl_hdr flush_resp1 __attribute__((aligned(16)));
-static struct virtio_gpu_ctrl_hdr flush_resp2 __attribute__((aligned(16)));
+static struct virtio_gpu_ctrl_hdr flush_resp __attribute__((aligned(16)));
 static spinlock_t gpu_flush_lock = {0};
 
 static void dump_gpu(struct virtio_gpu_device* gpu);
@@ -601,10 +598,14 @@ static int gpu_send_ctrl(struct virtio_gpu_device* gpu,
 
 /*
  * 上屏一帧脏矩形（坐标为 resource 绝对坐标）。
- *   rescan=0（常态）：T2D + FLUSH 用 virtqueue_send_dual 一次 NOTIFY 提交，
- *                    QEMU 同步处理往返从 2 次减为 1 次。
- *   rescan=1（panning 滚屏）：T2D 先单独提交，SET_SCANOUT + FLUSH 再
- *                    一次 NOTIFY 批量提交（3 次→2 次往返）。
+ *   1) TRANSFER_TO_HOST_2D：传脏矩形像素（滚屏时仅新露出的条带）
+ *   2) rescan 时 SET_SCANOUT：把屏幕窗口平移到 resource 内 (0, scanout_y)
+ *   3) RESOURCE_FLUSH：重绘脏矩形
+ *
+ * 每条命令单独 NOTIFY 并同步等完成。曾经试过把 T2D+FLUSH 合并成
+ * 一次 NOTIFY（virtqueue_send_dual），在部分 QEMU/显示路径下会出
+ * 现开机画面错乱，收益又小（每帧省一次 ~10us 往返，帧间隔 10ms），
+ * 已回退。不要在没有跨 QEMU 版本验证的情况下恢复批量提交。
  */
 int virtio_gpu_present(struct virtio_gpu_device* gpu,
 		       uint32_t x,
@@ -623,7 +624,7 @@ int virtio_gpu_present(struct virtio_gpu_device* gpu,
 
 	uint64_t offset = ((uint64_t)y * gpu->width + x) * 4;
 
-	/* 构造 T2D */
+	/* 1) TRANSFER_TO_HOST_2D */
 	memset(&flush_t2d, 0, sizeof(flush_t2d));
 	flush_t2d.hdr.type = VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D;
 	flush_t2d.r.x = x;
@@ -633,25 +634,14 @@ int virtio_gpu_present(struct virtio_gpu_device* gpu,
 	flush_t2d.offset = offset;
 	flush_t2d.resource_id = gpu->resource_id;
 
-	/* 构造 FLUSH */
-	memset(&flush_fl, 0, sizeof(flush_fl));
-	flush_fl.hdr.type = VIRTIO_GPU_CMD_RESOURCE_FLUSH;
-	flush_fl.r.x = x;
-	flush_fl.r.y = y;
-	flush_fl.r.width = w;
-	flush_fl.r.height = h;
-	flush_fl.resource_id = gpu->resource_id;
+	ret = gpu_send_ctrl(gpu, &flush_t2d, sizeof(flush_t2d), &flush_resp);
+	if (ret) {
+		release(&gpu_flush_lock);
+		return ret;
+	}
 
+	/* 2) 可选：scanout 窗口平移（panning） */
 	if (rescan) {
-		/* panning：先提交 T2D */
-		ret = gpu_send_ctrl(
-		    gpu, &flush_t2d, sizeof(flush_t2d), &flush_resp1);
-		if (ret) {
-			release(&gpu_flush_lock);
-			return ret;
-		}
-
-		/* SET_SCANOUT */
 		memset(&flush_ss, 0, sizeof(flush_ss));
 		flush_ss.hdr.type = VIRTIO_GPU_CMD_SET_SCANOUT;
 		flush_ss.r.x = 0;
@@ -661,44 +651,24 @@ int virtio_gpu_present(struct virtio_gpu_device* gpu,
 		flush_ss.scanout_id = gpu->scanout_id;
 		flush_ss.resource_id = gpu->resource_id;
 
-		/* SET_SCANOUT + FLUSH 批量提交 */
-		ret = virtqueue_send_dual(gpu->controlq,
-					  &flush_ss,
-					  sizeof(flush_ss),
-					  &flush_resp1,
-					  sizeof(flush_resp1),
-					  &flush_fl,
-					  sizeof(flush_fl),
-					  &flush_resp2,
-					  sizeof(flush_resp2));
+		ret = gpu_send_ctrl(
+		    gpu, &flush_ss, sizeof(flush_ss), &flush_resp);
 		if (ret) {
 			release(&gpu_flush_lock);
 			return ret;
 		}
-		ret = (flush_resp1.type == VIRTIO_GPU_RESP_OK_NODATA &&
-		       flush_resp2.type == VIRTIO_GPU_RESP_OK_NODATA)
-			  ? 0
-			  : -1;
-	} else {
-		/* 常态：T2D + FLUSH 一次 NOTIFY */
-		ret = virtqueue_send_dual(gpu->controlq,
-					  &flush_t2d,
-					  sizeof(flush_t2d),
-					  &flush_resp1,
-					  sizeof(flush_resp1),
-					  &flush_fl,
-					  sizeof(flush_fl),
-					  &flush_resp2,
-					  sizeof(flush_resp2));
-		if (ret) {
-			release(&gpu_flush_lock);
-			return ret;
-		}
-		ret = (flush_resp1.type == VIRTIO_GPU_RESP_OK_NODATA &&
-		       flush_resp2.type == VIRTIO_GPU_RESP_OK_NODATA)
-			  ? 0
-			  : -1;
 	}
+
+	/* 3) RESOURCE_FLUSH */
+	memset(&flush_fl, 0, sizeof(flush_fl));
+	flush_fl.hdr.type = VIRTIO_GPU_CMD_RESOURCE_FLUSH;
+	flush_fl.r.x = x;
+	flush_fl.r.y = y;
+	flush_fl.r.width = w;
+	flush_fl.r.height = h;
+	flush_fl.resource_id = gpu->resource_id;
+
+	ret = gpu_send_ctrl(gpu, &flush_fl, sizeof(flush_fl), &flush_resp);
 
 	release(&gpu_flush_lock);
 	return ret;
