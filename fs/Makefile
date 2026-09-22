@@ -4,7 +4,7 @@ CROSS_COMPILE ?= riscv64-linux-gnu-
 CC := $(CROSS_COMPILE)gcc
 ROOT := $(abspath $(CURDIR)/..)
 include $(ROOT)/build/paths.mk
-CFLAGS := -march=rv64gc -mabi=lp64 -nostdlib -ffreestanding $(INCLUDES) -g
+CFLAGS := -march=rv64gc -mabi=lp64 -nostdlib -ffreestanding $(INCLUDES) -g -O2
 CFLAGS += -MMD -MP
 
 SRC_C := $(wildcard *.c)

@@ -9,7 +9,7 @@ include $(ROOT)/build/paths.mk
 
 ARCH := rv64gc
 ABI := lp64
-CFLAGS := -g -march=$(ARCH) -mabi=$(ABI) -nostdlib -ffreestanding $(INCLUDES) -Wall -Werro
+CFLAGS := -g -O2 -march=$(ARCH) -mabi=$(ABI) -nostdlib -ffreestanding $(INCLUDES) -Wall
 LDFLAGS := -T kernel/kernel.lds -nostdlib
 
 	

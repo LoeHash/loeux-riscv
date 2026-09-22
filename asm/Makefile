@@ -2,7 +2,7 @@
 
 CROSS_COMPILE ?= riscv64-linux-gnu-
 CC := $(CROSS_COMPILE)gcc
-CFLAGS := -march=rv64gc -mabi=lp64 -nostdlib -ffreestanding -g
+CFLAGS := -march=rv64gc -mabi=lp64 -nostdlib -ffreestanding -g -O2
 
 .PHONY: all clean
 
