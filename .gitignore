@@ -12,6 +12,7 @@ user/bin/
 report/*
 no-kernel/*
 no-kernel
+doc/tips/kgfx-opt.md
 report
 .vscode
 .vscode/*
