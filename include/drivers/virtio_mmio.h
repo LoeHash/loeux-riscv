@@ -306,4 +306,13 @@ int init_virtqueue(struct virtqueue_n *vq, uint32_t start_idx);
 int virtqueue_send(struct virtqueue_n *vq,
                    void *cmd,  uint32_t cmd_len,
                    void *resp, uint32_t resp_len);
+
+/*
+ * 批量提交两条命令到同一 vring，只 NOTIFY 一次。
+ * 把 T2D + FLUSH 合并为一趟 QEMU 同步处理，命令往返减半。
+ * 返回 0 成功，-1 失败。
+ */
+int virtqueue_send_dual(struct virtqueue_n *vq,
+    void *cmd1, uint32_t cmd1_len, void *resp1, uint32_t resp1_len,
+    void *cmd2, uint32_t cmd2_len, void *resp2, uint32_t resp2_len);
 #endif

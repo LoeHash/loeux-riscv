@@ -174,3 +174,21 @@ tty_cdev_read(void* priv, void* buf, uint64_t count, uint64_t* out_len)
 	*out_len = i;
 	return 0;
 }
+
+// gcc 隐式链接使用
+void* memcpy(void* dest, const void* src, size_t n)
+{
+	uint8_t* d = (uint8_t*)dest;
+	const uint8_t* s = (const uint8_t*)src;
+	while (n--)
+		*d++ = *s++;
+	return dest;
+}
+
+void* memset(void* ptr, int value, size_t num)
+{
+	uint8_t* p = (uint8_t*)ptr;
+	while (num--)
+		*p++ = (uint8_t)value;
+	return ptr;
+}

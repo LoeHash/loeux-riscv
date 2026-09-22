@@ -228,6 +228,119 @@ int virtqueue_send(struct virtqueue_n* vq,
 	return 0;
 }
 
+/*
+ * 批量提交两条命令到同一 vring，只 NOTIFY 一次。
+ * (为kgfx特意提供 :-) )
+ */
+int virtqueue_send_dual(struct virtqueue_n* vq,
+			void* cmd1,
+			uint32_t cmd1_len,
+			void* resp1,
+			uint32_t resp1_len,
+			void* cmd2,
+			uint32_t cmd2_len,
+			void* resp2,
+			uint32_t resp2_len)
+{
+	if (vq == NULL || cmd1 == NULL || resp1 == NULL || cmd2 == NULL ||
+	    resp2 == NULL)
+		return -1;
+
+	acquire(&vq->vq_lock);
+
+	/* 分配 4 个 desc（2 条 out→in 链） */
+	int i0 = vq_find_free_desc(vq);
+	if (i0 < 0) {
+		release(&vq->vq_lock);
+		return -1;
+	}
+	int i1 = vq_find_free_desc(vq);
+	if (i1 < 0) {
+		vq->free_desc_bit_map &= ~(1ULL << i0);
+		release(&vq->vq_lock);
+		return -1;
+	}
+	int i2 = vq_find_free_desc(vq);
+	if (i2 < 0) {
+		vq->free_desc_bit_map &= ~(1ULL << i0);
+		vq->free_desc_bit_map &= ~(1ULL << i1);
+		release(&vq->vq_lock);
+		return -1;
+	}
+	int i3 = vq_find_free_desc(vq);
+	if (i3 < 0) {
+		vq->free_desc_bit_map &= ~(1ULL << i0);
+		vq->free_desc_bit_map &= ~(1ULL << i1);
+		vq->free_desc_bit_map &= ~(1ULL << i2);
+		release(&vq->vq_lock);
+		return -1;
+	}
+
+	/* 链 1: cmd1(out) → resp1(in) */
+	vq->desc_start[i0].addr = (phys_addr_t)(cmd1);
+	vq->desc_start[i0].len = cmd1_len;
+	vq->desc_start[i0].flags = VRING_DESC_F_NEXT;
+	vq->desc_start[i0].next = i1;
+	vq->desc_start[i1].addr = (phys_addr_t)(resp1);
+	vq->desc_start[i1].len = resp1_len;
+	vq->desc_start[i1].flags = VRING_DESC_F_WRITE;
+	vq->desc_start[i1].next = 0;
+
+	/* 链 2: cmd2(out) → resp2(in) */
+	vq->desc_start[i2].addr = (phys_addr_t)(cmd2);
+	vq->desc_start[i2].len = cmd2_len;
+	vq->desc_start[i2].flags = VRING_DESC_F_NEXT;
+	vq->desc_start[i2].next = i3;
+	vq->desc_start[i3].addr = (phys_addr_t)(resp2);
+	vq->desc_start[i3].len = resp2_len;
+	vq->desc_start[i3].flags = VRING_DESC_F_WRITE;
+	vq->desc_start[i3].next = 0;
+
+	/* 快照 used 索引（NOTIFY 前，QEMU 同步处理会立即更新） */
+	uint16_t old_used = vq->used_start->idx;
+
+	/* 挂两条链到 avail ring */
+	uint16_t aidx = vq->avail_start->idx % vq->queue_size;
+	vq->avail_start->ring[aidx] = (uint16_t)i0;
+	MEMORY_FENCE;
+	vq->avail_start->idx++;
+	uint16_t aidx2 = vq->avail_start->idx % vq->queue_size;
+	vq->avail_start->ring[aidx2] = (uint16_t)i2;
+	MEMORY_FENCE;
+	vq->avail_start->idx++;
+	MEMORY_FENCE;
+
+	/* NOTIFY 一次 — QEMU 同步处理两条命令 */
+	b32_write(vq->mmio_base + VIRTIO_MMIO_QUEUE_NOTIFY_OFFSET,
+		  vq->queue_idx);
+
+	/* 轮询 used ring，等两条命令都完成 */
+	int timeout = 10000000;
+	while (vq->used_start->idx < old_used + 2) {
+		if (--timeout == 0) {
+			vq->free_desc_bit_map &= ~(1ULL << i0);
+			vq->free_desc_bit_map &= ~(1ULL << i1);
+			vq->free_desc_bit_map &= ~(1ULL << i2);
+			vq->free_desc_bit_map &= ~(1ULL << i3);
+			printk("virtqueue_send_dual timeout\n");
+			release(&vq->vq_lock);
+			return -1;
+		}
+		wfi();
+	}
+
+	MEMORY_FENCE;
+
+	/* 释放 4 个 desc */
+	vq->free_desc_bit_map &= ~(1ULL << i0);
+	vq->free_desc_bit_map &= ~(1ULL << i1);
+	vq->free_desc_bit_map &= ~(1ULL << i2);
+	vq->free_desc_bit_map &= ~(1ULL << i3);
+
+	release(&vq->vq_lock);
+	return 0;
+}
+
 static int vq_find_free_desc(struct virtqueue_n* vq)
 {
 	for (int i = 0; i < vq->queue_size; i++) {
