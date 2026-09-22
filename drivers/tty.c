@@ -75,12 +75,12 @@ static int tty_cdev_write(void *priv, const void *buf, uint64_t count, uint64_t 
     release(&tty->output_lock);
 
     /*
-     * 整批输出只刷一次屏。
-     * putc 只画到后端缓冲并标脏，flush 在这里统一上屏：
-     * 一次 write 不论多少字符，只有一次 GPU 传输 + 窗口重绘。
+     * 这里不立即刷屏：putc 只写后端 fb 并标脏，上屏由 100Hz 时钟节拍
+     * 统一合并完成。这样程序连续输出（尤其滚屏）时，10ms 内的所有脏区
+     * 只产生一次 GPU 传输 + 窗口重绘。需要立即上屏的时刻（如 shell
+     * 打印完提示符、即将阻塞等键盘输入）由 read 路径调 flush 保证。
+     * uart 后端无 flush，字符本就即时输出，不受影响。
      */
-    if (tty->ops->flush)
-        tty->ops->flush(tty);
 
     *out_len = count;
     return 0;

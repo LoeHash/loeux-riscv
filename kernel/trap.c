@@ -52,7 +52,7 @@ void kernel_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
                 // 时钟中断
                 // 在内核态里的时钟中断
                 do_timer_tick();
-                sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
+                sbi_set_timer(rdtime() + (BASE_FREQUENCY / TIMER_TICKS_PER_SEC));
                 if (ts == 0)
                 {
                         w_sepc(sepc);
@@ -176,7 +176,7 @@ uint64_t user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
                  * The CPU may be trapped in a continuous timer-interrupt loop. 
                  *                      26-09-17        loehash
                  */
-                sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
+                sbi_set_timer(rdtime() + (BASE_FREQUENCY / TIMER_TICKS_PER_SEC));
                 yield();
         }else  if(scause == PAGE_FAULT_LOAD_SCAUSE || scause == PAGE_FAULT_STORE_SCAUSE){
                 do_page_fault(stval, get_page_fault_type(scause));

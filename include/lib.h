@@ -20,26 +20,49 @@ static inline char *strcpy_with_terminate(char *s, const char *t, int n)
         return os;
 }
 
+/*
+ * 内存搬运/填充按 uint64_t 宽度进行（RV64 上 LD/SD 一次 8 字节）。
+ * 之前是按字节循环：清/滚一次 1280x800x4 的 framebuffer 要迭代
+ * 400 万次，在 QEMU TCG 下极慢，是滚屏卡顿的重要来源。
+ * 仅当源、目的按 8 字节同余对齐时走宽拷贝，否则退回逐字节（保证正确）。
+ */
 static inline void *memmove(void *dst, const void *src, uint32_t n)
 {
-        const char *s;
-        char *d;
+        const uint8_t *s = (const uint8_t *)src;
+        uint8_t *d = (uint8_t *)dst;
 
-        if (n == 0)
+        if (n == 0 || dst == src)
                 return dst;
 
-        s = src;
-        d = dst;
-        if (s < d && s + n > d)
-        {
-                s += n;
-                d += n;
+        if (s < d && s + n > d) {
+                /* 重叠且目的在后：从尾部反向拷贝 */
+                const uint8_t *es = s + n;
+                uint8_t *ed = d + n;
+
+                if ((((uintptr_t)es | (uintptr_t)ed) & 7) == 0) {
+                        while (n >= 8) {
+                                es -= 8; ed -= 8;
+                                *(uint64_t *)ed = *(const uint64_t *)es;
+                                n -= 8;
+                        }
+                }
                 while (n-- > 0)
-                        *--d = *--s;
-        }
-        else
+                        *--ed = *--es;
+        } else {
+                /* 正向拷贝 */
+                if ((((uintptr_t)s | (uintptr_t)d) & 7) == 0) {
+                        const uint64_t *ws = (const uint64_t *)s;
+                        uint64_t *wd = (uint64_t *)d;
+                        while (n >= 8) {
+                                *wd++ = *ws++;
+                                n -= 8;
+                        }
+                        s = (const uint8_t *)ws;
+                        d = (uint8_t *)wd;
+                }
                 while (n-- > 0)
                         *d++ = *s++;
+        }
 
         return dst;
 }
@@ -52,11 +75,25 @@ static inline void *memmove(void *dst, const void *src, uint32_t n)
  */
 static inline void *memset(void *ptr, int value, size_t num)
 {
-        unsigned char *p = (unsigned char *)ptr;
-        unsigned char val = (unsigned char)value;
+        uint8_t *p = (uint8_t *)ptr;
+        uint8_t val = (uint8_t)value;
+        size_t i = 0;
 
-        for (size_t i = 0; i < num; i++)
-                p[i] = val;
+        /* 头部补到 8 字节对齐 */
+        while (i < num && (((uintptr_t)(p + i)) & 7))
+                p[i++] = val;
+
+        if (i + 8 <= num) {
+                uint64_t wval = (uint64_t)val * 0x0101010101010101ULL;
+                uint64_t *wp = (uint64_t *)(p + i);
+                size_t cnt = (num - i) / 8;
+                while (cnt--)
+                        *wp++ = wval;
+                i = (uint8_t *)wp - p;
+        }
+
+        while (i < num)
+                p[i++] = val;
 
         return ptr;
 }
@@ -83,11 +120,26 @@ static inline int memcmp(const void *s1, const void *s2, size_t n)
  */
 static inline void *memcpy(void *dest, const void *src, size_t num)
 {
-        unsigned char *d = (unsigned char *)dest;
-        const unsigned char *s = (const unsigned char *)src;
+        uint8_t *d = (uint8_t *)dest;
+        const uint8_t *s = (const uint8_t *)src;
+        size_t i = 0;
 
-        for (size_t i = 0; i < num; i++)
-                d[i] = s[i];
+        /* 两端都 8 字节对齐时按 uint64_t 拷贝 */
+        if ((((uintptr_t)s | (uintptr_t)d) & 7) == 0) {
+                const uint64_t *ws = (const uint64_t *)s;
+                uint64_t *wd = (uint64_t *)d;
+                while (i + 8 <= num) {
+                        *wd++ = *ws++;
+                        i += 8;
+                }
+                s = (const uint8_t *)ws;
+                d = (uint8_t *)wd;
+        }
+
+        while (i < num) {
+                *d++ = *s++;
+                i++;
+        }
 
         return dest;
 }

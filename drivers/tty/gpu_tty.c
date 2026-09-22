@@ -95,11 +95,11 @@ static int gpu_tty_putc(struct tty *tty, char c)
 	return 0;
 }
 
-/* 把标脏的后端缓冲一次性刷到屏幕 */
+/* 立即把标脏的后端缓冲刷到屏幕（用于即将阻塞等输入前，保证回显即时） */
 static int gpu_tty_flush(struct tty *tty)
 {
-	struct gpu_tty_state *st = tty->priv;
-	kgfx_update(st->gpu);
+	(void)tty;
+	kgfx_flush_now();
 	return 0;
 }
 
@@ -143,13 +143,16 @@ void init_gpu_tty()
         gpu0_tty_state.cur_x = 0;
         gpu0_tty_state.cur_y = 0;
         gpu0_tty_state.fg    = 0xFFFFFFFF;
-        gpu0_tty_state.bg    = 0xFF000000; 
+        gpu0_tty_state.bg    = 0xFF000000;
         gpu0_tty_state.cursor_visible = 1;
         gpu0_tty_state.cursor_drawn = 0;
         gpu0_tty_state.blink_counter = 0;
 
+        /* 注册给 kgfx，之后屏幕刷新由 100Hz 时钟节拍统一合并驱动 */
+        kgfx_attach(gpu0_tty_state.gpu);
+
         kgfx_clear(gpu0_tty_state.gpu, gpu0_tty_state.bg);
-        kgfx_update(gpu0_tty_state.gpu);
+        kgfx_flush_now();
 
         gpu0_tty.name = "gpu/0";
         gpu0_tty.ops  = &gpu_tty_ops;

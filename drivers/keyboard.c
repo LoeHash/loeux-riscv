@@ -350,9 +350,9 @@ static int keyboard_poll(struct virtio_input_device *kb)
 
 	while (vq->used_start->idx != kb->last_used_idx) {
 		/*
-		 * 锁内：取走一个完成事件（拷出内容），回收 desc 并立即
+		 * 锁内：取走一个完成事件，回收 desc 并立即
 		 * 重挂到 avail。重挂后设备随时可能写新事件进 ev_bufs[bi]，
-		 * 所以键值处理（handle_key）必须用拷贝、放在锁外做。
+		 * 所以键值处理必须用拷贝、放在锁外做。
 		 */
 		struct virtio_input_event ev;
 		int buf_idx;
@@ -360,7 +360,7 @@ static int keyboard_poll(struct virtio_input_device *kb)
 		acquire(&vq->fdbm_lk);
 		{
 			struct virtq_used_elem *e =
-				&vq->used_start->ring[kb->last_used_idx % vq->queue_size];
+				(struct virtq_used_elem *)&vq->used_start->ring[kb->last_used_idx % vq->queue_size];
 
 			buf_idx = e->id;
 			ev = ev_bufs[buf_idx];

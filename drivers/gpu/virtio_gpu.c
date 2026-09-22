@@ -40,6 +40,7 @@ static struct virtio_gpu_device *gpu_get_last();
 static union {
         struct virtio_gpu_transfer_to_host_2d t2d;
         struct virtio_gpu_resource_flush      fl;
+        struct virtio_gpu_set_scanout         ss;
         uint8_t                               pad[64];
 } flush_cmd __attribute__((aligned(16)));
 static struct virtio_gpu_ctrl_hdr flush_resp __attribute__((aligned(16)));
@@ -402,7 +403,14 @@ static int virtio_gpu_create_framebuffer(struct virtio_gpu_device *gpu)
         int ret;
 
         // 1. DMA 分配
-        gpu->fb_size     = gpu->width * gpu->height * 4;
+        /*
+         * backing 高度取屏幕的 2 倍：多出的一屏是滚屏 panning 的余量。
+         * 滚一行时 SET_SCANOUT 窗口在 resource 内下移 16px，只需 T2D
+         * 新露出的底部行；窗口移到底后才做一次整屏搬运并归零，从而把
+         * 滚屏 DMA 从每帧 4MB（全屏）降到每帧 ~20KB（一个字符行）。
+         */
+        gpu->fb_height   = gpu->height * 2;
+        gpu->fb_size     = (uint64_t)gpu->width * gpu->fb_height * 4;
         gpu->fb          = dma_alloc(gpu->fb_size);
         if (!gpu->fb) {
                 printk("create_fb: dma_alloc failed, size=%lu\n", gpu->fb_size);
@@ -429,7 +437,7 @@ static int virtio_gpu_create_framebuffer(struct virtio_gpu_device *gpu)
                 cmd->resource_id  = gpu->resource_id;
                 cmd->format       = VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM;
                 cmd->width        = gpu->width;
-                cmd->height       = gpu->height;
+                cmd->height       = gpu->fb_height;
 
                 ret = virtqueue_send(gpu->controlq,
                                      cmd,  sizeof(*cmd),
@@ -541,16 +549,28 @@ static void dump_gpu(struct virtio_gpu_device *gpu)
 
 }
 
+/* 发一条无数据响应的控制命令；成功 0 失败 -1 */
+static int gpu_send_ctrl(struct virtio_gpu_device *gpu, void *cmd, uint32_t cmd_len)
+{
+        struct virtio_gpu_ctrl_hdr *resp = &flush_resp;
+
+        memset(resp, 0, sizeof(*resp));
+        if (virtqueue_send(gpu->controlq, cmd, cmd_len,
+                           resp, sizeof(*resp)) != 0)
+                return -1;
+        return resp->type == VIRTIO_GPU_RESP_OK_NODATA ? 0 : -1;
+}
+
 /*
- * 把 fb 的一块脏区域刷到屏幕。
- * 现代qemu需要选转移，在flush
- *   1) TRANSFER_TO_HOST_2D：把 guest backing(fb) 的像素 DMA 到设备侧
- *      resource 镜像；QEMU 不会直接引用 backing。
- *   2) RESOURCE_FLUSH：通知 scanout 该区域已变化，重绘到窗口。
+ * 上屏一帧脏矩形（坐标为 resource 绝对坐标）。
+ *   1) TRANSFER_TO_HOST_2D：只传脏矩形像素（滚屏时仅新露出的条带）
+ *   2) rescan 时 SET_SCANOUT：把屏幕窗口平移到 resource 内
+ *      (0, scanout_y)，旧行无需重传——滚屏比整屏搬运省 ~200 倍 DMA
+ *   3) RESOURCE_FLUSH：重绘脏矩形
  */
-int virtio_gpu_flush(struct virtio_gpu_device *gpu,
-                     uint32_t x, uint32_t y,
-                     uint32_t w, uint32_t h)
+int virtio_gpu_present(struct virtio_gpu_device *gpu,
+                       uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                       int rescan, uint32_t scanout_y)
 {
         int ret;
 
@@ -560,17 +580,14 @@ int virtio_gpu_flush(struct virtio_gpu_device *gpu,
         /* 命令缓冲是静态共享的，且同一 controlq 不允许并发提交 */
         acquire(&gpu_flush_lock);
 
-        /* backing 内源数据的字节偏移：第 y 行第 x 个像素 */
+        /* backing 内源数据的字节偏移：第 y 行第 x 个像素（跨距是整幅宽） */
         uint64_t offset = ((uint64_t)y * gpu->width + x) * 4;
 
         /* 1) TRANSFER_TO_HOST_2D */
         {
-                struct virtio_gpu_transfer_to_host_2d *cmd  = &flush_cmd.t2d;
-                struct virtio_gpu_ctrl_hdr            *resp = &flush_resp;
+                struct virtio_gpu_transfer_to_host_2d *cmd = &flush_cmd.t2d;
 
                 memset(cmd, 0, sizeof(*cmd));
-                memset(resp, 0, sizeof(*resp));
-
                 cmd->hdr.type     = VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D;
                 cmd->r.x          = x;
                 cmd->r.y          = y;
@@ -579,27 +596,38 @@ int virtio_gpu_flush(struct virtio_gpu_device *gpu,
                 cmd->offset       = offset;
                 cmd->resource_id  = gpu->resource_id;
 
-                ret = virtqueue_send(gpu->controlq,
-                                     cmd,  sizeof(*cmd),
-                                     resp, sizeof(*resp));
-
-                if (ret == 0 && resp->type != VIRTIO_GPU_RESP_OK_NODATA)
-                        ret = -1;
-
+                ret = gpu_send_ctrl(gpu, cmd, sizeof(*cmd));
                 if (ret) {
                         release(&gpu_flush_lock);
                         return ret;
                 }
         }
 
-        /* 2) RESOURCE_FLUSH */
-        {
-                struct virtio_gpu_resource_flush *cmd  = &flush_cmd.fl;
-                struct virtio_gpu_ctrl_hdr       *resp = &flush_resp;
+        /* 2) 可选：scanout 窗口平移（panning） */
+        if (rescan) {
+                struct virtio_gpu_set_scanout *cmd = &flush_cmd.ss;
 
                 memset(cmd, 0, sizeof(*cmd));
-                memset(resp, 0, sizeof(*resp));
+                cmd->hdr.type     = VIRTIO_GPU_CMD_SET_SCANOUT;
+                cmd->r.x          = 0;
+                cmd->r.y          = scanout_y;
+                cmd->r.width      = gpu->width;
+                cmd->r.height     = gpu->height;
+                cmd->scanout_id   = gpu->scanout_id;
+                cmd->resource_id  = gpu->resource_id;
 
+                ret = gpu_send_ctrl(gpu, cmd, sizeof(*cmd));
+                if (ret) {
+                        release(&gpu_flush_lock);
+                        return ret;
+                }
+        }
+
+        /* 3) RESOURCE_FLUSH */
+        {
+                struct virtio_gpu_resource_flush *cmd = &flush_cmd.fl;
+
+                memset(cmd, 0, sizeof(*cmd));
                 cmd->hdr.type     = VIRTIO_GPU_CMD_RESOURCE_FLUSH;
                 cmd->r.x          = x;
                 cmd->r.y          = y;
@@ -607,16 +635,19 @@ int virtio_gpu_flush(struct virtio_gpu_device *gpu,
                 cmd->r.height     = h;
                 cmd->resource_id  = gpu->resource_id;
 
-                ret = virtqueue_send(gpu->controlq,
-                                     cmd,  sizeof(*cmd),
-                                     resp, sizeof(*resp));
-
-                if (ret == 0 && resp->type != VIRTIO_GPU_RESP_OK_NODATA)
-                        ret = -1;
+                ret = gpu_send_ctrl(gpu, cmd, sizeof(*cmd));
         }
 
         release(&gpu_flush_lock);
         return ret;
+}
+
+int virtio_gpu_flush(struct virtio_gpu_device *gpu,
+                     uint32_t x, uint32_t y,
+                     uint32_t w, uint32_t h)
+{
+        /* 无 panning 的普通刷新（test 等路径） */
+        return virtio_gpu_present(gpu, x, y, w, h, 0, 0);
 }
 
 void gpu_update(struct virtio_gpu_device *gpu, uint32_t x, uint32_t y, uint32_t w, uint32_t h)

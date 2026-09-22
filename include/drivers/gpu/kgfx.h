@@ -26,6 +26,22 @@ void kgfx_clear(struct virtio_gpu_device *gpu, uint32_t color);
  */
 void kgfx_scroll_up(struct virtio_gpu_device *gpu, uint32_t line_h, uint32_t bg);
 
+/*
+ * 标记脏区需要上屏（轻量，不发 virtio 命令）。
+ * 真正的刷屏由时钟节拍统一完成（kgfx_timer_tick），
+ * 从而把 10ms 内的所有绘制（包括连续滚屏的全屏脏区）
+ * 合并成一次 TRANSFER_TO_HOST_2D + RESOURCE_FLUSH。
+ */
 void kgfx_update(struct virtio_gpu_device *gpu);
+
+/* 立即把累积的脏区刷到屏幕（如：tty 即将阻塞等输入前） */
+void kgfx_flush_now(void);
+
+/* 时钟节拍回调：有待刷内容就刷一次（100Hz 驱动） */
+void kgfx_timer_tick(void);
+
+/* 注册当前屏幕设备（单屏），时钟刷新需要它 */
+void kgfx_attach(struct virtio_gpu_device *gpu);
+
 void init_kgfx(void);
 #endif

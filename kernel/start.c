@@ -103,7 +103,7 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         // 开启时钟中断
         enable_timer_interrupt();
         // 设置一次定时器
-        sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
+        sbi_set_timer(rdtime() + (BASE_FREQUENCY / TIMER_TICKS_PER_SEC));
 
         // 挂载硬盘
         if (vfs_mount(&virtio_block_device, "/", "ext2") == -1)
@@ -148,7 +148,7 @@ void secondary_start(uint64_t hart_id, uint64_t data_addr)
         intr_on();
         enable_timer_interrupt();
         // 设置一次定时器
-        sbi_set_timer(rdtime() + (BASE_FREQUENCY / TASK_CPU_SLIP_FACTOR));
+        sbi_set_timer(rdtime() + (BASE_FREQUENCY / TIMER_TICKS_PER_SEC));
         scheduler();
 }
 

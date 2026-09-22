@@ -38,8 +38,9 @@ struct virtio_gpu_device {
 
     uint32_t resource_id;             // framebuffer 资源 ID
     uint32_t cursor_resource_id;      // 光标图像资源 ID
-    uint32_t width;                   // 分辨率宽
-    uint32_t height;                  // 分辨率高
+    uint32_t width;                   // 屏幕分辨率宽（scanout 宽）
+    uint32_t height;                  // 屏幕分辨率高（scanout 高）
+    uint32_t fb_height;               // backing/resource 实际高度（滚屏 panning 余量，=2*height）
 
     void *fb;                         // framebuffer 虚拟地址，写像素用
     phys_addr_t fb_phy;               // framebuffer 物理地址，attach 时填给设备
@@ -139,6 +140,17 @@ struct virtio_gpu_transfer_to_host_2d {
 
 
 void init_virtio_gpu();
+
+/*
+ * 上屏一帧的脏矩形（x/y/w/h 为 resource 绝对坐标）。
+ * rescan=1 时额外发 SET_SCANOUT，把屏幕窗口移到 resource 内
+ * (0, scanout_y) 处——滚屏 panning 用：旧像素无需重传，只传
+ * 新露出的底部条带 + 平移窗口。rescan=0 时 scanout_y 被忽略。
+ */
+int virtio_gpu_present(struct virtio_gpu_device *gpu,
+                       uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                       int rescan, uint32_t scanout_y);
+
 int virtio_gpu_flush(struct virtio_gpu_device *gpu,
                             uint32_t x, uint32_t y,
                             uint32_t w, uint32_t h);

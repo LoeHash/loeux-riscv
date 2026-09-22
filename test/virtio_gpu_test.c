@@ -50,7 +50,7 @@ void kgfx_test_rect(struct virtio_gpu_device *gpu)
         kgfx_clear(gpu, 0xFF000000);                          // 黑底
         kgfx_fill_rect(gpu, 100, 100, 200, 150, 0xFFFF0000);  // 红色实心矩形
         kgfx_draw_rect(gpu, 400, 100, 300, 200, 0xFF00FF00);  // 绿色边框矩形
-        kgfx_update(gpu);                                                       // 刷新脏区域
+        kgfx_flush_now();                                                       // 刷新脏区域
 }
 
 void kgfx_test_text(struct virtio_gpu_device *gpu)
@@ -58,7 +58,7 @@ void kgfx_test_text(struct virtio_gpu_device *gpu)
         kgfx_clear(gpu, 0xFF000000);
         kgfx_draw_string(gpu, "Hello, Loeux!", 100, 100, 0xFFFFFFFF, 0xFF000000);
         kgfx_draw_string(gpu, "0123456789", 100, 130, 0xFFFFFF00, 0xFF000000);
-        kgfx_update(gpu);
+        kgfx_flush_now();
 }
 
 
@@ -75,7 +75,7 @@ void kgfx_test_line(struct virtio_gpu_device *gpu)
         // 对角线
         kgfx_draw_line(gpu, 0, 0, 1279, 799, 0xFFFF0000);
 
-        kgfx_update(gpu);
+        kgfx_flush_now();
 }
 
 // 综合测试：把所有可见字符、各种图形都画出来
@@ -102,7 +102,7 @@ void kgfx_test_all_chars(struct virtio_gpu_device *gpu)
                 }
         }
 
-        kgfx_update(gpu);
+        kgfx_flush_now();
 }
 
 void kgfx_test_color_bars(struct virtio_gpu_device *gpu)
@@ -120,7 +120,7 @@ void kgfx_test_color_bars(struct virtio_gpu_device *gpu)
                 kgfx_fill_rect(gpu, 0, i * bar_h, gpu->width, bar_h, colors[i]);
         }
 
-        kgfx_update(gpu);
+        kgfx_flush_now();
 }
 
 void kgfx_test_rects(struct virtio_gpu_device *gpu)
@@ -138,7 +138,7 @@ void kgfx_test_rects(struct virtio_gpu_device *gpu)
                 kgfx_draw_rect(gpu, x, y, w, h, colors[i % 5]);
         }
 
-        kgfx_update(gpu);
+        kgfx_flush_now();
 }
 
 void kgfx_test_lines(struct virtio_gpu_device *gpu)
@@ -162,7 +162,7 @@ void kgfx_test_lines(struct virtio_gpu_device *gpu)
         for (int y = 0; y < (int)gpu->height; y += 64)
                 kgfx_draw_line(gpu, 0, y, gpu->width - 1, y, 0xFF404040);
 
-        kgfx_update(gpu);
+        kgfx_flush_now();
 }
 
 void kgfx_test_text_lines(struct virtio_gpu_device *gpu)
@@ -188,7 +188,7 @@ void kgfx_test_text_lines(struct virtio_gpu_device *gpu)
                 y += ASCII8X16_H + 4;
         }
 
-        kgfx_update(gpu);
+        kgfx_flush_now();
 }
 
 // 综合测试，依次跑所有
