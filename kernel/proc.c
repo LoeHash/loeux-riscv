@@ -925,7 +925,6 @@ int kfork()
 	//    但共享出的 file->refcount 必须原子自增
 	//    因为后续父子任意一方 close 时会原子减
 	//    避免与对方的 fork/close 竞争。
-
 	for (int i = 0; i < NOFILE; i++) {
 		struct file* f = father_ts->ofile[i];
 

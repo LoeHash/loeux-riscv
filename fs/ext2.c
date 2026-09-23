@@ -1794,6 +1794,10 @@ static int ext2_create(struct inode* dir,
 	    dir->sb->private == NULL || dir->private == NULL)
 		return -1;
 
+	/* 调用方可能只传权限位（如 0666），不带 S_IFREG 类型位；
+	 * mode 的 S_IFMT 全 0 时自动补 S_IFREG */
+	if ((mode & S_IFMT) == 0)
+		mode |= S_IFREG;
 	if ((mode & S_IFMT) != S_IFREG)
 		return -1;
 

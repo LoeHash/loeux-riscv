@@ -76,7 +76,7 @@ static void load_file(const char* path)
 	if (fd < 0) {
 		/* 文件不存在：新建空文档 */
 		nlines = 1;
-		lines[0] = malloc(1);
+		lines[0] = malloc(MAX_LINE_LEN);
 		lines[0][0] = '\0';
 		line_lens[0] = 0;
 		return;
@@ -100,12 +100,16 @@ static void load_file(const char* path)
 		if (i == content_len || content[i] == '\n') {
 			int len = i - start;
 			if (nlines < MAX_LINES) {
-				char* line = malloc(len + 1);
-				for (int j = 0; j < len; j++)
+				char* line = malloc(MAX_LINE_LEN);
+				int copy = len < MAX_LINE_LEN - 1
+					       ? len
+					       : MAX_LINE_LEN - 1;
+				int j;
+				for (j = 0; j < copy; j++)
 					line[j] = content[start + j];
-				line[len] = '\0';
+				line[j] = '\0';
 				lines[nlines] = line;
-				line_lens[nlines] = len;
+				line_lens[nlines] = copy;
 				nlines++;
 			}
 			start = i + 1;
@@ -113,7 +117,7 @@ static void load_file(const char* path)
 	}
 	if (nlines == 0) {
 		nlines = 1;
-		lines[0] = malloc(1);
+		lines[0] = malloc(MAX_LINE_LEN);
 		lines[0][0] = '\0';
 		line_lens[0] = 0;
 	}
@@ -134,10 +138,13 @@ static void save_file(void)
 	modified = 0;
 }
 
-/* 重绘整个屏幕：不清屏，光标回到 (1,1) 逐行覆盖 */
+/* 重绘整个屏幕：覆盖式（\033[H 回到 1,1 逐行覆盖，不清屏不闪）
+ * 重绘前 \033[?25l 隐藏光标、绘完定位光标后 \033[?25h 再显示，
+ * 避免重绘过程中每行末尾 putc 画/擦光标造成的闪烁。 */
 static void redraw(void)
 {
-	emit_str("\033[H"); /* 光标到 (1,1) */
+	emit_str("\033[?25l"); /* 隐藏光标 */
+	emit_str("\033[H");    /* 光标到 (1,1) */
 	for (int i = 0; i < ROWS; i++) {
 		if (i < nlines) {
 			emit(lines[i], line_lens[i]);
@@ -147,6 +154,7 @@ static void redraw(void)
 			emit_str("\r\n");
 	}
 	move_cursor(cur_row, cur_col);
+	emit_str("\033[?25h"); /* 显示光标 */
 }
 
 /* 在光标处插入字符 */
@@ -202,10 +210,11 @@ static void insert_newline(void)
 	int len = line_lens[cur_row];
 	char* line = lines[cur_row];
 	int rest_len = len - cur_col;
-	char* new_line = malloc(rest_len + 1);
-	for (int i = 0; i < rest_len; i++)
+	char* new_line = malloc(MAX_LINE_LEN);
+	int copy = rest_len < MAX_LINE_LEN - 1 ? rest_len : MAX_LINE_LEN - 1;
+	for (int i = 0; i < copy; i++)
 		new_line[i] = line[cur_col + i];
-	new_line[rest_len] = '\0';
+	new_line[copy] = '\0';
 
 	line_lens[cur_row] = cur_col;
 	line[cur_col] = '\0';
@@ -278,8 +287,10 @@ int main(int argc, char* argv[])
 
 	char c;
 	while (read(0, &c, 1) == 1) {
+		int is_move = 0;
 		if (c == '\033') {
-			/* 转义序列：方向键 \033[A/B/C/D */
+			/* 转义序列：方向键 \033[A/B/C/D — 光标移动不需 full
+			 * redraw */
 			char s1, s2;
 			if (read(0, &s1, 1) != 1)
 				continue;
@@ -301,6 +312,7 @@ int main(int argc, char* argv[])
 				move_left();
 				break;
 			}
+			is_move = 1;
 		} else if (c == 0x11) {
 			/* Ctrl+Q 退出 */
 			break;
@@ -314,7 +326,13 @@ int main(int argc, char* argv[])
 		} else if (c >= 0x20 && c < 0x7f) {
 			insert_char(c);
 		}
-		redraw();
+		if (is_move) {
+			/* 只定位光标，内容没变 */
+			move_cursor(cur_row, cur_col);
+		} else {
+			/* 文本编辑/保存后 full redraw */
+			redraw();
+		}
 	}
 
 	clear_screen();

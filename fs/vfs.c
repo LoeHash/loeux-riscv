@@ -10,6 +10,7 @@
 #include <char_dev.h>
 #include <lib.h>
 #include <syscall.h>
+#include <printk.h>
 
 /*
  * VFS 层开发范式：

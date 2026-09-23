@@ -14,7 +14,8 @@ INCLUDES := -I. \
             -I../include/test
 
 CFLAGS := -march=rv64gc -mabi=lp64 \
-          -nostdlib -ffreestanding \
+          -nostdlib -ffreestanding -fno-builtin \
+          -fno-tree-loop-distribute-patterns \
           $(INCLUDES) -g \
           -MMD -MP
 
@@ -28,7 +29,7 @@ MOUNT_POINT := /media/loe
 
 # 用户库
 
-LIB_SRCS ?= ulib.c stdio.c malloc.c
+LIB_SRCS ?= ulib.c stdio.c malloc.c mem.c
 LIB_OBJS := $(LIB_SRCS:.c=.o)
 USER_LIBS ?= $(LIB_OBJS)
 
