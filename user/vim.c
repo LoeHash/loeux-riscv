@@ -1,13 +1,3 @@
-/*
- * vim.c - 极简全屏文本编辑器
- *
- *
- * 实现要点：
- *   - 用 read(0, &c, 1) 逐字符读输入（内核 tty 层对 count==1 走原始模式，
- *     不经过行规则/回显）
- *   - 用 ANSI 转义序列控制 gpu_tty：\033[2J 清屏、\033[row;colH 光标定位、
- *     \033[K 清行尾
- */
 #include <ulib.h>
 #include <stdio.h>
 #include <malloc.h>
