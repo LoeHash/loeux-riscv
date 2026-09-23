@@ -155,6 +155,7 @@ clean:
 	$(MAKE) -C drivers clean
 	$(MAKE) -C fs clean
 	$(MAKE) -C test clean
+	$(MAKE) -C utils clean
 	$(MAKE) -C mm clean
 	$(MAKE) -C user clean
 	$(MAKE) -C asm clean
