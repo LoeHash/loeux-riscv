@@ -12,18 +12,21 @@
 #define FOTMAT_ZERO 1 << 4
 
 #define ZEROPAD 1  /* pad with zero */
-#define SIGN 2     /* unsigned/signed long */
-#define PLUS 4     /* show plus */
-#define SPACE 8    /* space if plus */
-#define LEFT 16    /* left justified */
+#define SIGN 2	   /* unsigned/signed long */
+#define PLUS 4	   /* show plus */
+#define SPACE 8	   /* space if plus */
+#define LEFT 16	   /* left justified */
 #define SPECIAL 32 /* 0x */
 #define SMALL 64   /* use 'abcdef' instead of 'ABCDEF' */
 
-int vsprintf(char *buf, const char *fmt, va_list args);
-void printk(char *fmt, ...);
+int vsprintf(char* buf, const char* fmt, va_list args);
+void printk(char* fmt, ...);
 
-int skip_atoi(const char **s);
+void printk_color(int fg_sgr, char* fmt, ...);
 
-static char *number(char *str, long num, int base, int size, int precision, int type);
+int skip_atoi(const char** s);
+
+static char*
+number(char* str, long num, int base, int size, int precision, int type);
 
 #endif

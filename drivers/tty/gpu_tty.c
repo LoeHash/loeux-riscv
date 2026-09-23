@@ -25,6 +25,34 @@ static void parse_two(const char* s, int* a, int* b, int da, int db);
 static void
 gpu_tty_handle_csi(struct gpu_tty_state* st, char final, const char* args);
 
+/* ---- SGR 颜色（\033[…m）与 printk 控制台通道 ---- */
+
+#define ANSI_FG_DEFAULT 0xFFFFFFFF
+#define ANSI_BG_DEFAULT 0xFF000000
+
+/* ANSI 16 色 to RGBA索引 0-15 */
+static const uint32_t ansi_colors[16] = {
+    0xFF000000, /* 0  black          */
+    0xFFAA0000, /* 1  red            */
+    0xFF00AA00, /* 2  green          */
+    0xFFAA5500, /* 3  yellow/brown   */
+    0xFF0000AA, /* 4  blue           */
+    0xFFAA00AA, /* 5  magenta        */
+    0xFF00AAAA, /* 6  cyan           */
+    0xFFAAAAAA, /* 7  white (gray)   */
+    0xFF555555, /* 8  bright black   */
+    0xFFFF5555, /* 9  bright red     */
+    0xFF55FF55, /* 10 bright green   */
+    0xFFFFFF55, /* 11 bright yellow  */
+    0xFF5555FF, /* 12 bright blue    */
+    0xFFFF55FF, /* 13 bright magenta */
+    0xFF55FFFF, /* 14 bright cyan    */
+    0xFFFFFFFF, /* 15 bright white   */
+};
+
+/* printk 屏幕通道就绪标志：init_gpu_tty 末尾置 1（开机早期串口单路） */
+static int console_ready = 0;
+
 static void parse_two(const char* s, int* a, int* b, int da, int db)
 {
 	int v = 0, first = 1, has = 0;
@@ -134,6 +162,51 @@ gpu_tty_handle_csi(struct gpu_tty_state* st, char final, const char* args)
 			}
 			kgfx_mark_dirty_screen(
 			    st->cur_x, st->cur_y + 14, ASCII8X16_W, 2);
+		}
+		break;
+	}
+	case 'm': {
+		/*
+		 * SGR 颜色：\033[<n>m，分号分隔多参数（如 \033[31;42m）。
+		 * 只改 fg/bg 影响后续绘制，不动像素故无需标脏。
+		 * fb 为 B8G8R8A8 小端，颜色常量按 0xAARRGGBB 写即正确。
+		 */
+		const char* p = args;
+		int val = 0, has = 0;
+		if (*p == '\0')
+			val = 0, has = 1; /* 空参数等价 \033[m = 复位 */
+		for (;; p++) {
+			if (*p >= '0' && *p <= '9') {
+				val = val * 10 + (*p - '0');
+				has = 1;
+			}
+			if (*p == ';' || *p == '\0') {
+				if (has) {
+					if (val == 0) {
+						st->fg = ANSI_FG_DEFAULT;
+						st->bg = ANSI_BG_DEFAULT;
+					} else if (val >= 30 && val <= 37) {
+						st->fg = ansi_colors[val - 30];
+					} else if (val == 39) {
+						st->fg = ANSI_FG_DEFAULT;
+					} else if (val >= 40 && val <= 47) {
+						st->bg = ansi_colors[val - 40];
+					} else if (val == 49) {
+						st->bg = ANSI_BG_DEFAULT;
+					} else if (val >= 90 && val <= 97) {
+						st->fg =
+						    ansi_colors[val - 90 + 8];
+					} else if (val >= 100 && val <= 107) {
+						st->bg =
+						    ansi_colors[val - 100 + 8];
+					}
+					/* 其余（1 加粗、5 闪烁等）忽略 */
+				}
+				val = 0;
+				has = 0;
+				if (*p == '\0')
+					break;
+			}
 		}
 		break;
 	}
@@ -350,7 +423,32 @@ void init_gpu_tty()
 		return;
 	}
 	printk("the gpu tty has been initied!\n");
+	console_ready = 1;
 	gpu_tty_test();
+}
+
+/*
+ * printk 控制台通道（内核 printk 双路输出的屏幕侧）。
+ * 逐字符走 putc（含 \n 滚屏、\033 转义解析），
+ * 上屏由 100Hz 时钟节拍统一合并，无需在此 flush。
+ * gpu_tty 未初始化（开机早期）返回 -1，printk 自动退化为仅串口。
+ */
+int gpu_tty_console_write(const char* s, uint64_t len)
+{
+	struct tty* t = &gpu0_tty;
+
+	if (!console_ready)
+		return -1;
+
+	for (uint64_t i = 0; i < len; i++)
+		t->ops->putc(t, s[i]);
+	return 0;
+}
+
+/* 强制把已标脏内容立即刷上屏（panic 停机前用：时钟节拍可能已停） */
+void gpu_tty_console_flush(void)
+{
+	kgfx_flush_now();
 }
 
 static void gpu_tty_test(void)
@@ -396,6 +494,14 @@ static void gpu_tty_test(void)
 	t->ops->putc(t, 'D');
 	t->ops->putc(t, 'E');
 	t->ops->putc(t, '\n');
+
+	/* SGR 颜色自测：正常启动应看到 红/绿/黄 三色行，验证 \033[…m 解析 */
+	{
+		const char* color_test = "\033[31mColor 31: RED\033[0m\n"
+					 "\033[32mColor 32: GREEN\033[0m\n"
+					 "\033[33mColor 33: YELLOW\033[0m\n";
+		gpu_tty_console_write(color_test, strlen(color_test));
+	}
 
 	/* 批量输出结束，一次性刷屏 */
 	t->ops->flush(t);

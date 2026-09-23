@@ -21,4 +21,7 @@ struct gpu_tty_state {
 };
 void gpu_tty_tick();
 void init_gpu_tty();
+/* printk 控制台通道：返回 0 成功，-1 = gpu_tty 未就绪 则走串口 */
+int gpu_tty_console_write(const char* s, uint64_t len);
+void gpu_tty_console_flush(void);
 #endif

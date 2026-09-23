@@ -1,6 +1,13 @@
 /*
  * 这是给内核使用的printk
  * 任何系统调用都不应使用 printk
+ *
+ * 双通道输出：
+ *   串口 to 纯文本，宿主机日志通道，不带转义码便于 grep；
+ *   屏幕 to gpu_tty 控制台，颜色转义序列由 printk 自己维护：
+ *           msg_fg 生效期间每条消息包裹 \033[<n>m ... \033[0m，
+ *           串口侧不受影响。
+ *           由于开机早期 gpu_tty 未就绪 则自动退化为仅串口。
  */
 #include <stdarg.h>
 #include <stddef.h>
@@ -10,8 +17,12 @@
 #include <printk.h>
 #include <type.h>
 #include <spinlock.h>
+#include <tty/gpu_tty.h>
 
 static spinlock_t printing_lock = {0};
+
+/* 当前 printk 屏幕侧前景色 SGR 码，-1 = 默认不包裹序列 */
+static int msg_fg = -1;
 
 #define is_digit(c) ((c) >= '0' && (c) <= '9')
 
@@ -261,21 +272,92 @@ int vsprintf(char* buf, const char* fmt, va_list args)
 	return str - buf;
 }
 
+/*
+ * 控制台发射：格式化好的消息同时发串口和屏幕。
+ * 串口始终纯文本；屏幕侧在 msg_fg 生效时由 printk 自己拼装
+ * \033[<n>m ... \033[0m 包裹（gpu_tty 未就绪时 gpu_tty_console_write
+ * 返回 -1，自动退化为仅串口。
+ */
+int printk_screen_ready(void)
+{
+	return gpu_tty_console_write("", 0) == 0;
+}
+
+static void printk_emit(const char* s, int len)
+{
+	int i;
+
+	/* 串口（SBI 控制台）：纯文本 */
+	for (i = 0; i < len; i++)
+		sbi_putchar(s[i]);
+
+	/* 屏幕gpu_tty：文本只写一次；msg_fg 生效时由 printk 自己
+	 * 拼装 \033[<n>m ... \033[0m 包裹，未就绪则整体退化仅串口 */
+	if (!printk_screen_ready())
+		return;
+
+	if (msg_fg >= 0) {
+		char seq[16];
+		int n = 0, v = msg_fg;
+		char tmp[4];
+
+		/* 进色 \033[<n>m */
+		seq[n++] = '\033';
+		seq[n++] = '[';
+		int m = 0;
+		if (v == 0) {
+			tmp[m++] = '0';
+		} else {
+			while (v) {
+				tmp[m++] = '0' + v % 10;
+				v /= 10;
+			}
+		}
+		while (m)
+			seq[n++] = tmp[--m];
+		seq[n++] = 'm';
+		gpu_tty_console_write(seq, n);
+	}
+
+	gpu_tty_console_write(s, len);
+
+	if (msg_fg >= 0)
+		gpu_tty_console_write("\033[0m", 4); /* 复位 */
+}
+
 void printk(char* fmt, ...)
 {
 
 	va_list args;
 	char buf[PRINT_BUFFER_SIZE];
-	char* p = buf;
 	va_start(args, fmt);
 	vsprintf(buf, fmt, args);
 	va_end(args);
 
 	acquire(&printing_lock);
-	while (*p != '\0') {
-		sbi_putchar(*p);
-		p++;
-	}
+	printk_emit(buf, strlen(buf));
+	release(&printing_lock);
+}
+
+/*
+ * 带颜色的内核打印：fg_sgr 为 SGR 前景色码（31=红、32=绿、33=黄…），
+ * 只影响本条消息的屏幕侧显示。供 panic 等需要醒目提示的路径使用。
+ */
+void printk_color(int fg_sgr, char* fmt, ...)
+{
+	va_list args;
+	char buf[PRINT_BUFFER_SIZE];
+	int saved;
+
+	va_start(args, fmt);
+	vsprintf(buf, fmt, args);
+	va_end(args);
+
+	acquire(&printing_lock);
+	saved = msg_fg;
+	msg_fg = fg_sgr;
+	printk_emit(buf, strlen(buf));
+	msg_fg = saved;
 	release(&printing_lock);
 }
 
