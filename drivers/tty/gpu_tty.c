@@ -118,6 +118,8 @@ gpu_tty_handle_csi(struct gpu_tty_state* st, char final, const char* args)
 		if (ny + ASCII8X16_H > gpu->height)
 			ny = gpu->height - ASCII8X16_H;
 		gpu_tty_erase_cursor(st);
+		kgfx_mark_dirty_screen(
+		    st->cur_x, st->cur_y + 14, ASCII8X16_W, 2);
 		st->cur_x = nx;
 		st->cur_y = ny;
 		if (st->cursor_visible)
