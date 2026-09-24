@@ -3,6 +3,7 @@
  *
  * A very small self-hostable MiniC -> RV64 ELF64 compiler.
  *
+
  * The compiler itself is intended to run as a user process of loeux.
  * It therefore uses only the project's user headers and these runtime
  * interfaces:
@@ -62,8 +63,6 @@ static const char* g_lib_dir = LIB_DIR;
 #ifndef O_TRUNC
 #define O_TRUNC 01000
 #endif
-
-/* ===== 2. 基础整数/内存工具 ===== */
 
 static void* mc_memcpy(void* dst, const void* src, unsigned long n);
 static void* mc_memset(void* dst, int c, unsigned long n);
@@ -252,8 +251,6 @@ static void die_plain(const char* msg)
 {
 	write(STDERR_FD, (unsigned char*)msg, u_strlen(msg));
 	write(STDERR_FD, (unsigned char*)"\n", 1);
-	while (1) {
-	}
 }
 
 static void dief(const char* file, int line, int col, const char* msg)
@@ -269,8 +266,6 @@ static void dief(const char* file, int line, int col, const char* msg)
 	write(STDERR_FD, (unsigned char*)": error: ", 9);
 	write(STDERR_FD, (unsigned char*)msg, u_strlen(msg));
 	write(STDERR_FD, (unsigned char*)"\n", 1);
-	while (1) {
-	}
 }
 
 static int
@@ -339,8 +334,6 @@ file_write_all(const char* path, const unsigned char* buf, unsigned long n)
 	close(fd);
 	return 0;
 }
-
-/* ===== 3. 动态字节向量 ===== */
 
 struct ByteVec {
 	unsigned char* p;
@@ -412,8 +405,6 @@ static int bv_align(struct ByteVec* v, unsigned long a)
 {
 	return bv_resize(v, align_up(v->n, a));
 }
-
-/* ===== 4. ELF64 定义 ===== */
 
 #define EI_NIDENT 16
 #define ELFCLASS64 2
@@ -529,8 +520,6 @@ static unsigned long long r_info(unsigned int s, unsigned int t)
 {
 	return ((unsigned long long)s << 32) | t;
 }
-
-/* ===== 5. 极简 #include + #define 预处理 ===== */
 
 /* ---- 宏表 ---- */
 #define MAX_MACROS 512
@@ -1225,8 +1214,6 @@ static char* expand_file(const char* path, int depth)
 	return r;
 }
 
-/* ===== 6. Lexer ===== */
-
 enum TokenKind {
 	TOK_EOF,
 	TOK_ID,
@@ -1602,8 +1589,6 @@ static int lex_all(const char* file, const char* src, struct TokenVec* out)
 	}
 }
 
-/* ===== 7. 类型、符号、AST ===== */
-
 enum BaseType { BT_VOID, BT_CHAR, BT_INT, BT_LONG };
 
 struct Type {
@@ -1853,8 +1838,6 @@ static void gv_push(struct GlobalVec* v, struct GlobalInit g)
 	}
 	v->v[v->n++] = g;
 }
-
-/* ===== 8. Parser ===== */
 
 struct Parser {
 	const char* file;
@@ -2611,8 +2594,6 @@ static void parse_translation_unit(struct Parser* p)
 	}
 }
 
-/* ===== 9. RISC-V 编码器 ===== */
-
 static unsigned int
 rv_r(int funct7, int rs2, int rs1, int funct3, int rd, int opcode)
 {
@@ -2687,8 +2668,6 @@ static unsigned int rv_sb(int rs2, int rs1, int imm)
 {
 	return rv_s(imm, rs2, rs1, 0);
 }
-
-/* ===== 10. 对象模型 / relocation ===== */
 
 struct ObjSym {
 	char* name;
@@ -2810,8 +2789,6 @@ static int reloc_add(struct RelocVec* v,
 	++v->n;
 	return 0;
 }
-
-/* ===== 11. Codegen ===== */
 
 struct CodeGen {
 	struct Parser* parser;
@@ -3133,9 +3110,9 @@ static void gen_binary(struct CodeGen* g,
 	else if (u_streq(e->op, ">>"))
 		emit32cg(g, rv_r(0, 10, 5, 5, 10, 0x33));
 	else if (u_streq(e->op, "<"))
-		emit32cg(g, rv_r(0, 5, 10, 2, 10, 0x33));
-	else if (u_streq(e->op, ">"))
 		emit32cg(g, rv_r(0, 10, 5, 2, 10, 0x33));
+	else if (u_streq(e->op, ">"))
+		emit32cg(g, rv_r(0, 5, 10, 2, 10, 0x33));
 	else if (u_streq(e->op, "<=")) {
 		emit32cg(g, rv_r(0, 5, 10, 2, 10, 0x33));
 		emit32cg(g, rv_i(1, 10, 4, 10, 0x13));
@@ -3640,8 +3617,6 @@ static void generate_object(struct CodeGen* g)
 	}
 }
 
-/* ===== 12. ELF64 REL object 写出 ===== */
-
 static unsigned int
 add_str(char** buf, unsigned long* n, unsigned long* cap, const char* s)
 {
@@ -3884,8 +3859,6 @@ static int object_to_elf(struct Object* o, struct ByteVec* out)
 	return 0;
 }
 
-/* ===== 13. 内置 linker ===== */
-
 struct LinkObj {
 	unsigned char* file;
 	unsigned long size;
@@ -3965,6 +3938,18 @@ linkobj_parse(struct LinkObj* o, unsigned char* file, unsigned long size)
 			o->sym_sec = i;
 		if (u_streq(name, ".strtab"))
 			o->str_sec = i;
+
+		/* 丢弃异常展开 / 调试 / 注解元数据。.eh_frame 带 SHF_ALLOC，
+		 * 但 freestanding 运行时从不做 DWARF 展开，其 SET/PCREL/ADD
+		 * 等重定位本链接器也无法处理；直接忽略整段（连同它的 rela
+		 * 段）。 debug、comment、riscv.attributes、note
+		 * 等段也不参与加载。 */
+		if (starts_with(name, ".eh_frame") ||
+		    starts_with(name, ".debug") ||
+		    starts_with(name, ".comment") ||
+		    starts_with(name, ".riscv") || starts_with(name, ".note") ||
+		    starts_with(name, ".zdebug"))
+			continue;
 
 		if (o->sh[i].sh_type == SHT_NOBITS) {
 			if (o->sh[i].sh_flags & SHF_ALLOC)
@@ -4147,19 +4132,26 @@ static void patch_j(unsigned char* p, long long imm)
 	wr32(p, x);
 }
 
+/* CB-type (c.beqz/c.bnez), verified against GNU as: inst bits
+ * 12,11,10,6,5,4,3,2 hold imm bits 8,4,3,7,6,2,1,5. */
 static void patch_rvc_branch(unsigned char* p, long long imm)
 {
 	unsigned short x = (unsigned short)(p[0] | ((unsigned short)p[1] << 8));
 	unsigned u = (unsigned)imm;
 	x &= (unsigned short)~0x1c7cU;
 	x |= (unsigned short)(((u >> 8) & 1) << 12);
-	x |= (unsigned short)(((u >> 7) & 3) << 10);
-	x |= (unsigned short)(((u >> 3) & 3) << 5);
-	x |= (unsigned short)(((u >> 1) & 3) << 3);
+	x |= (unsigned short)(((u >> 4) & 1) << 11);
+	x |= (unsigned short)(((u >> 3) & 1) << 10);
+	x |= (unsigned short)(((u >> 7) & 1) << 6);
+	x |= (unsigned short)(((u >> 6) & 1) << 5);
+	x |= (unsigned short)(((u >> 2) & 1) << 4);
+	x |= (unsigned short)(((u >> 1) & 1) << 3);
 	x |= (unsigned short)(((u >> 5) & 1) << 2);
 	wr16(p, x);
 }
 
+/* CJ-type (c.j): inst bits 12,11,10,9,8,7,6,5,4:3,2 hold
+ * imm bits 11,4,9,8,10,6,7,3,2:1,5. */
 static void patch_rvc_jump(unsigned char* p, long long imm)
 {
 	unsigned short x = (unsigned short)(p[0] | ((unsigned short)p[1] << 8));
@@ -4167,12 +4159,15 @@ static void patch_rvc_jump(unsigned char* p, long long imm)
 	x &= (unsigned short)~0x1ffcU;
 	x |= (unsigned short)(((u >> 11) & 1) << 12);
 	x |= (unsigned short)(((u >> 4) & 1) << 11);
-	x |= (unsigned short)(((u >> 9) & 3) << 9);
+	x |= (unsigned short)(((u >> 9) & 1) << 10);
+	x |= (unsigned short)(((u >> 8) & 1) << 9);
 	x |= (unsigned short)(((u >> 10) & 1) << 8);
 	x |= (unsigned short)(((u >> 6) & 1) << 7);
 	x |= (unsigned short)(((u >> 7) & 1) << 6);
-	x |= (unsigned short)(((u >> 1) & 1) << 5);
-	x |= (unsigned short)(((u >> 3) & 7) << 2);
+	x |= (unsigned short)(((u >> 3) & 1) << 5);
+	x |= (unsigned short)(((u >> 2) & 1) << 4);
+	x |= (unsigned short)(((u >> 1) & 1) << 3);
+	x |= (unsigned short)(((u >> 5) & 1) << 2);
 	wr16(p, x);
 }
 
@@ -4605,8 +4600,6 @@ static int link_final(struct ByteVec* user_elf, const char* outpath)
 	return 0;
 }
 
-/* ===== 14. AST dump / 调试 ===== */
-
 static void dump_expr(struct Expr* e, int d)
 {
 	int i;
@@ -4728,8 +4721,6 @@ static void dump_stmt(struct Stmt* s, int d)
 		break;
 	}
 }
-
-/* ===== 15. 驱动 ===== */
 
 struct Options {
 	const char* input;
@@ -4870,8 +4861,6 @@ static int parse_options(int argc, char** argv, struct Options* o)
 		die_plain("lcc: -o is required");
 	return 0;
 }
-
-/* ===== 16. main ===== */
 
 int main(int argc, char** argv)
 {
