@@ -1,7 +1,7 @@
 #ifndef _INC_USER_UTYPE_H
 #define _INC_USER_UTYPE_H
 ///////////////////////////////TYPE DEFINITIONS///////////////////////////////
-#define NULL (void *)0
+#define NULL (void*)0
 
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
@@ -14,7 +14,10 @@ typedef signed int int32_t;
 typedef signed long int64_t;
 
 typedef unsigned long size_t;
-typedef void *voidp_t;
+typedef long ssize_t;
+typedef unsigned long uintptr_t;
+typedef void* voidp_t;
 typedef int pid_t;
-///////////////////////////////TYPE DEFINITIONS END///////////////////////////////
+///////////////////////////////TYPE DEFINITIONS
+///END///////////////////////////////
 #endif

@@ -11,7 +11,6 @@
 
 uint64_t sys_sbrk()
 {
-
 	int delta;
 
 	get_arg_int(0, &delta);
@@ -21,40 +20,10 @@ uint64_t sys_sbrk()
 		return -1;
 	}
 	uint64_t before_brk = ts->heap_brk;
-	uint64_t new_brk = ts->heap_brk + delta;
+	ts->heap_brk += delta;
 
-	/* 扩堆时立即把新增页映射好。*/
-	/* 暂时如此，TODO: 后面如果copyout或copyin时出现pf，再映射好*/
-	if (new_brk > before_brk) {
-		uint64_t va = PGROUNDDOWN(before_brk);
-		uint64_t end = PGROUNDDOWN(new_brk - 1);
-		acquire(&ts->lk);
-		for (; va <= end; va += PG_4K_SIZE) {
-			if (walkaddr(ts->pg, va) != 0)
-				continue;
-			char* pa = kalloc();
-			if (pa == NULL) {
-				release(&ts->lk);
-				return -1;
-			}
-			memset(pa, 0, PG_4K_SIZE);
-			if (mappages(ts->pg,
-				     va,
-				     PG_4K_SIZE,
-				     (uint64_t)pa,
-				     PTE_V | PTE_W | PTE_R | PTE_U) < 0) {
-				free_page(pa);
-				release(&ts->lk);
-				return -1;
-			}
-		}
-		ts->heap_brk = new_brk;
-		if (ts->heap_brk > ts->heap_history_max)
-			ts->heap_history_max = ts->heap_brk;
-		release(&ts->lk);
-	} else {
-		/* 收缩：保持已有映射（与原行为一致，不做 unmap） */
-		ts->heap_brk = new_brk;
+	if (ts->heap_brk > ts->heap_history_max) {
+		ts->heap_history_max = ts->heap_brk;
 	}
 
 	return before_brk;
@@ -75,7 +44,7 @@ uint64_t sys_pwd()
 	struct task_struct* ts = get_task();
 	acquire(&ts->lk);
 
-	copy_data_str_out(
+	copy_str_to_user(
 	    buf_addr, ts->cwd_path, max < MAX_PATH_LEN ? max : MAX_PATH_LEN);
 
 	release(&ts->lk);
@@ -96,7 +65,7 @@ uint64_t sys_chdir()
 	if (path == NULL)
 		return -1;
 
-	if (copyinstr(ts->pg, path, path_addr, MAX_PATH_LEN) < 0) {
+	if (copy_str_from_user(ts->pg, path, path_addr, MAX_PATH_LEN) < 0) {
 		slab_free(path);
 		return -1;
 	}
@@ -180,7 +149,7 @@ uint64_t sys_exec()
 
 	// 1. 从用户空间拷贝 path 字符串
 	//    copyinstr 遍历用户页表翻译地址，遇到 \0 停止
-	if (copyinstr(ts->pg, u_path, path_addr, MAX_PATH_LEN) < 0) {
+	if (copy_str_from_user(ts->pg, u_path, path_addr, MAX_PATH_LEN) < 0) {
 		return -1;
 	}
 
@@ -209,10 +178,10 @@ uint64_t sys_exec()
 	while (argc < MAX_ARGS - 1) {
 		// 从用户空间读取一个 char* 指针
 		uint64_t str_addr;
-		if (copyin(ts->pg,
-			   (char*)&str_addr,
-			   argv_addr + argc * sizeof(uint64_t),
-			   sizeof(uint64_t)) < 0) {
+		if (copy_from_user(ts->pg,
+				   (char*)&str_addr,
+				   argv_addr + argc * sizeof(uint64_t),
+				   sizeof(uint64_t)) < 0) {
 			goto fail;
 		}
 
@@ -227,7 +196,8 @@ uint64_t sys_exec()
 		alloc_count++;
 
 		// 从用户空间拷贝字符串到内核
-		if (copyinstr(ts->pg, argv[argc], str_addr, MAX_PATH_LEN) < 0) {
+		if (copy_str_from_user(
+			ts->pg, argv[argc], str_addr, MAX_PATH_LEN) < 0) {
 			goto fail;
 		}
 

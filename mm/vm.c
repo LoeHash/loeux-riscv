@@ -425,7 +425,7 @@ uint64_t walkaddr(page_table pagetable, uint64_t va)
 }
 
 // 未来可增加懒分配机制
-int copyout(page_table pagetable, uint64_t dstva, char* src, uint64_t len)
+int copy_to_user(page_table pagetable, uint64_t dstva, char* src, uint64_t len)
 {
 	uint64_t n, va0, pa0;
 	pte* pte;
@@ -440,7 +440,10 @@ int copyout(page_table pagetable, uint64_t dstva, char* src, uint64_t len)
 		// 未来这里做懒分配
 		pa0 = walkaddr(pagetable, va0);
 		if (pa0 == 0) {
-			return -1;
+			if (do_page_fault_with_new_pa(va0, PF_STORE, &pa0) <
+			    0) {
+				return EFAULT;
+			}
 		}
 
 		// 权限检查
@@ -461,7 +464,10 @@ int copyout(page_table pagetable, uint64_t dstva, char* src, uint64_t len)
 	return 0;
 }
 
-int copyin(page_table pagetable, char* dst, uint64_t srcva, uint64_t len)
+int copy_from_user(page_table pagetable,
+		   char* dst,
+		   uint64_t srcva,
+		   uint64_t len)
 {
 	uint64_t n, va0, pa0;
 	while (len > 0) {
@@ -473,7 +479,9 @@ int copyin(page_table pagetable, char* dst, uint64_t srcva, uint64_t len)
 		// 未来这里做懒分配
 		pa0 = walkaddr(pagetable, va0);
 		if (pa0 == 0) {
-			return -1;
+			if (do_page_fault_with_new_pa(va0, PF_LOAD, &pa0) < 0) {
+				return EFAULT;
+			}
 		}
 
 		n = PG_4K_SIZE - (srcva - va0);
@@ -488,16 +496,30 @@ int copyin(page_table pagetable, char* dst, uint64_t srcva, uint64_t len)
 	return 0;
 }
 
-int copyinstr(page_table pagetable, char* dst, uint64_t srcva, uint64_t max)
+int copy_str_from_user(page_table pagetable,
+		       char* dst,
+		       uint64_t srcva,
+		       uint64_t max)
 {
 	uint64_t n, va0, pa0;
 	int got_null = 0;
 
 	while (got_null == 0 && max > 0) {
 		va0 = PGROUNDDOWN(srcva);
-		pa0 = walkaddr(pagetable, va0);
-		if (pa0 == 0)
+
+		va0 = PGROUNDDOWN(srcva);
+		if (va0 > MAX_VA) {
 			return -1;
+		}
+
+		pa0 = walkaddr(pagetable, va0);
+
+		if (pa0 == 0) {
+			if (do_page_fault_with_new_pa(va0, PF_LOAD, &pa0) < 0) {
+				return EFAULT;
+			}
+		}
+
 		n = PG_4K_SIZE - (srcva - va0);
 		if (n > max)
 			n = max;
@@ -644,4 +666,107 @@ uint64_t va2pa(page_table pt, uint64_t va)
 	if (!(*p & PTE_V))
 		return (uint64_t)-1;
 	return PTE2PA(*p) | (va & 0xFFF);
+}
+
+/// @brief 处理缺页异常，分配新的物理页
+/// @param fault_addr 缺页地址
+/// @param type 缺页类型
+/// @param pa_ptr 新分配的物理页地址,会写回
+/// @return 0 成功 -1 失败(只要失败当前进程会被kill)
+/// @note 此函数不会设置进程dead标志
+int do_page_fault_with_new_pa(uint64_t fault_addr,
+			      enum page_fault_type type,
+			      uint64_t* pa_ptr)
+{
+	struct task_struct* ts = get_task();
+
+	if (type != PF_LOAD && type != PF_STORE) {
+		return -1;
+	}
+
+	if (fault_addr < ts->heap_start || fault_addr >= ts->heap_brk) {
+		return -1;
+	}
+
+	uint64_t va = PGROUNDDOWN(fault_addr);
+
+	char* pa = kalloc();
+	if (pa == NULL) {
+		return -1;
+	}
+
+	memset(pa, 0, PG_4K_SIZE);
+
+	acquire(&ts->lk);
+
+	if (mappages(ts->pg,
+		     va,
+		     PG_4K_SIZE,
+		     (uint64_t)pa,
+		     PTE_V | PTE_W | PTE_R | PTE_U) < 0) {
+		release(&ts->lk);
+		free_page(pa);
+		printk("[WWWRRROONG!!!!!!] GOING TO KILL THE PID: %d\n",
+		       ts->pid);
+		return -1;
+	}
+
+	release(&ts->lk);
+
+	*pa_ptr = (uint64_t)pa;
+	return 0;
+}
+
+void do_page_fault(uint64_t fault_addr, enum page_fault_type type)
+{
+	struct task_struct* ts = get_task();
+
+	if (type != PF_LOAD && type != PF_STORE) {
+		to_kill(ts);
+		return;
+	}
+
+	if (fault_addr < ts->heap_start || fault_addr >= ts->heap_brk) {
+		to_kill(ts);
+		return;
+	}
+
+	uint64_t va = PGROUNDDOWN(fault_addr);
+
+	char* pa = kalloc();
+	if (pa == NULL) {
+		to_kill(ts);
+		return;
+	}
+
+	memset(pa, 0, PG_4K_SIZE);
+
+	acquire(&ts->lk);
+
+	if (mappages(ts->pg,
+		     va,
+		     PG_4K_SIZE,
+		     (uint64_t)pa,
+		     PTE_V | PTE_W | PTE_R | PTE_U) < 0) {
+		release(&ts->lk);
+		free_page(pa);
+		printk("[WWWRRROONG!!!!!!] GOING TO KILL THE PID: %d\n",
+		       ts->pid);
+		to_kill(ts);
+		return;
+	}
+
+	release(&ts->lk);
+}
+
+enum page_fault_type get_page_fault_type(uint64_t scause)
+{
+	if (scause == PAGE_FAULT_LOAD_SCAUSE)
+		return PF_LOAD;
+	else if (scause == PAGE_FAULT_STORE_SCAUSE)
+		return PF_STORE;
+	else if (scause == 12)
+		return PF_INSTRUCTION;
+	else
+		return PF_INSTRUCTION;
 }

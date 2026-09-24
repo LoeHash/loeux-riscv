@@ -27,19 +27,19 @@
 
 typedef uint64_t (*syscall_func_t)(void);
 
-int copy_data_addr(uint64_t addr, uint64_t *ip);
-int copy_data_str_out(uint64_t addr, char *buf, int max);
-int copy_data_str(uint64_t addr, char *buf, int max);
-void get_arg_addr(int n, uint64_t *buf);
-void get_arg_int(int n, int *buf);
+int copy_data_addr(uint64_t addr, uint64_t* ip);
+int copy_str_to_user(uint64_t addr, char* buf, int max);
+int copy_data_str(uint64_t addr, char* buf, int max);
+void get_arg_addr(int n, uint64_t* buf);
+void get_arg_int(int n, int* buf);
 void syscall();
-void do_build_user_path(char *des_path, char *u_path, char *cwd);
-void get_arg_i8(int n, int8_t *buf);
-void get_arg_u8(int n, uint8_t *buf);
-void get_arg_i16(int n, int16_t *buf);
-void get_arg_u16(int n, uint16_t *buf);
-void get_arg_i32(int n, int32_t *buf);
-void get_arg_u32(int n, uint32_t *buf);
-void get_arg_i64(int n, int64_t *buf);
-void get_arg_u64(int n, uint64_t *buf);
+void do_build_user_path(char* des_path, char* u_path, char* cwd);
+void get_arg_i8(int n, int8_t* buf);
+void get_arg_u8(int n, uint8_t* buf);
+void get_arg_i16(int n, int16_t* buf);
+void get_arg_u16(int n, uint16_t* buf);
+void get_arg_i32(int n, int32_t* buf);
+void get_arg_u32(int n, uint32_t* buf);
+void get_arg_i64(int n, int64_t* buf);
+void get_arg_u64(int n, uint64_t* buf);
 #endif

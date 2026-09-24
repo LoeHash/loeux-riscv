@@ -73,7 +73,7 @@ int copy_data_addr(uint64_t addr, uint64_t* ip)
 	// 之前误用 copyin（用户 → 内核），方向相反：
 	// 会把用户栈上的旧值覆盖进内核变量，wait 的 status 永远传不出去。
 	// 映射合法性由 copyout 遍历页表验证，未映射地址自然失败。
-	return copyout(t->pg, addr, (char*)ip, sizeof(*ip));
+	return copy_to_user(t->pg, addr, (char*)ip, sizeof(*ip));
 }
 
 /// @brief 从内核缓冲区 buf 复制 max 字节到用户虚拟地址 addr 中
@@ -81,10 +81,10 @@ int copy_data_addr(uint64_t addr, uint64_t* ip)
 /// @param buf 内核缓冲区
 /// @param max 最大复制字节数
 /// @return 实际复制字节数
-int copy_data_str_out(uint64_t addr, char* buf, int max)
+int copy_str_to_user(uint64_t addr, char* buf, int max)
 {
 	struct task_struct* t = get_task();
-	if (copyout(t->pg, addr, buf, max) < 0) {
+	if (copy_to_user(t->pg, addr, buf, max) < 0) {
 		return -1;
 	}
 	return max;
@@ -98,7 +98,7 @@ int copy_data_str_out(uint64_t addr, char* buf, int max)
 int copy_data_str(uint64_t addr, char* buf, int max)
 {
 	struct task_struct* t = get_task();
-	if (copyin(t->pg, buf, addr, max) < 0)
+	if (copy_from_user(t->pg, buf, addr, max) < 0)
 		return -1;
 	return strlen(buf);
 }

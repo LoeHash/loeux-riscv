@@ -6,7 +6,7 @@
 #include <hashmap.h>
 
 #define VFS_ROOT_PARENT_SPECIAL 0xDEADBEEFCAFEBABEULL
-#define VFS_STD_DEVICE "/dev/tty/gpu/0"
+#define VFS_STD_DEVICE "/dev/tty/uart/0"
 /*
 VFS inode 生命周期总结
 
@@ -42,11 +42,11 @@ inode_get 场景
 filesystem 创建 inode：
 
 fat12_lookup()
-        |
-        v
+	|
+	v
 struct inode
-        |
-        v
+	|
+	v
 refcount = 1
 
 这个引用属于调用者。
@@ -87,11 +87,11 @@ cache引用 != 调用者引用
 open：
 
 vfs_lookup()
-        |
-        v
+	|
+	v
 inode
-        |
-        v
+	|
+	v
 file->inode
 
 这里是：
@@ -101,8 +101,8 @@ file->inode
 不是增加：
 
 lookup引用
-        |
-        v
+	|
+	v
 file引用
 
 所以：
@@ -167,8 +167,8 @@ current = next;
 file关闭
 file_put()
 
-        |
-        v
+	|
+	v
 
 inode_put(file->inode)
 
@@ -266,84 +266,79 @@ struct inode;
 struct file;
 struct file_operations;
 
-struct filesystem_registry
-{
-        struct filesystem *head;
+struct filesystem_registry {
+	struct filesystem* head;
 
-        struct spinlock lock;
+	struct spinlock lock;
 };
 
 typedef struct filesystem_registry filesystem_registry_t;
 
-/// @note fs和sb的关系在于: 一个是描述数据的组织方式, 一个是描述该以什么样的方式读取
+/// @note fs和sb的关系在于: 一个是描述数据的组织方式,
+/// 一个是描述该以什么样的方式读取
 /*
  * 文件系统类型
  */
-struct filesystem
-{
-        const char name[VFS_FS_NAME_MAX];
+struct filesystem {
+	const char name[VFS_FS_NAME_MAX];
 
-        int (*get_super)(struct filesystem *fs,
-                         struct block_device *dev,
-                         struct super_block **sb);
+	int (*get_super)(struct filesystem* fs,
+			 struct block_device* dev,
+			 struct super_block** sb);
 
-        void (*kill_sb)(struct super_block *sb);
+	void (*kill_sb)(struct super_block* sb);
 
-        struct file_operations *fops;
-        struct inode_operations *iops;
+	struct file_operations* fops;
+	struct inode_operations* iops;
 
-        struct filesystem *next;
+	struct filesystem* next;
 };
 
 typedef struct filesystem filesystem_t;
 
-struct vfs_kstat
-{
-        uint64_t ino;
-        uint32_t mode;
+struct vfs_kstat {
+	uint64_t ino;
+	uint32_t mode;
 
-        uint32_t uid;
-        uint32_t gid;
-        uint64_t size;
-        uint32_t nlink;
-        uint64_t blocks;
-        uint64_t blksize;
-        uint64_t atime;
-        uint64_t mtime;
-        uint64_t ctime;
+	uint32_t uid;
+	uint32_t gid;
+	uint64_t size;
+	uint32_t nlink;
+	uint64_t blocks;
+	uint64_t blksize;
+	uint64_t atime;
+	uint64_t mtime;
+	uint64_t ctime;
 };
 
-struct vfs_dirent
-{
-        uint64_t ino;
+struct vfs_dirent {
+	uint64_t ino;
 
-        uint32_t type;
+	uint32_t type;
 
-        char name[VFS_NAME_MAX];
+	char name[VFS_NAME_MAX];
 };
 
 /*
  * 一个具体的挂载点
  * /media/loe -> 某个 FAT12 super_block
  */
-struct mount
-{
-        char path[VFS_MAX_PATH_LEN];
+struct mount {
+	char path[VFS_MAX_PATH_LEN];
 
-        struct super_block *sb;
+	struct super_block* sb;
 
-        struct mount *parent;
-        struct mount *child;
-        struct mount *next;
+	struct mount* parent;
+	struct mount* child;
+	struct mount* next;
 };
 
 typedef struct mount mount_t;
 
-struct mount_table
-{
-        struct mount *root;
+struct mount_table {
+	struct mount* root;
 
-        struct spinlock lock;
+	struct spinlock lock;
 };
 
 typedef struct mount_table mount_table_t;
@@ -354,61 +349,57 @@ typedef struct mount_table mount_table_t;
  * 如：loeux.img 被作为 FAT12 挂载到 /media/loe
  * 具体文件系统实现时，super_block应持有一个inode的引用
  */
-struct super_block
-{
-        struct filesystem *fs;
-        struct block_device *dev;
+struct super_block {
+	struct filesystem* fs;
+	struct block_device* dev;
 
-        struct inode *root;
+	struct inode* root;
 
-        void *private;
+	void* private;
 };
 
 typedef struct super_block super_block_t;
 
 /*
-        锁序：
-                icache.lock
-                     ↓
-                inode->lock
+	锁序：
+		icache.lock
+		     ↓
+		inode->lock
 */
-struct inode_cache
-{
-        hash_table_t *table;
-        struct spinlock lock;
+struct inode_cache {
+	hash_table_t* table;
+	struct spinlock lock;
 };
 typedef struct inode_cache inode_cache_t;
 
-struct inode_cache_key
-{
-        struct inode *parent;
-        char name[VFS_MAX_PATH_LEN];
+struct inode_cache_key {
+	struct inode* parent;
+	char name[VFS_MAX_PATH_LEN];
 };
 typedef struct inode_cache_key inode_cache_key_t;
 
-struct inode
-{
-        struct super_block *sb;
+struct inode {
+	struct super_block* sb;
 
-        uint64_t ino;
+	uint64_t ino;
 
-        uint32_t mode;
+	uint32_t mode;
 
-        uint32_t uid;
-        uint32_t gid;
+	uint32_t uid;
+	uint32_t gid;
 
-        uint64_t size;
+	uint64_t size;
 
-        struct inode_operations *iops;
-        struct file_operations *fops;
+	struct inode_operations* iops;
+	struct file_operations* fops;
 
-        void *private;
+	void* private;
 
-        uint32_t refcount;
+	uint32_t refcount;
 
-        struct inode_cache_key cache_key;
+	struct inode_cache_key cache_key;
 
-        spinlock_t lock;
+	spinlock_t lock;
 };
 
 typedef struct inode inode_t;
@@ -418,20 +409,19 @@ typedef struct inode inode_t;
  *
  * fork / dup 后可以被多个 fd 共享。
  */
-struct file
-{
-        struct inode *inode;
+struct file {
+	struct inode* inode;
 
-        uint64_t pos;
-        uint32_t flags;
+	uint64_t pos;
+	uint32_t flags;
 
-        struct file_operations *fops;
+	struct file_operations* fops;
 
-        void *private;
+	void* private;
 
-        uint32_t refcount;
+	uint32_t refcount;
 
-        struct sleeplock slk;
+	struct sleeplock slk;
 };
 
 typedef struct file file_t;
@@ -439,11 +429,10 @@ typedef struct file file_t;
 /*
  * 进程自己的 fd 表
  */
-struct fd_table
-{
-        struct file *files[VFS_MAX_FD_NUM];
+struct fd_table {
+	struct file* files[VFS_MAX_FD_NUM];
 
-        struct spinlock lock;
+	struct spinlock lock;
 };
 
 /*
@@ -451,39 +440,34 @@ struct fd_table
  *
  * 操作“文件 / 目录对象本身”
  */
-struct inode_operations
-{
-        int (*lookup)(struct inode *dir,
-                      const char *name,
-                      struct inode **inode);
+struct inode_operations {
+	int (*lookup)(struct inode* dir,
+		      const char* name,
+		      struct inode** inode);
 
-        int (*create)(struct inode *dir,
-                      const char *name,
-                      uint32_t mode,
-                      struct inode **inode);
+	int (*create)(struct inode* dir,
+		      const char* name,
+		      uint32_t mode,
+		      struct inode** inode);
 
-        int (*mkdir)(struct inode *dir,
-                     const char *name,
-                     uint32_t mode,
-                     struct inode **inode);
+	int (*mkdir)(struct inode* dir,
+		     const char* name,
+		     uint32_t mode,
+		     struct inode** inode);
 
-        int (*rmdir)(struct inode *dir,
-                     const char *name);
+	int (*rmdir)(struct inode* dir, const char* name);
 
-        int (*unlink)(struct inode *dir,
-                      const char *name);
+	int (*unlink)(struct inode* dir, const char* name);
 
-        int (*readdir)(struct inode *dir,
-                       uint64_t *offset,
-                       struct vfs_dirent *dirent);
+	int (*readdir)(struct inode* dir,
+		       uint64_t* offset,
+		       struct vfs_dirent* dirent);
 
-        int (*getattr)(struct inode *inode,
-                       struct vfs_kstat *stat);
+	int (*getattr)(struct inode* inode, struct vfs_kstat* stat);
 
-        int (*truncate)(struct inode *inode,
-                uint64_t size);
+	int (*truncate)(struct inode* inode, uint64_t size);
 
-        void (*destroy)(struct inode *inode);
+	void (*destroy)(struct inode* inode);
 };
 
 /*
@@ -507,22 +491,14 @@ struct inode_operations
  *                             ├── seek  → fat12_seek
  *                             └── close → fat12_close
  */
-struct file_operations
-{
-        int64_t (*read)(struct file *file,
-                        void *buf,
-                        uint64_t count);
+struct file_operations {
+	int64_t (*read)(struct file* file, void* buf, uint64_t count);
 
-        int64_t (*write)(struct file *file,
-                         const void *buf,
-                         uint64_t count);
+	int64_t (*write)(struct file* file, const void* buf, uint64_t count);
 
-        int64_t (*seek)(struct file *file,
-                        int64_t offset,
-                        int whence);
+	int64_t (*seek)(struct file* file, int64_t offset, int whence);
 
-        int (*close)(struct file *file);
-
+	int (*close)(struct file* file);
 };
 
 typedef struct inode_operations inode_operations_t;
@@ -543,9 +519,9 @@ void init_vfs(void);
 /// @param fs_type 文件系统类型名，例如 "fat32"
 ///
 /// @return 成功返回 0，失败返回 -1
-int vfs_mount(struct block_device *dev,
-              const char *target,
-              const char *fs_type);
+int vfs_mount(struct block_device* dev,
+	      const char* target,
+	      const char* fs_type);
 
 /// @brief 卸载挂载点 target。
 ///
@@ -555,14 +531,14 @@ int vfs_mount(struct block_device *dev,
 /// @param target 挂载点路径，例如 "/mnt"
 ///
 /// @return 成功返回 0，失败返回 -1
-int vfs_umount(const char *target);
+int vfs_umount(const char* target);
 
 /// @brief 返回根挂载点。
 ///
 /// 用于调试（如打印挂载表）。未挂载根文件系统时返回 NULL。
 ///
 /// @return 根挂载点，失败返回 NULL
-struct mount *vfs_get_root_mount(void);
+struct mount* vfs_get_root_mount(void);
 
 /// @brief 为当前进程建立标准输入/输出/错误（fd 0/1/2）。
 ///
@@ -575,7 +551,7 @@ void init_vfs_std(void);
 /// @param path 绝对路径
 ///
 /// @return 覆盖该路径的最深挂载点，失败返回 NULL
-struct mount *vfs_find_mount(const char *path);
+struct mount* vfs_find_mount(const char* path);
 
 /// @brief 注册一个文件系统到文件系统注册表。
 ///
@@ -584,14 +560,14 @@ struct mount *vfs_find_mount(const char *path);
 /// @param fs 文件系统对象
 ///
 /// @return 成功返回 0，失败返回 -1
-int vfs_register_filesystem(struct filesystem *fs);
+int vfs_register_filesystem(struct filesystem* fs);
 
 /// @brief 根据名字查找已注册的文件系统。
 ///
 /// @param name 文件系统类型名
 ///
 /// @return 找到返回 filesystem，失败返回 NULL
-struct filesystem *vfs_get_filesystem(const char *name);
+struct filesystem* vfs_get_filesystem(const char* name);
 
 /// @brief 解析绝对路径，返回对应 inode。
 ///
@@ -602,8 +578,7 @@ struct filesystem *vfs_get_filesystem(const char *name);
 /// @param inode 返回解析到的 inode
 ///
 /// @return 成功返回 0，失败返回 -1
-int vfs_lookup(const char *path,
-               struct inode **inode);
+int vfs_lookup(const char* path, struct inode** inode);
 
 /// @brief 解析 path，找到其直接父目录 inode，
 ///        并将最后一个路径组件写入 name。
@@ -616,9 +591,7 @@ int vfs_lookup(const char *path,
 /// @param name   返回最后一级组件名称
 ///
 /// @return 成功返回 0，失败返回 -1
-int vfs_lookup_parent(const char *path,
-                      struct inode **parent,
-                      char *name);
+int vfs_lookup_parent(const char* path, struct inode** parent, char* name);
 
 /// @brief 检查当前凭据是否具有访问 inode 所需的权限。
 ///
@@ -627,9 +600,9 @@ int vfs_lookup_parent(const char *path,
 /// @param mask  所需权限，例如 MAY_READ | MAY_WRITE
 ///
 /// @return 具有所需权限返回 0，否则返回 -1
-int vfs_permission(const struct inode *inode,
-                   const struct credentials *cred,
-                   uint32_t mask);
+int vfs_permission(const struct inode* inode,
+		   const struct credentials* cred,
+		   uint32_t mask);
 
 /// @brief 在 path 指定的位置创建普通文件，并返回新文件 inode。
 ///
@@ -638,9 +611,7 @@ int vfs_permission(const struct inode *inode,
 /// @param inode 返回创建后的 inode
 ///
 /// @return 成功返回 0，失败返回 -1
-int vfs_create(const char *path,
-               uint32_t mode,
-               struct inode **inode);
+int vfs_create(const char* path, uint32_t mode, struct inode** inode);
 
 /// @brief 在 path 指定的位置创建目录。
 ///
@@ -648,22 +619,21 @@ int vfs_create(const char *path,
 /// @param mode 创建权限，仅包含 rwx 权限位
 ///
 /// @return 成功返回 0，失败返回 -1
-int vfs_mkdir(const char *path,
-              uint32_t mode);
+int vfs_mkdir(const char* path, uint32_t mode);
 
 /// @brief 删除 path 指定的普通文件目录项。
 ///
 /// @param path 文件路径
 ///
 /// @return 成功返回 0，失败返回 -1
-int vfs_unlink(const char *path);
+int vfs_unlink(const char* path);
 
 /// @brief 删除 path 指定的目录。
 ///
 /// @param path 目录路径
 ///
 /// @return 成功返回 0，失败返回 -1
-int vfs_rmdir(const char *path);
+int vfs_rmdir(const char* path);
 
 /// @brief 根据父目录 inode 和文件名查找缓存中的 inode。
 ///
@@ -671,32 +641,31 @@ int vfs_rmdir(const char *path);
 /// @param name   文件名
 ///
 /// @return 命中的 inode，未找到时返回 NULL
-struct inode *inode_cache_find(struct inode *parent,
-                               const char *name);
+struct inode* inode_cache_find(struct inode* parent, const char* name);
 
 /// @brief 将 inode 插入 inode cache。
 ///
 /// @param inode 要缓存的 inode
 ///
 /// @return 成功返回 0，inode 已存在或参数非法时返回 -1
-int inode_cache_insert(struct inode *inode);
+int inode_cache_insert(struct inode* inode);
 
 /// @brief 从 inode cache 中移除 inode。
 ///
 /// 仅当 inode 只由 cache 持有时才会真正移除并释放。
 ///
 /// @param inode 要移除的 inode
-void inode_cache_remove(struct inode *inode);
+void inode_cache_remove(struct inode* inode);
 
 /// @brief 增加 inode 的引用计数。
 ///
 /// @param inode 要增加引用计数的 inode
-void inode_get(struct inode *inode);
+void inode_get(struct inode* inode);
 
 /// @brief 减少 inode 的引用计数，不会直接 free。
 ///
 /// @param inode 要减少引用计数的 inode
-void inode_put(struct inode *inode);
+void inode_put(struct inode* inode);
 
 /// @brief 打开一个文件。
 ///
@@ -706,15 +675,14 @@ void inode_put(struct inode *inode);
 /// @param flags 打开标志
 ///
 /// @return 成功返回 fd，失败返回 -1
-int vfs_open(const char *path,
-             uint32_t flags);
+int vfs_open(const char* path, uint32_t flags);
 
 /// @brief 关闭一个文件对象。
 ///
 /// 内部调用 file_put，减少引用计数。
 ///
 /// @param file 要关闭的文件对象
-void vfs_close(struct file *file);
+void vfs_close(struct file* file);
 
 /// @brief 复制一个文件描述符。
 ///
@@ -726,14 +694,14 @@ int vfs_dup(int oldfd);
 /// @brief 增加 file 的引用计数。
 ///
 /// @param file 目标 file
-void file_get(struct file *file);
+void file_get(struct file* file);
 
 /// @brief 减少 file 的引用计数。
 ///
 /// 引用计数归零时调用 fops->close，释放 inode 引用并释放 file。
 ///
 /// @param file 目标 file
-void file_put(struct file *file);
+void file_put(struct file* file);
 
 /// @brief 为 file 分配一个文件描述符。
 ///
@@ -742,14 +710,14 @@ void file_put(struct file *file);
 /// @param file 要分配 fd 的文件对象
 ///
 /// @return 成功返回 fd，失败返回 -1
-int fd_alloc(struct file *file);
+int fd_alloc(struct file* file);
 
 /// @brief 根据 fd 获取当前进程打开文件。
 ///
 /// @param fd 文件描述符
 ///
 /// @return 成功返回 file，并增加引用；失败返回 NULL
-struct file *fd_get(int fd);
+struct file* fd_get(int fd);
 
 /// @brief 关闭一个文件描述符。
 ///
@@ -770,9 +738,7 @@ int fd_close(int fd);
 /// @param count 期望读取的字节数
 ///
 /// @return 成功返回实际读取的字节数，失败返回 -1
-int64_t vfs_read(struct file *file,
-                 void *buf,
-                 uint64_t count);
+int64_t vfs_read(struct file* file, void* buf, uint64_t count);
 
 /// @brief 向打开文件中写入数据。
 ///
@@ -784,9 +750,7 @@ int64_t vfs_read(struct file *file,
 /// @param count 期望写入的字节数
 ///
 /// @return 成功返回实际写入的字节数，失败返回 -1
-int64_t vfs_write(struct file *file,
-                  const void *buf,
-                  uint64_t count);
+int64_t vfs_write(struct file* file, const void* buf, uint64_t count);
 
 /// @brief 修改打开文件的当前偏移位置。
 ///
@@ -798,9 +762,7 @@ int64_t vfs_write(struct file *file,
 ///                SEEK_END  从文件末尾
 ///
 /// @return 成功返回新的文件位置，失败返回 -1
-int64_t vfs_seek(struct file *file,
-                 int64_t offset,
-                 int whence);
+int64_t vfs_seek(struct file* file, int64_t offset, int whence);
 
 /// @brief 获取打开文件的属性。
 ///
@@ -808,8 +770,7 @@ int64_t vfs_seek(struct file *file,
 /// @param stat 属性结构
 ///
 /// @return 成功 0，失败 -1
-int vfs_fstat(struct file *file,
-              struct vfs_kstat *stat);
+int vfs_fstat(struct file* file, struct vfs_kstat* stat);
 
 /// @brief 读取目录中的下一项。
 ///
@@ -819,8 +780,7 @@ int vfs_fstat(struct file *file,
 /// @param dirent 输出目录项
 ///
 /// @return 成功返回 0，结束或失败返回 -1
-int vfs_readdir(struct file *file,
-                struct vfs_dirent *dirent);
+int vfs_readdir(struct file* file, struct vfs_dirent* dirent);
 
 /// @brief 截断 inode 对应文件大小。
 ///
@@ -831,8 +791,7 @@ int vfs_readdir(struct file *file,
 /// @param size  新文件大小
 ///
 /// @return 成功返回 0，失败返回 -1
-int vfs_truncate(struct inode *inode,
-                 uint64_t size);
+int vfs_truncate(struct inode* inode, uint64_t size);
 
 /// @brief 根据 fd 修改打开文件的当前偏移位置。
 ///
@@ -846,9 +805,6 @@ int vfs_truncate(struct inode *inode,
 ///                SEEK_END  从文件末尾
 ///
 /// @return 成功返回新的文件位置，失败返回 -1
-int64_t vfs_seek_fd(int fd,
-                    int64_t offset,
-                    int whence);
+int64_t vfs_seek_fd(int fd, int64_t offset, int whence);
 
 #endif
-

@@ -40,7 +40,7 @@ uint64_t sys_read()
 		return -1;
 	}
 
-	if (copy_data_str_out(buf, kbuf, ret) < 0) {
+	if (copy_str_to_user(buf, kbuf, ret) < 0) {
 		kfree(kbuf);
 		return -1;
 	}
@@ -163,7 +163,7 @@ uint64_t sys_fstat()
 	ust.st_mtime = (time_t)stat.mtime;
 	ust.st_ctime = (time_t)stat.ctime;
 
-	if (copy_data_str_out(stat_addr, (char*)&ust, sizeof(ust)) < 0)
+	if (copy_str_to_user(stat_addr, (char*)&ust, sizeof(ust)) < 0)
 		return -1;
 
 	return 0;
@@ -234,7 +234,7 @@ uint64_t sys_getdents()
 	file_put(file);
 
 	if (offset > 0) {
-		if (copy_data_str_out(ubuf, kbuf, offset) < 0) {
+		if (copy_str_to_user(ubuf, kbuf, offset) < 0) {
 			kfree(kbuf);
 			return -1;
 		}
@@ -261,7 +261,7 @@ uint64_t sys_open()
 	if (path == NULL)
 		return -1;
 
-	if (copyinstr(ts->pg, path, path_addr, MAX_PATH_LEN) < 0) {
+	if (copy_str_from_user(ts->pg, path, path_addr, MAX_PATH_LEN) < 0) {
 		slab_free(path);
 		return -1;
 	}
@@ -297,7 +297,7 @@ uint64_t sys_mkdir()
 	if (path == NULL)
 		return -1;
 
-	if (copyinstr(ts->pg, path, path_addr, MAX_PATH_LEN) < 0) {
+	if (copy_str_from_user(ts->pg, path, path_addr, MAX_PATH_LEN) < 0) {
 		slab_free(path);
 		return -1;
 	}

@@ -1089,7 +1089,7 @@ int kexec(char* path, char** argv)
 		}
 
 		// 将当前数据拷贝出去
-		if (copyout(
+		if (copy_to_user(
 			new_page, new_sp, argv[argc], strlen(argv[argc]) + 1) <
 		    0) {
 			goto out;
@@ -1105,10 +1105,10 @@ int kexec(char* path, char** argv)
 	if (new_sp < USER_STACK_BASE) {
 		goto out;
 	}
-	if (copyout(new_page,
-		    new_sp,
-		    (char*)user_argv_ptr,
-		    (argc + 1) * sizeof(uint64_t)) < 0) {
+	if (copy_to_user(new_page,
+			 new_sp,
+			 (char*)user_argv_ptr,
+			 (argc + 1) * sizeof(uint64_t)) < 0) {
 		goto out;
 	}
 

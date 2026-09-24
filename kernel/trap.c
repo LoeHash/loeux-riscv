@@ -9,6 +9,7 @@
 #include <timer.h>
 #include <syscall.h>
 #include <spinlock.h>
+#include <vm.h>
 #include <lib.h>
 
 extern uint64_t main_core;
@@ -16,8 +17,10 @@ extern char kernel_trap_vec[];
 extern char _trampoline_jump[];
 extern char _trampoline_ret[];
 
-static void do_page_fault(uint64_t fault_addr, enum page_fault_type type);
-static enum page_fault_type get_page_fault_type(uint64_t scause);
+static void show_kernel_trap_error_info(uint64_t scause,
+					uint64_t sepc,
+					uint64_t stval,
+					uint64_t sstatus);
 
 /// @brief
 /// @param scause 保存异常发生时的 PC
@@ -26,9 +29,6 @@ static enum page_fault_type get_page_fault_type(uint64_t scause);
 void kernel_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
 {
 	intr_off();
-
-	// 解决页表缓存问题
-	// sfence_vma();
 
 	uint64_t sstatus = r_sstatus();
 	struct task_struct* ts = get_task();
@@ -85,33 +85,8 @@ void kernel_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
 
 		return;
 	}
-	printk("the kernel_pt %0#lx\n", kernel_pt);
 
-	printk("KERNEL TRAP ENTRY: "
-	       "hart=%d "
-	       "scause=%lx "
-	       "sepc=%lx "
-	       "stval=%lx "
-	       "sstatus=%lx "
-	       "SPP=%d "
-	       "SIE=%d "
-	       "satp=%lx "
-	       "stvec=%lx\n",
-	       get_cpu_id(),
-	       scause,
-	       sepc,
-	       stval,
-	       sstatus,
-	       (int)((sstatus & SSTATUS_SPP) != 0),
-	       (int)((sstatus & SSTATUS_SIE) != 0),
-	       r_satp(),
-	       r_stvec());
-	printk("Kernel trap!\n");
-	printk("Wrong with the cpu id: %d\n", get_cpu_id());
-	printk("   scause 保存异常发生时的 PC: %0#lx\n", scause);
-	printk("   sepc   保存异常发生时的 PC: %0#lx\n", sepc);
-	printk("   stval  异常的附加信息:%0#lx\n", stval);
-
+	show_kernel_trap_error_info(scause, sepc, stval, sstatus);
 	while (1) {
 		/* code */
 	}
@@ -224,61 +199,60 @@ void init_kernel_trap_vec()
 	w_stvec((uint64_t)kernel_trap_vec);
 }
 
-static void do_page_fault(uint64_t fault_addr, enum page_fault_type type)
+static void show_kernel_trap_error_info(uint64_t scause,
+					uint64_t sepc,
+					uint64_t stval,
+					uint64_t sstatus)
 {
-	struct task_struct* ts = get_task();
-
-	if (type != PF_LOAD && type != PF_STORE) {
-		to_kill(ts);
-		return;
-	}
-
-	if (fault_addr < ts->heap_start || fault_addr >= ts->heap_brk) {
-		to_kill(ts);
-		return;
-	}
-
-	uint64_t va = PGROUNDDOWN(fault_addr);
-
-	char* pa = kalloc();
-	if (pa == NULL) {
-		to_kill(ts);
-		return;
-	}
-
-	memset(pa, 0, PG_4K_SIZE);
-
-	acquire(&ts->lk);
-
-	if (mappages(ts->pg,
-		     va,
-		     PG_4K_SIZE,
-		     (uint64_t)pa,
-		     PTE_V | PTE_W | PTE_R | PTE_U) < 0) {
-		release(&ts->lk);
-		free_page(pa);
-		printk("[WWWRRROONG!!!!!!] GOING TO KILL THE PID: %d\n",
-		       ts->pid);
-		to_kill(ts);
-		return;
-	}
-	// printk("[pf] pid=%d addr=%p type=%s brk=%p start=%p -> %s\n",
-	//         ts->pid, (void *)fault_addr,
-	//         type == PF_LOAD ? "load" : "store",
-	//         (void *)ts->heap_brk, (void *)ts->heap_start,
-	//         (fault_addr < ts->heap_start || fault_addr >= ts->heap_brk)
-	//                 ? "kill" : "alloc");
-	release(&ts->lk);
+	printk("KERNEL TRAP ENTRY: "
+	       "hart=%d "
+	       "scause=%lx "
+	       "sepc=%lx "
+	       "stval=%lx "
+	       "sstatus=%lx "
+	       "SPP=%d "
+	       "SIE=%d "
+	       "satp=%lx "
+	       "stvec=%lx\n",
+	       get_cpu_id(),
+	       scause,
+	       sepc,
+	       stval,
+	       sstatus,
+	       (int)((sstatus & SSTATUS_SPP) != 0),
+	       (int)((sstatus & SSTATUS_SIE) != 0),
+	       r_satp(),
+	       r_stvec());
+	printk("Kernel trap!\n");
+	printk("Wrong with the cpu id: %d\n", get_cpu_id());
+	printk("   scause 保存异常发生时的 PC: %0#lx\n", scause);
+	printk("   sepc   保存异常发生时的 PC: %0#lx\n", sepc);
+	printk("   stval  异常的附加信息:%0#lx\n", stval);
 }
 
-static enum page_fault_type get_page_fault_type(uint64_t scause)
+/// @brief 判断是否是用户堆页故障
+///        关键点是：用户当前在内核态里，且因为某些函数
+///        如 copyin 或 copyout 导致的懒分配页故障
+///        为保效率，我们需要在trap中处理，但很危险。
+/// @param scause 异常原因
+/// @param stval 异常的附加信息
+/// @return true 如果是用户堆页故障
+/// @return false 如果不是用户堆页故障
+static bool is_user_heap_trap_in_kernel(uint64_t scause, uint64_t stval)
 {
-	if (scause == PAGE_FAULT_LOAD_SCAUSE)
-		return PF_LOAD;
-	else if (scause == PAGE_FAULT_STORE_SCAUSE)
-		return PF_STORE;
-	else if (scause == 12)
-		return PF_INSTRUCTION;
-	else
-		return PF_INSTRUCTION;
+	if (get_task() == NULL) {
+		return false;
+	}
+
+	if (scause != PAGE_FAULT_LOAD_SCAUSE &&
+	    scause != PAGE_FAULT_STORE_SCAUSE) {
+		return false;
+	}
+
+	struct task_struct* ts = get_task();
+	if (stval < ts->heap_start || stval >= ts->heap_brk) {
+		return false;
+	}
+
+	return true;
 }
