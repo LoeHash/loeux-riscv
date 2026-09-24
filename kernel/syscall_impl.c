@@ -23,12 +23,8 @@ uint64_t sys_sbrk()
 	uint64_t before_brk = ts->heap_brk;
 	uint64_t new_brk = ts->heap_brk + delta;
 
-	/* 扩堆时立即把新增页映射好。
-	 * copyin/copyout 不会像 do_page_fault 那样做懒分配，
-	 * 若新 malloc 的缓冲区落在尚未被用户态触碰过的页上，
-	 * read() 的 copyout 会因 walkaddr==0 直接失败（返回 -1）。
-	 * 因此在 brk 增长路径上预先建立 [before_brk, new_brk)
-	 * 涉及的全部物理页。已存在映射的页跳过。 */
+	/* 扩堆时立即把新增页映射好。*/
+	/* 暂时如此，TODO: 后面如果copyout或copyin时出现pf，再映射好*/
 	if (new_brk > before_brk) {
 		uint64_t va = PGROUNDDOWN(before_brk);
 		uint64_t end = PGROUNDDOWN(new_brk - 1);
@@ -46,8 +42,7 @@ uint64_t sys_sbrk()
 				     va,
 				     PG_4K_SIZE,
 				     (uint64_t)pa,
-				     PTE_V | PTE_W | PTE_R |
-					 PTE_U) < 0) {
+				     PTE_V | PTE_W | PTE_R | PTE_U) < 0) {
 				free_page(pa);
 				release(&ts->lk);
 				return -1;
