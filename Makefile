@@ -162,17 +162,19 @@ clean:
 	rm -f $(TARGET) $(TARGET_BIN)
 qemu:
 	qemu-system-riscv64 \
-    		-machine virt,dumpdtb=qemu.dtb \
+    		-machine virt \
     		-smp 4 \
     		-m 2048M \
     		-kernel kernel.elf \
     		-device virtio-gpu-device,bus=virtio-mmio-bus.1 \
-    		-display sdl \
+    		-display sdl,gl=off \
     		-serial mon:stdio \
     		-global virtio-mmio.force-legacy=false \
     		-drive file=loeux.img,format=raw,if=none,id=loeux \
     		-device virtio-blk-device,drive=loeux,bus=virtio-mmio-bus.0 \
     		-device virtio-keyboard-device,bus=virtio-mmio-bus.2
+
+
 
 gdb:
 	qemu-system-riscv64 \
