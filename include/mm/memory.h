@@ -50,4 +50,5 @@ int free_page(void *pa);
 void *kalloc();
 int kfree(void *pa);
 int page_inc_ref(void *pa);
+struct page *pa2page(void *pa);
 #endif

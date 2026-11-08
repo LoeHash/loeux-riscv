@@ -14,7 +14,7 @@
 #include <vm.h>
 
 /*
-我们现在规定，所有的用户态程序，全部在0x0 处加载运行
+我们现在规定，所有的用户态程序，全部在0x1000 处加载运行
 所以我们真正需要的就是想想kexec会做什么？
 我认为kexec需要从磁盘读取文件，加载到内存，然后为进程创建页表，从0x0处开始运行
 并记录进程的占用大小，此时设置进程的trapframe, epc,等必要信息
@@ -245,15 +245,17 @@ struct task_struct *alloc_task(bool is_create_pg)
                         new_task->pid = alloc_pid();
                         new_task->state = USED;
 
+                        // utf 是每个进程都必须的，
+                        // 与是否创建页表无关。COW fork 也需要自己的 utf。
+                        if ((new_task->utf = (struct trapframe *)kalloc()) == NULL)
+                        {
+                                free_task(new_task);
+                                release(&new_task->lk);
+                                return 0;
+                        }
+
                         if (is_create_pg)
                         {
-                                if ((new_task->utf = (struct trapframe *)kalloc()) == NULL)
-                                {
-                                        free_task(new_task);
-                                        release(&new_task->lk);
-                                        return 0;
-                                }
-
                                 // An empty user page table.
                                 new_task->pg = create_task_pgtable(new_task);
 
@@ -558,13 +560,13 @@ void free_task(struct task_struct *t)
         t->utf = 0;
         if (t->pg)
         {
-                free_task_pgtable(t->pg, t->size);
-                // 选择性释放堆
+                // 先解堆映射再 freewalk，避免 freewalk panic / UAF
                 if (t->heap_start && t->heap_history_max)
                 {
                         do_free_task_heap(
                             t->pg, t->heap_start, t->heap_history_max);
                 }
+                free_task_pgtable(t->pg, t->size);
         }
         t->pg = 0;
         t->size = 0;
@@ -598,9 +600,13 @@ void free_task_pgtable(page_table pagetable, uint64_t sz)
 static void
 do_free_task_heap(page_table pg, uint64_t heap_start, uint64_t heap_history_max)
 {
-        if (heap_start == 0)
+        if (heap_start == 0 || heap_history_max <= heap_start)
                 return;
-        pg_unmap(pg, heap_start, heap_history_max - heap_start / PG_4K_SIZE, 1);
+        // 页数 = (heap_end - heap_start) / 页大小。
+        // 注意运算符优先级：必须先减再除，否则 heap_start/PG_4K_SIZE
+        // 会被先算，得到错误的页数。
+        uint64_t npages = (heap_history_max - heap_start) / PG_4K_SIZE;
+        pg_unmap(pg, heap_start, npages, 1);
 }
 
 /// @brief 映射进程的页表, 基本映射：仅包含蹦床页和trapframe映射
@@ -836,9 +842,13 @@ int kexit(int exit_code)
         ts->return_val = exit_code;
 
         // 3. 释放所有页表内存和物理页, 以及用户栈
-        //    同时释放堆内存
-        free_task_pgtable(ts->pg, ts->size);
+        //    同时释放堆内存。
+        //    注意：必须先 do_free_task_heap 再 free_task_pgtable，
+        //    因为 free_task_pgtable 内部的 freewalk 会释放页表页，
+        //    且遇到未解除的叶子 PTE 会 panic。堆页若不先解除映射，
+        //    freewalk 会 panic；若先 freewalk 再解堆映射则是 UAF。
         do_free_task_heap(ts->pg, ts->heap_start, ts->heap_history_max);
+        free_task_pgtable(ts->pg, ts->size);
 
         ts->pg = 0;
         ts->size = 0;
@@ -922,7 +932,7 @@ int kfork()
                       "NULL!\n");
         }
 
-        if ((new_ts = alloc_task(IS_USE_COW)) == NULL)
+        if ((new_ts = alloc_task(!IS_USE_COW)) == NULL)
         {
                 return -1;
         }
@@ -949,8 +959,14 @@ int kfork()
                                           (father_ts->heap_history_max - father_ts->heap_start),
                                           PTE_C,
                                           PTE_W);
+
+                // 修改了父进程页表的权限
+                // 须刷 TLB：否则父进程 TLB 仍缓存可写条目，
+                // 写共享页不触发 COW fault，直接写坏父子共享的物理页。
+                sfence_vma();
+
                 // 4.   设置子进程的pg
-                new_ts->pg = (page_table_dump(&father_ts->pg));
+                new_ts->pg = (page_table_dump(father_ts->pg));
                 // 失败
                 if (new_ts->pg == NULL)
                 {
@@ -968,7 +984,34 @@ int kfork()
                                                   father_ts->heap_start,
                                                   (father_ts->heap_history_max - father_ts->heap_start),
                                                   PTE_W, PTE_C);
-                        return -1;
+
+                        // 恢复了父进程的写权限，同样需要刷 TLB。
+                        sfence_vma();
+
+                        goto fails;
+                }
+
+                // page_table_dump 跳过了 trampoline，且 trapframe 仍指向父pg的utf
+                // 所以：
+                //   1. 解除子页表中继承的 trapframe 映射 释放对父 utf 的引用计数；
+                //   2. 映射 trampoline
+                //   3. 映射子进程自己的 trapframe
+                pg_unmap(new_ts->pg, TRAPFRAME_MAPPING, 1, 1);
+                if (mappages(new_ts->pg,
+                             TRAMPOLINE,
+                             PG_4K_SIZE,
+                             (uint64_t)_trampoline_jump,
+                             PTE_V | PTE_R | PTE_X) < 0)
+                {
+                        goto fails;
+                }
+                if (mappages(new_ts->pg,
+                             TRAPFRAME_MAPPING,
+                             PG_4K_SIZE,
+                             (uint64_t)(new_ts->utf),
+                             PTE_V | PTE_R | PTE_W) < 0)
+                {
+                        goto fails;
                 }
 
                 // 完成
@@ -991,9 +1034,7 @@ int kfork()
                         // 会触发
                         // reacquire
                         // panic。
-                        release(&new_ts->lk);
-                        free_task(new_ts);
-                        return -1;
+                        goto fails;
                 }
 
                 // 2. 映射用户栈
@@ -1001,9 +1042,7 @@ int kfork()
                         father_ts->pg, new_ts->pg, USER_STACK_BASE, USER_STACK_SIZE)) ==
                     -1)
                 {
-                        release(&new_ts->lk);
-                        free_task(new_ts);
-                        return -1;
+                        goto fails;
                 }
 
                 // 3.  映射堆内存
@@ -1013,9 +1052,7 @@ int kfork()
                         father_ts->heap_start,
                         (father_ts->heap_history_max - father_ts->heap_start))) == -1)
                 {
-                        release(&new_ts->lk);
-                        free_task(new_ts);
-                        return -1;
+                        goto fails;
                 }
         }
 
@@ -1078,12 +1115,14 @@ int kfork()
         }
 
         new_ts->state = RUNNABLE;
+        pid_t child_pid = new_ts->pid;
         release(&new_ts->lk);
 
-        // 注意：锁已释放，new_ts 生命周期不再受控——
-        // 子进程可能已被其他 hart 调度、甚至 exit
-        // 并被回收。 此处绝不能再解引用 new_ts
-        return new_ts->pid;
+        return child_pid;
+fails:
+        release(&new_ts->lk);
+        free_task(new_ts);
+        return -1;
 }
 
 int kexec(char *path, char **argv)
@@ -1170,6 +1209,27 @@ int kexec(char *path, char **argv)
         new_page = create_task_pgtable(t);
         if (new_page == 0)
         {
+                goto out;
+        }
+
+        // kexec 创建的新页表必须映射 trampoline 和 trapframe，
+        // 否则用户态 trap 时 CPU 跳转到 TRAMPOLINE 会缺页崩溃。
+        // trampoline 是全局共享的代码页，trapframe 是当前 task 的。
+        if (mappages(new_page,
+                     TRAMPOLINE,
+                     PG_4K_SIZE,
+                     (uint64_t)_trampoline_jump,
+                     PTE_V | PTE_R | PTE_X) < 0)
+        {
+                goto out;
+        }
+        if (mappages(new_page,
+                     TRAPFRAME_MAPPING,
+                     PG_4K_SIZE,
+                     (uint64_t)(t->utf),
+                     PTE_V | PTE_R | PTE_W) < 0)
+        {
+                pg_unmap(new_page, TRAMPOLINE, 1, 0);
                 goto out;
         }
 
@@ -1299,9 +1359,10 @@ int kexec(char *path, char **argv)
         // new_page
         new_page = 0;
 
-        free_task_pgtable(old_page, old_size);
-
+        // 先释放旧堆映射，再释放旧页表（freewalk 会 panic 于残留叶子，
+        // 且释放页表后再解堆映射是 UAF）。
         do_free_task_heap(old_page, old_heap_start, old_heap_history_max);
+        free_task_pgtable(old_page, old_size);
 
         ret = argc;
 out:

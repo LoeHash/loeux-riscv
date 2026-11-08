@@ -430,6 +430,11 @@ void gpu_tty_tick()
         struct tty *tty = &gpu0_tty;
         struct gpu_tty_state *st = tty->priv;
 
+        // gpu_tty 尚未初始化（priv 为空）时直接返回，
+        // 避免定时器在 init_gpu_tty 之前触发导致 NULL 解引用。
+        if (st == NULL)
+                return;
+
         st->blink_counter++;
         if (st->blink_counter < BLINK_INTERVAL)
                 return;

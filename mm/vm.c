@@ -13,7 +13,9 @@ page_table kernel_pt = 0;
 uint8_t vm_init_status = 0;
 spinlock_t vm_init_lock = {0};
 static inline int pte_is_leaf(pte_t pte);
-static page_table page_table_dump_level(page_table *src, int level);
+static page_table page_table_dump_level(page_table src, int level);
+static void _do_page_fault_lazy_allocation(uint64_t fault_addr, struct task_struct *ts);
+void static _do_page_fault_cow(uint64_t fault_addr);
 
 extern char _trampoline_jump[];
 
@@ -465,7 +467,7 @@ int copy_to_user(page_table pagetable, uint64_t dstva, char *src, uint64_t len)
                         return -1;
                 }
 
-                // 未来这里做懒分配
+                // 未来这里做懒分配 完成！
                 pa0 = walkaddr(pagetable, va0);
                 if (pa0 == 0)
                 {
@@ -480,7 +482,21 @@ int copy_to_user(page_table pagetable, uint64_t dstva, char *src, uint64_t len)
                 pte = pte_walk(pagetable, va0, 0);
                 if ((*pte & PTE_W) == 0)
                 {
-                        return -1;
+                        // COW 页：触发写时复制，使页面可写后再拷贝。
+                        // fork 后用户页被设为只读（PTE_W=0, PTE_C=1），
+                        // 必须先完成 COW，否则会把共享页写坏。
+                        if (*pte & PTE_C)
+                        {
+                                _do_page_fault_cow(va0);
+                                pte = pte_walk(pagetable, va0, 0);
+                                if (pte == NULL || !(*pte & PTE_W))
+                                        return -1;
+                                pa0 = PTE2PA(*pte);
+                        }
+                        else
+                        {
+                                return -1;
+                        }
                 }
 
                 n = PG_4K_SIZE - (dstva - va0);
@@ -844,13 +860,36 @@ void do_page_fault(uint64_t fault_addr, enum page_fault_type type)
                 return;
         }
 
+        uint64_t va = PGROUNDDOWN(fault_addr);
+
+        // 先判断是不是cow
+        pte *p = pte_walk(ts->pg, va, 0);
+        if (p == NULL)
+        {
+                _do_page_fault_lazy_allocation(fault_addr, ts);
+                return;
+        }
+        if (*p & PTE_C)
+        {
+                // 则处理cow异常
+                _do_page_fault_cow(fault_addr);
+                return;
+        }
+        else
+        {
+                _do_page_fault_lazy_allocation(fault_addr, ts);
+                return;
+        }
+}
+
+static void _do_page_fault_lazy_allocation(uint64_t fault_addr, struct task_struct *ts)
+{
+
         if (fault_addr < ts->heap_start || fault_addr >= ts->heap_brk)
         {
                 to_kill(ts);
                 return;
         }
-
-        uint64_t va = PGROUNDDOWN(fault_addr);
 
         char *pa = kalloc();
         if (pa == NULL)
@@ -861,7 +900,9 @@ void do_page_fault(uint64_t fault_addr, enum page_fault_type type)
 
         memset(pa, 0, PG_4K_SIZE);
 
-        acquire(&ts->lk);
+        // very big stupid wrong.
+        // acquire(&ts->lk);
+        uint64_t va = PGROUNDDOWN(fault_addr);
 
         if (mappages(ts->pg,
                      va,
@@ -869,7 +910,7 @@ void do_page_fault(uint64_t fault_addr, enum page_fault_type type)
                      (uint64_t)pa,
                      PTE_V | PTE_W | PTE_R | PTE_U) < 0)
         {
-                release(&ts->lk);
+                // release(&ts->lk);
                 free_page(pa);
                 printk("[WWWRRROONG!!!!!!] GOING TO KILL THE PID: %d\n",
                        ts->pid);
@@ -877,7 +918,7 @@ void do_page_fault(uint64_t fault_addr, enum page_fault_type type)
                 return;
         }
 
-        release(&ts->lk);
+        // release(&ts->lk);
 }
 
 enum page_fault_type get_page_fault_type(uint64_t scause)
@@ -902,7 +943,7 @@ static inline int pte_is_leaf(pte_t pte)
 /// @param level 当前级别：2=L3, 1=L2, 0=L1（叶子层）
 /// @return 新页表页；失败返回 NULL
 /// @note 只拷贝页表项，不拷贝物理内存；叶子 PTE 共享原物理页
-static page_table page_table_dump_level(page_table *src, int level)
+static page_table page_table_dump_level(page_table src, int level)
 {
         page_table new_pg = pg_create();
         if (!new_pg)
@@ -918,16 +959,23 @@ static page_table page_table_dump_level(page_table *src, int level)
                 {
                         if (level == 0 || pte_is_leaf(pt))
                         {
+                                uint64_t pa = PTE2PA(pt);
+                                // 跳过 trampoline 页：它是内核代码页
+                                // （非 alloc_page 分配），不能 page_inc_ref/
+                                // free_page，且所有进程共享同一份，由
+                                // kfork 在 dump 后单独映射。
+                                if (pa == (uint64_t)_trampoline_jump)
+                                        continue;
                                 // 叶子 PTE：只拷 PTE，物理页共享，不拷内存
                                 new_pg[i] = pt;
 
-                                page_inc_ref(PTE2PA(pt));
+                                page_inc_ref((void *)pa);
                         }
                         else
                         {
                                 // 非叶子 PTE：指向下一级页表页，必须新分配再递归拷贝
-                                page_table *child = (page_table *)PTE2PA(pt);
-                                page_table *new_child = page_table_dump_level(child, level - 1);
+                                page_table child = (page_table)PTE2PA(pt);
+                                page_table new_child = page_table_dump_level(child, level - 1);
                                 if (!new_child)
                                 {
                                         // 回滚 [0, i) 已处理项
@@ -970,7 +1018,50 @@ static page_table page_table_dump_level(page_table *src, int level)
 /// @param src  源
 /// @return 一个新的页表，和 src 完全一致
 /// @note 为保证分配时的页表页数可控性，必须分配一个新的
-page_table page_table_dump(page_table *src)
+page_table page_table_dump(page_table src)
 {
         return page_table_dump_level(src, 2);
+}
+
+void static _do_page_fault_cow(uint64_t fault_addr)
+{
+        struct task_struct *ts = get_task();
+        page_table pg = ts->pg;
+        uint64_t va = PGROUNDDOWN(fault_addr);
+
+        pte_t *p = pte_walk(pg, va, 0);
+        if (p == NULL || !(*p & PTE_V))
+        {
+                to_kill(ts);
+                return;
+        }
+
+        if (!(*p & PTE_C))
+        {
+                to_kill(ts);
+                return;
+        }
+
+        // 分配新页
+        char *chunk = kalloc();
+        if (!chunk)
+        {
+                to_kill(ts);
+                return;
+        }
+
+        // 拷贝原页内容
+        char *pa = PTE2PA(*p);
+        memcpy(chunk, pa, PG_4K_SIZE);
+
+        // 直接改写当前 PTE：COW 页本就已映射，不能用 mappages
+        // 新页可读写，清除 PTE_C 标记。
+        *p = PA2PTE((uint64_t)chunk) | PTE_V | PTE_W | PTE_R | PTE_U;
+
+        // 必须刷新 TLB：否则 CPU 仍持有旧的只读 PTE，
+        // 返回用户态后会反复触发 store fault 死循环。
+        sfence_vma();
+
+        // 旧页引用计数减一；仍被其它进程共享时不会真正回收。
+        free_page(pa);
 }

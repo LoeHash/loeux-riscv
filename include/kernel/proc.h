@@ -12,7 +12,7 @@
 
 #define GET_CPU_ID get_cpu_id()
 
-#define IS_USE_COW true
+#define IS_USE_COW false
 
 extern struct task_struct tasks[NTASKS];
 extern struct cpu cpus[NCPUS];

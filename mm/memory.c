@@ -14,6 +14,8 @@ spinlock_t memory_init_lock = {0};
 spinlock_t memory_lock = {0};
 
 static const uint32_t mem_buff_size = 128;
+static void check_pa_valid(void *pa);
+
 extern char _phy_start[];
 
 // fdt 内存节点必须包含 device_type = "memory"
@@ -252,6 +254,10 @@ int kfree(void *pa)
 // 释放一个物理页：校验合法性后挂回空闲链表尾部。
 // 全程持有 memory_lock；acquire() 内部 push_off 会关闭中断，
 // 因此在系统调用（开中断）上下文中调用也是安全的。
+// 释放一个物理页：校验合法性后挂回空闲链表尾部。
+// 锁顺序固定为 memory_lock -> page_lock（与 alloc_page 一致）。
+// acquire() 内部 push_off 关中断，系统调用上下文中调用安全。
+// 注意：本函数不清零物理页，清零由 alloc_page 在独占后完成。
 int free_page(void *pa)
 {
         if (pa == NULL)
@@ -262,12 +268,9 @@ int free_page(void *pa)
         uintptr_t addr = (uintptr_t)pa;
 
         // 地址合法性：必须 4K 对齐，且落在受管的可分配物理内存范围内
-        // （低于 free_start_at 的是内核/SBI/页元数据保留页，
-        //   FDT 页虽在范围内但带 PG_FLAG_RESERVED 标记）
         if ((addr & (PG_4K_SIZE - 1)) != 0 || addr < gmd.free_start_at ||
             addr > gmd.free_end_at)
         {
-                // TEMP-DIAG: 打印调用者返回地址便于定位野指针来源
                 printk("free_page: bad address %p caller=%p ra2=%p\n",
                        pa,
                        __builtin_return_address(0),
@@ -277,35 +280,45 @@ int free_page(void *pa)
 
         struct page *pg = PHY_TO_PAGE(pa);
 
+        // 统一锁顺序：先 memory_lock，再 page_lock
         acquire(&memory_lock);
+        acquire(&pg->page_lock);
 
         if (pg->flags & PG_FLAG_RESERVED)
         {
+                release(&pg->page_lock);
                 release(&memory_lock);
-                panic(
-                    PANIC_ERROR, "free_page: freeing reserved page %p!\n", pa);
+                panic(PANIC_ERROR, "free_page: freeing reserved page %p!\n", pa);
         }
         // 页必须处于已分配状态，否则就是双重释放/释放野指针
         if (!(pg->flags & PG_FLAG_USED))
         {
+                release(&pg->page_lock);
                 release(&memory_lock);
                 panic(PANIC_ERROR, "free_page: double free %p!\n", pa);
         }
-
-        // 引用计数：当前没有共享页，分配时 refcount=1；
-        // 保留语义以便未来共享页表页使用
-        if (pg->refcount > 0)
+        // 已分配页的 refcount 必 >= 1；为 0 说明状态机被破坏
+        if (pg->refcount == 0)
         {
-                pg->refcount--;
+                release(&pg->page_lock);
+                release(&memory_lock);
+                panic(PANIC_ERROR, "free_page: zero refcount %p!\n", pa);
         }
+
+        // 引用计数：分配时 refcount=1，每次 free 减一；
+        // 减到 0 才真正回收
+        pg->refcount--;
+
         if (pg->refcount > 0)
         {
                 // 仍被引用，不回收
+                release(&pg->page_lock);
                 release(&memory_lock);
                 return 0;
         }
 
-        // 摘成干净节点，尾插到空闲链表
+        // refcount 归零
+        // next/prev 是空闲链表指针，统一由 memory_lock 保护
         pg->flags = PG_FLAG_FREE;
         pg->next = NULL;
         pg->prev = gmd.free_tail;
@@ -320,9 +333,8 @@ int free_page(void *pa)
         }
         gmd.free_tail = pg;
 
+        release(&pg->page_lock);
         release(&memory_lock);
-
-        memset((char *)pg->paddr, 0, PG_4K_SIZE);
 
         return 0;
 }
@@ -348,6 +360,7 @@ void *alloc_page()
                 // 否则之后 free 会挂到一个已分配出去的旧尾页上
                 gmd.free_tail = NULL;
         }
+        acquire(&pg->page_lock);
 
         pg->next = NULL;
         pg->prev = NULL;
@@ -358,8 +371,8 @@ void *alloc_page()
         pg->refcount++;
         pg->slab = NULL; // 默认分配时所属的slab为NULL
 
+        release(&pg->page_lock);
         release(&memory_lock);
-
         memset((char *)pg->paddr, 0, PG_4K_SIZE);
 
         return (void *)pg->paddr;
@@ -390,8 +403,35 @@ int page_inc_ref(void *pa)
 
         struct page *pg = PHY_TO_PAGE(pa);
 
-        acquire(&memory_lock);
+        acquire(&pg->page_lock);
         pg->refcount++;
-        release(&memory_lock);
+        release(&pg->page_lock);
         return 0;
+}
+
+struct page *pa2page(void *pa)
+{
+        check_pa_valid(pa);
+        return PHY_TO_PAGE(pa);
+}
+
+static void check_pa_valid(void *pa)
+{
+        if (pa == NULL)
+        {
+                panic(PANIC_ERROR, "page_inc_ref: NULL pointer!\n");
+        }
+
+        uintptr_t addr = (uintptr_t)pa;
+
+        // 检查
+        if ((addr & (PG_4K_SIZE - 1)) != 0 || addr < gmd.free_start_at ||
+            addr > gmd.free_end_at)
+        {
+                printk("free_page: bad address %p caller=%p ra2=%p\n",
+                       pa,
+                       __builtin_return_address(0),
+                       __builtin_return_address(1));
+                panic(PANIC_ERROR, "free_page: bad address %p!\n", pa);
+        }
 }
