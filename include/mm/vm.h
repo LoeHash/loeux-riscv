@@ -8,12 +8,13 @@
 #define PTE_R (1L << 1)
 #define PTE_W (1L << 2)
 #define PTE_X (1L << 3)
-#define PTE_U (1L << 4)	   // user can access
-#define PTE_G (1L << 5)	   // user can access
-#define PTE_A (1L << 6)	   // is accessed
-#define PTE_D (1L << 7)	   // is writen
-#define PTE_C (1L << 8)	   // is cow pte?
-#define PTE_SAVE (1L << 9) // RESERVED JUST FOR NOW.......
+#define PTE_U (1L << 4)      // user can access
+#define PTE_G (1L << 5)      // user can access
+#define PTE_A (1L << 6)      // is accessed
+#define PTE_D (1L << 7)      // is writen
+#define PTE_C (1L << 8)      // is cow pte?
+#define PTE_SAVE (1L << 9)   // RESERVED JUST FOR NOW.......
+#define PTE_FLAGS_MASK 0x3FF // 9 bits
 #define PGSHIFT 12
 #define PXMASK 0x1FF // 9 bits
 #define PXSHIFT(level) (PGSHIFT + (9 * (level)))
@@ -24,6 +25,7 @@
 #define PGROUNDDOWN(a) (((a)) & ~(0xFFF))
 #define PGROUNDUP(sz) (((sz) + PG_4K_SIZE - 1) & ~(PG_4K_SIZE - 1))
 #define PTE_FLAGS(pte) ((pte) & 0x3FF)
+#define PTE_SET_FLAGS(pte, flags) (((pte) & ~0x3FF) | ((flags) & 0x3FF))
 #define EFAULT -114514
 // 缺页异常scause
 #define PAGE_FAULT_LOAD_SCAUSE 13
@@ -33,23 +35,24 @@ extern page_table kernel_pt;
 extern uint8_t vm_init_status;
 extern spinlock_t vm_init_lock;
 
-enum page_fault_type {
-	PF_LOAD,	// scause == 13
-	PF_STORE,	// scause == 15
-	PF_INSTRUCTION, // scause == 12 (未来扩展)
+enum page_fault_type
+{
+        PF_LOAD,        // scause == 13
+        PF_STORE,       // scause == 15
+        PF_INSTRUCTION, // scause == 12 (未来扩展)
 };
 
-pte* pte_walk(page_table pt, vir_addr_t va, int create);
+pte *pte_walk(page_table pt, vir_addr_t va, int create);
 int kvminit(page_table pt,
-	    vir_addr_t va,
-	    phys_addr_t pa,
-	    uint64_t pages,
-	    uint32_t flags,
-	    int debug);
+            vir_addr_t va,
+            phys_addr_t pa,
+            uint64_t pages,
+            uint32_t flags,
+            int debug);
 int copy_str_from_user(page_table pagetable,
-		       char* dst,
-		       uint64_t srcva,
-		       uint64_t max);
+                       char *dst,
+                       uint64_t srcva,
+                       uint64_t max);
 void init_kvmmap();
 void init_kvmhart();
 void kvm_do_mapping(page_table pgtable);
@@ -61,29 +64,36 @@ void freewalk(page_table pagetable);
 int mappages(
     page_table pagetable, uint64_t va, uint64_t size, uint64_t pa, int perm);
 uint64_t walkaddr(page_table pagetable, uint64_t va);
-int copy_to_user(page_table pagetable, uint64_t dstva, char* src, uint64_t len);
+int copy_to_user(page_table pagetable, uint64_t dstva, char *src, uint64_t len);
 int copy_from_user(page_table pagetable,
-		   char* dst,
-		   uint64_t srcva,
-		   uint64_t len);
+                   char *dst,
+                   uint64_t srcva,
+                   uint64_t len);
 int vm_pagetbl_copy(page_table src_pg,
-		    page_table dst_pg,
-		    uint64_t sz,
-		    bool is_user_copy);
+                    page_table dst_pg,
+                    uint64_t sz,
+                    bool is_user_copy);
 int vm_pagetbl_copy_asign(page_table src_pg,
-			  page_table dst_pg,
-			  uint64_t va_start,
-			  uint64_t sz);
+                          page_table dst_pg,
+                          uint64_t va_start,
+                          uint64_t sz);
 
 /// @brief 处理缺页异常，分配新的物理页
 /// @param fault_addr 缺页地址
 /// @param type 缺页类型
 /// @param pa_ptr 新分配的物理页地址指针,会写回
 int do_page_fault_with_new_pa(uint64_t fault_addr,
-			      enum page_fault_type type,
-			      uint64_t* pa_ptr);
+                              enum page_fault_type type,
+                              uint64_t *pa_ptr);
 
 uint64_t va2pa(page_table pt, uint64_t va);
 void do_page_fault(uint64_t fault_addr, enum page_fault_type type);
 enum page_fault_type get_page_fault_type(uint64_t scause);
+
+int vm_pagetbl_set_perm_asign(page_table target_pg,
+                              uint64_t va_start,
+                              uint64_t sz,
+                              int add_perm,
+                              int del_perm);
+page_table page_table_dump(page_table *src);
 #endif

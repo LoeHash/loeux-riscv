@@ -54,7 +54,7 @@ void init_user()
 
         // alloc_task 静默获取ts锁
         // 同时不会释放
-        ts = alloc_task();
+        ts = alloc_task(true);
 
         initask = ts;
 
@@ -233,7 +233,7 @@ uint64_t get_cpu_id()
 
 /// @brief 分配任务结构体
 ///        此方法不会释放进程本身的锁
-struct task_struct *alloc_task()
+struct task_struct *alloc_task(bool is_create_pg)
 {
         struct task_struct *new_task;
 
@@ -245,23 +245,32 @@ struct task_struct *alloc_task()
                         new_task->pid = alloc_pid();
                         new_task->state = USED;
 
-                        if ((new_task->utf = (struct trapframe *)kalloc()) == NULL)
+                        if (is_create_pg)
                         {
-                                free_task(new_task);
-                                release(&new_task->lk);
-                                return 0;
-                        }
+                                if ((new_task->utf = (struct trapframe *)kalloc()) == NULL)
+                                {
+                                        free_task(new_task);
+                                        release(&new_task->lk);
+                                        return 0;
+                                }
 
-                        // An empty user page table.
-                        new_task->pg = create_task_pgtable(new_task);
-                        // 映射trapframe和trampoline
-                        mapping_task_pgtable_tf_and_tp(new_task);
+                                // An empty user page table.
+                                new_task->pg = create_task_pgtable(new_task);
 
-                        if (new_task->pg == 0)
-                        {
-                                free_task(new_task);
-                                release(&new_task->lk);
-                                return 0;
+                                if (new_task->pg == 0)
+                                {
+                                        free_task(new_task);
+                                        release(&new_task->lk);
+                                        return 0;
+                                }
+
+                                // 映射trapframe和trampoline
+                                if (mapping_task_pgtable_tf_and_tp(new_task) == 0)
+                                {
+                                        free_task(new_task);
+                                        release(&new_task->lk);
+                                        return 0;
+                                }
                         }
 
                         memset(&new_task->ctx, 0, sizeof(new_task->ctx));
@@ -895,6 +904,9 @@ int kexit(int exit_code)
 
 /// @brief  创建一个子进程
 /// @return 子进程的 pid
+/// @note    使用cow, 只会分配一个任务结构体，不会进行页表的创建
+///          同时，父进程和子进程都会转向使用同一个页表（父进程的）
+///          同时将父页表的可写标志清除
 int kfork()
 {
         pid_t new_pid, parent_pid;
@@ -910,52 +922,101 @@ int kfork()
                       "NULL!\n");
         }
 
-        if ((new_ts = alloc_task()) == NULL)
+        if ((new_ts = alloc_task(IS_USE_COW)) == NULL)
         {
                 return -1;
         }
 
-        // 目前我们持有new_ts的锁
-        // 1. 复制父进程页表的所有内容
-        //    26-9-17 修复remap
-        if ((vm_pagetbl_copy_asign(father_ts->pg,
-                                   new_ts->pg,
-                                   USER_BASE_PROG_ADDR,
-                                   father_ts->size - USER_BASE_PROG_ADDR)) ==
-            -1)
+        if (IS_USE_COW)
         {
-                // 失败路径必须释放锁，否则
-                // free_task
-                // 之后该槽位被复用，
-                // 后续 acquire
-                // 会触发
-                // reacquire
-                // panic。
-                release(&new_ts->lk);
-                free_task(new_ts);
-                return -1;
-        }
+                // 1. 使用写时复制
+                //    将页表项全部设置为只读
+                //    同时设置页表项的 PTE_C 作为使用写时复制的标志
+                vm_pagetbl_set_perm_asign(father_ts->pg,
+                                          USER_BASE_PROG_ADDR,
+                                          father_ts->size - USER_BASE_PROG_ADDR,
+                                          PTE_C,
+                                          PTE_W);
+                // 2. 设置用户栈
+                vm_pagetbl_set_perm_asign(father_ts->pg,
+                                          USER_STACK_BASE,
+                                          USER_STACK_SIZE,
+                                          PTE_C,
+                                          PTE_W);
+                // 3.  设置堆内存
+                vm_pagetbl_set_perm_asign(father_ts->pg,
+                                          father_ts->heap_start,
+                                          (father_ts->heap_history_max - father_ts->heap_start),
+                                          PTE_C,
+                                          PTE_W);
+                // 4.   设置子进程的pg
+                new_ts->pg = (page_table_dump(&father_ts->pg));
+                // 失败
+                if (new_ts->pg == NULL)
+                {
+                        vm_pagetbl_set_perm_asign(father_ts->pg,
+                                                  USER_BASE_PROG_ADDR,
+                                                  father_ts->size - USER_BASE_PROG_ADDR,
+                                                  PTE_W, PTE_C);
 
-        // 2. 映射用户栈
-        if ((vm_pagetbl_copy_asign(
-                father_ts->pg, new_ts->pg, USER_STACK_BASE, USER_STACK_SIZE)) ==
-            -1)
-        {
-                release(&new_ts->lk);
-                free_task(new_ts);
-                return -1;
-        }
+                        vm_pagetbl_set_perm_asign(father_ts->pg,
+                                                  USER_STACK_BASE,
+                                                  USER_STACK_SIZE,
+                                                  PTE_W, PTE_C);
 
-        // 3.  映射堆内存
-        if ((vm_pagetbl_copy_asign(
-                father_ts->pg,
-                new_ts->pg,
-                father_ts->heap_start,
-                (father_ts->heap_history_max - father_ts->heap_start))) == -1)
+                        vm_pagetbl_set_perm_asign(father_ts->pg,
+                                                  father_ts->heap_start,
+                                                  (father_ts->heap_history_max - father_ts->heap_start),
+                                                  PTE_W, PTE_C);
+                        return -1;
+                }
+
+                // 完成
+        }
+        else
         {
-                release(&new_ts->lk);
-                free_task(new_ts);
-                return -1;
+                // 目前我们持有new_ts的锁
+                // 1. 复制父进程页表的所有内容
+                //    26-9-17 修复remap
+                if ((vm_pagetbl_copy_asign(father_ts->pg,
+                                           new_ts->pg,
+                                           USER_BASE_PROG_ADDR,
+                                           father_ts->size - USER_BASE_PROG_ADDR)) ==
+                    -1)
+                {
+                        // 失败路径必须释放锁，否则
+                        // free_task
+                        // 之后该槽位被复用，
+                        // 后续 acquire
+                        // 会触发
+                        // reacquire
+                        // panic。
+                        release(&new_ts->lk);
+                        free_task(new_ts);
+                        return -1;
+                }
+
+                // 2. 映射用户栈
+                if ((vm_pagetbl_copy_asign(
+                        father_ts->pg, new_ts->pg, USER_STACK_BASE, USER_STACK_SIZE)) ==
+                    -1)
+                {
+                        release(&new_ts->lk);
+                        free_task(new_ts);
+                        return -1;
+                }
+
+                // 3.  映射堆内存
+                if ((vm_pagetbl_copy_asign(
+                        father_ts->pg,
+                        new_ts->pg,
+                        father_ts->heap_start,
+                        (father_ts->heap_history_max - father_ts->heap_start))) == -1)
+                {
+                        release(&new_ts->lk);
+                        free_task(new_ts);
+                        return -1;
+                }
         }
 
         // 3. 设置子进程的pid和parent
