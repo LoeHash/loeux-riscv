@@ -13,7 +13,7 @@ page_table kernel_pt = 0;
 uint8_t vm_init_status = 0;
 spinlock_t vm_init_lock = {0};
 static inline int pte_is_leaf(pte_t pte);
-static page_table page_table_dump_level(page_table src, int level);
+static page_table page_table_dup_level(page_table src, int level);
 static void _do_page_fault_lazy_allocation(uint64_t fault_addr, struct task_struct *ts);
 void static _do_page_fault_cow(uint64_t fault_addr);
 
@@ -943,7 +943,7 @@ static inline int pte_is_leaf(pte_t pte)
 /// @param level 当前级别：2=L3, 1=L2, 0=L1（叶子层）
 /// @return 新页表页；失败返回 NULL
 /// @note 只拷贝页表项，不拷贝物理内存；叶子 PTE 共享原物理页
-static page_table page_table_dump_level(page_table src, int level)
+static page_table page_table_dup_level(page_table src, int level)
 {
         page_table new_pg = pg_create();
         if (!new_pg)
@@ -975,7 +975,7 @@ static page_table page_table_dump_level(page_table src, int level)
                         {
                                 // 非叶子 PTE：指向下一级页表页，必须新分配再递归拷贝
                                 page_table child = (page_table)PTE2PA(pt);
-                                page_table new_child = page_table_dump_level(child, level - 1);
+                                page_table new_child = page_table_dup_level(child, level - 1);
                                 if (!new_child)
                                 {
                                         // 回滚 [0, i) 已处理项
@@ -1018,9 +1018,9 @@ static page_table page_table_dump_level(page_table src, int level)
 /// @param src  源
 /// @return 一个新的页表，和 src 完全一致
 /// @note 为保证分配时的页表页数可控性，必须分配一个新的
-page_table page_table_dump(page_table src)
+page_table page_table_dup(page_table src)
 {
-        return page_table_dump_level(src, 2);
+        return page_table_dup_level(src, 2);
 }
 
 void static _do_page_fault_cow(uint64_t fault_addr)

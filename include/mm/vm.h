@@ -95,5 +95,5 @@ int vm_pagetbl_set_perm_asign(page_table target_pg,
                               uint64_t sz,
                               int add_perm,
                               int del_perm);
-page_table page_table_dump(page_table src);
+page_table page_table_dup(page_table src);
 #endif

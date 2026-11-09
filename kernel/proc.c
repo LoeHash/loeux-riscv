@@ -966,7 +966,7 @@ int kfork()
                 sfence_vma();
 
                 // 4.   设置子进程的pg
-                new_ts->pg = (page_table_dump(father_ts->pg));
+                new_ts->pg = (page_table_dup(father_ts->pg));
                 // 失败
                 if (new_ts->pg == NULL)
                 {
