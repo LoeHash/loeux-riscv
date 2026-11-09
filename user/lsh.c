@@ -1,3 +1,8 @@
+/* The Lsh Shell
+ *      check link: https://github.com/brenns10/lsh
+ *      respect!
+ */
+
 #include <ulib.h>
 #include <stdio.h>
 
@@ -52,7 +57,6 @@ int lsh_exit(char **args)
         return 0;
 }
 
-// ========== 程序启动（fork + exec）==========
 int lsh_launch(char **args)
 {
         pid_t pid;
