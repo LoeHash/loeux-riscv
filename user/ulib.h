@@ -27,6 +27,7 @@
 #define SYSCALL_SBRK 17
 #define SYSCALL_UNLINK 18
 #define SYSCALL_RMDIR 19
+#define SYSCALL_GETSYSTICK 20
 ///////////////////////////////SYSCALLS END///////////////////////////////
 
 int pwd(char *buf, int max);

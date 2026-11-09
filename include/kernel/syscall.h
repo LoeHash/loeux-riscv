@@ -26,6 +26,7 @@
 #define SYSCALL_SBRK 17
 #define SYSCALL_UNLINK 18
 #define SYSCALL_RMDIR 19
+#define SYSCALL_GETSYSTICK 20
 
 typedef uint64_t (*syscall_func_t)(void);
 
