@@ -319,3 +319,55 @@ uint64_t sys_mkdir()
 
         return ret;
 }
+
+uint64_t sys_unlink()
+{
+        struct task_struct *ts = get_task();
+
+        uint64_t path_addr;
+
+        get_arg_addr(0, &path_addr);
+
+        char *path = slab_alloc(MAX_PATH_LEN);
+
+        if (path == NULL)
+                return -1;
+
+        if (copy_str_from_user(ts->pg, path, path_addr, MAX_PATH_LEN) < 0)
+        {
+                slab_free(path);
+                return -1;
+        }
+
+        int ret = vfs_unlink(path);
+
+        slab_free(path);
+
+        return ret;
+}
+
+uint64_t sys_rmdir()
+{
+        struct task_struct *ts = get_task();
+
+        uint64_t path_addr;
+
+        get_arg_addr(0, &path_addr);
+
+        char *path = slab_alloc(MAX_PATH_LEN);
+
+        if (path == NULL)
+                return -1;
+
+        if (copy_str_from_user(ts->pg, path, path_addr, MAX_PATH_LEN) < 0)
+        {
+                slab_free(path);
+                return -1;
+        }
+
+        int ret = vfs_rmdir(path);
+
+        slab_free(path);
+
+        return ret;
+}

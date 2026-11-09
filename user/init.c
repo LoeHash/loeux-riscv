@@ -5,7 +5,7 @@
 #include <ufile.h>
 
 // 尝试执行 lsh：交给 ulib 的 execvp 在 PATH 里搜索。
-// 返回: -1 表示所有候选目录都没找到（exec 成功不返回）
+// 返回: -1 表示所有候选目录都没找到
 static int try_exec_lsh(void)
 {
         char *argv[2];

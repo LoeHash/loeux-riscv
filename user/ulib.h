@@ -25,6 +25,8 @@
 #define SYSCALL_GETDENTS 15
 #define SYSCALL_PWD 16
 #define SYSCALL_SBRK 17
+#define SYSCALL_UNLINK 18
+#define SYSCALL_RMDIR 19
 ///////////////////////////////SYSCALLS END///////////////////////////////
 
 int pwd(char *buf, int max);
@@ -36,7 +38,7 @@ const char *get_path(void);                // 读取当前搜索路径
 void set_path(const char *path);           // 设置搜索路径 "dir1:dir2:..."
 int get_pid();
 int get_ppid();
-void * sbrk(int64_t delta);
+void *sbrk(int64_t delta);
 int wait(int *status);
 int waitpid(int pid, int *status);
 int exit(int exit_code);
@@ -47,4 +49,6 @@ int open(const char *path, int flags);
 int close(int fd);
 int fstat(int fd, struct stat *buf);
 int getdents(int fd, struct dirent *buf, uint32_t count);
+int unlink(const char *path);
+int rmdir(const char *path);
 #endif

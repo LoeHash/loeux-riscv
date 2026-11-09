@@ -130,12 +130,12 @@ static struct file_operations ext2_file_ops;
 
 static void ext2_inode_destroy(struct inode* inode);
 static int ext2_truncate(struct inode* inode, uint64_t size);
+static int ext2_priv_save(struct ext2_fs_priv *fs, struct ext2_inode_priv *priv);
 
 /*
- * 工具：块 I/O
- *  */
-
-static inline uint32_t ext2_block_sectors(struct ext2_fs_priv* fs)
+* 工具：块 I/O
+*  */
+static inline uint32_t ext2_block_sectors(struct ext2_fs_priv *fs)
 {
 	return fs->block_size / 512;
 }
