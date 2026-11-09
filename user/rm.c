@@ -1,6 +1,6 @@
 #include <ulib.h>
 #include <stdio.h>
-#include <string.h>
+#include <ustring.h>
 #include <ufile.h>
 
 #ifndef DT_UNKNOWN
@@ -15,6 +15,7 @@
 
 static int opt_recursive = 0;
 static int opt_force = 0;
+static int join_path(char *out, int outsz, const char *path, const char *name);
 
 static int rm_file(const char *path)
 {
@@ -90,7 +91,7 @@ static int rm_tree(const char *path)
                                 continue;
 
                         char child[PATH_MAX];
-                        if (snprintf(child, sizeof(child), "%s/%s", path, name) >= (int)sizeof(child))
+                        if (join_path(child, sizeof(child), path, name) < 0)
                         {
                                 printf("rm: path too long: %s/%s\n", path, name);
                                 failures++;
@@ -197,4 +198,28 @@ int main(int argc, char **argv)
         }
 
         return failures ? -1 : 0;
+}
+
+/* 把 path + "/" + name 拼到 out，成功返回 0，溢出返回 -1 */
+static int join_path(char *out, int outsz, const char *path, const char *name)
+{
+        int i = 0, j = 0;
+        while (path[i])
+        {
+                if (i + 1 >= outsz)
+                        return -1;
+                out[i] = path[i];
+                i++;
+        }
+        if (i + 1 >= outsz)
+                return -1;
+        out[i++] = '/';
+        while (name[j])
+        {
+                if (i + 1 >= outsz)
+                        return -1;
+                out[i++] = name[j++];
+        }
+        out[i] = '\0';
+        return 0;
 }
