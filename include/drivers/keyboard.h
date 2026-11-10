@@ -29,34 +29,38 @@
 #define KEY_DOWN 108
 #define KEY_LEFT 105
 #define KEY_RIGHT 106
+#define KEY_PAGEUP 104
+#define KEY_PAGEDOWN 109
 
 // 队列 / 缓冲区
 #define VIRTIO_KEYBOARD_MAX_QUEUE_NUM 8
 #define INPUT_EVENT_BUFS 8
 #define INPUT_CHAR_BUF_SIZE 256
 
-struct virtio_input_event {
-	uint16_t type;
-	uint16_t code;
-	uint32_t value;
+struct virtio_input_event
+{
+        uint16_t type;
+        uint16_t code;
+        uint32_t value;
 } __attribute__((packed));
 
-struct virtio_input_device {
-	uintptr_t mmio_base;
-	struct virtqueue_n* eventq;
-	struct virtqueue_n* statusq;
-	int shift;
-	int ctrl;
-	uint16_t last_used_idx;
-	char buf[INPUT_CHAR_BUF_SIZE];
-	int head;
-	int tail;
-	int initialized;
-	struct virtio_input_device* next;
+struct virtio_input_device
+{
+        uintptr_t mmio_base;
+        struct virtqueue_n *eventq;
+        struct virtqueue_n *statusq;
+        int shift;
+        int ctrl;
+        uint16_t last_used_idx;
+        char buf[INPUT_CHAR_BUF_SIZE];
+        int head;
+        int tail;
+        int initialized;
+        struct virtio_input_device *next;
 };
 
 void init_keyboard(void);
-int keyboard_getchar(char* out);
+int keyboard_getchar(char *out);
 int keyboard_has_input(void);
 
 #endif

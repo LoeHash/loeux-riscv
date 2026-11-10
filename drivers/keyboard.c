@@ -366,6 +366,12 @@ handle_key(struct virtio_input_device* kb, uint16_t code, uint32_t value)
 	case KEY_RIGHT:
 		buf_push_n(kb, "\033[C", 3);
 		return;
+	case KEY_PAGEUP:
+		buf_push_n(kb, "\033[5~", 4);
+		return;
+	case KEY_PAGEDOWN:
+		buf_push_n(kb, "\033[6~", 4);
+		return;
 	}
 
 	if (code >= 128)
