@@ -27,6 +27,6 @@ void printk_color(int fg_sgr, char* fmt, ...);
 int skip_atoi(const char** s);
 
 static char*
-number(char* str, long num, int base, int size, int precision, int type);
+number(char* str, unsigned long long num, int base, int size, int precision, int type, char sign);
 
 #endif
