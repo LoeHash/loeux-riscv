@@ -28,6 +28,8 @@
 #define SYSCALL_RMDIR 19
 #define SYSCALL_GETSYSTICK 20
 
+#define SYSCALL_DEBUGGING_TRACING_COST_TIME_SWITCHER 1
+
 typedef uint64_t (*syscall_func_t)(void);
 
 int copy_data_addr(uint64_t addr, uint64_t *ip);

@@ -6,6 +6,7 @@
 #include <printk.h>
 #include <lib.h>
 #include <panic.h>
+#include <riscv.h>
 
 extern uint64_t sys_close();
 extern uint64_t sys_open();
@@ -50,6 +51,30 @@ static syscall_func_t syscalls[] = {
     [SYSCALL_UNLINK] sys_unlink,       // []
     [SYSCALL_RMDIR] sys_rmdir,         // []
     [SYSCALL_GETSYSTICK] sys_get_tick, // []
+};
+
+static char *syscalls_names[] = {
+    [0] 0,                               // syscall id = 0,
+    [SYSCALL_WRITE] "sys_write",         // []
+    [SYSCALL_FORK] "sys_fork",           // []
+    [SYSCALL_EXEC] "sys_exec",           // []
+    [SYSCALL_GETPID] "sys_getpid",       // []
+    [SYSCALL_GETPPID] "sys_getppid",     // []
+    [SYSCALL_WAIT] "sys_wait",           // []
+    [SYSCALL_EXIT] "sys_exit",           // []
+    [SYSCALL_READ] "sys_read",           // []
+    [SYSCALL_CHDIR] "sys_chdir",         // []
+    [SYSCALL_WAITPID] "sys_waitpid",     // []
+    [SYSCALL_MKDIR] "sys_mkdir",         // []
+    [SYSCALL_OPEN] "sys_open",           // []
+    [SYSCALL_CLOSE] "sys_close",         // []
+    [SYSCALL_FSTAT] "sys_fstat",         // []
+    [SYSCALL_GETDENTS] "sys_getdents",   // []
+    [SYSCALL_PWD] "sys_pwd",             // []
+    [SYSCALL_SBRK] "sys_sbrk",           // []
+    [SYSCALL_UNLINK] "sys_unlink",       // []
+    [SYSCALL_RMDIR] "sys_rmdir",         // []
+    [SYSCALL_GETSYSTICK] "sys_get_tick", // []
 };
 
 static uint64_t get_arg_reg(int n)
@@ -177,9 +202,11 @@ void syscall()
 
         int sys_id = ts->utf->a7;
 
+        uint64_t start = rdtime();
         if (sys_id > 0 && syscalls[sys_id] && sys_id < ARR_LEN(syscalls))
         {
                 ts->utf->a0 = syscalls[sys_id]();
+                printk("the syscall: %s costs: %llu ticks\n", syscalls_names[sys_id], (rdtime() - start));
         }
         else
         {

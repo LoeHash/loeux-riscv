@@ -288,8 +288,8 @@ static void printk_emit(const char* s, int len)
 	int i;
 
 	/* 串口（SBI 控制台）：纯文本 */
-	for (i = 0; i < len; i++)
-		sbi_putchar(s[i]);
+	// for (i = 0; i < len; i++)
+	// 	sbi_putchar(s[i]);
 
 	/* 屏幕gpu_tty：文本只写一次；msg_fg 生效时由 printk 自己
 	 * 拼装 \033[<n>m ... \033[0m 包裹，未就绪则整体退化仅串口 */
