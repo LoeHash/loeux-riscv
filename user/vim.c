@@ -145,16 +145,55 @@ static void redraw(void)
         emit_str("\033[H");    /* 光标到 (1,1) */
         for (int i = 0; i < ROWS; i++)
         {
-                if (i < nlines)
+                int line_idx = scroll_row + i;
+                if (line_idx < nlines)
                 {
-                        emit(lines[i], line_lens[i]);
+                        int len = line_lens[line_idx];
+                        char *line = lines[line_idx];
+                        if (len > COLS - 1)
+                                len = COLS - 1; /* 防止超长行换行打乱行对齐 */
+                        if (line_idx == cur_row)
+                        {
+                                /* 光标行：光标处包亮黄底黑字色块 */
+                                for (int j = 0; j < len; j++)
+                                {
+                                        if (j == cur_col)
+                                        {
+                                                emit_str("\033[30;103m");
+                                                emit(&line[j], 1);
+                                                emit_str("\033[0m");
+                                        }
+                                        else
+                                        {
+                                                emit(&line[j], 1);
+                                        }
+                                }
+                                if (cur_col >= len)
+                                {
+                                        /* 光标在行尾之后：画一个色块空格 */
+                                        emit_str("\033[30;103m \033[0m");
+                                }
+                        }
+                        else
+                        {
+                                emit(line, len);
+                        }
                 }
                 emit_str("\033[K"); /* 清除行尾 */
                 if (i < ROWS - 1)
                         emit_str("\r\n");
         }
-        move_cursor(cur_row, cur_col);
+        move_cursor(cur_row - scroll_row, cur_col);
         emit_str("\033[?25h"); /* 显示光标 */
+}
+
+/* 调整视口，保证光标始终可见 */
+static void adjust_scroll(void)
+{
+        if (cur_row < scroll_row)
+                scroll_row = cur_row;
+        else if (cur_row >= scroll_row + ROWS)
+                scroll_row = cur_row - ROWS + 1;
 }
 
 /* 在光标处插入字符 */
@@ -244,6 +283,7 @@ static void move_up(void)
                 if (cur_col > line_lens[cur_row])
                         cur_col = line_lens[cur_row];
         }
+        adjust_scroll();
 }
 
 static void move_down(void)
@@ -254,6 +294,7 @@ static void move_down(void)
                 if (cur_col > line_lens[cur_row])
                         cur_col = line_lens[cur_row];
         }
+        adjust_scroll();
 }
 
 static void move_left(void)
@@ -267,6 +308,7 @@ static void move_left(void)
                 cur_row--;
                 cur_col = line_lens[cur_row];
         }
+        adjust_scroll();
 }
 
 static void move_right(void)
@@ -280,6 +322,27 @@ static void move_right(void)
                 cur_row++;
                 cur_col = 0;
         }
+        adjust_scroll();
+}
+
+static void page_up(void)
+{
+        cur_row -= ROWS;
+        if (cur_row < 0)
+                cur_row = 0;
+        if (cur_col > line_lens[cur_row])
+                cur_col = line_lens[cur_row];
+        adjust_scroll();
+}
+
+static void page_down(void)
+{
+        cur_row += ROWS;
+        if (cur_row >= nlines)
+                cur_row = nlines - 1;
+        if (cur_col > line_lens[cur_row])
+                cur_col = line_lens[cur_row];
+        adjust_scroll();
 }
 
 int main(int argc, char *argv[])
@@ -294,6 +357,7 @@ int main(int argc, char *argv[])
         load_file(filename);
         cur_row = 0;
         cur_col = 0;
+        scroll_row = 0;
         modified = 0;
 
         clear_screen();
@@ -302,11 +366,9 @@ int main(int argc, char *argv[])
         char c;
         while (read(0, &c, 1) == 1)
         {
-                int is_move = 0;
                 if (c == '\033')
                 {
-                        /* 转义序列：方向键 \033[A/B/C/D — 光标移动不需 full
-                         * redraw */
+                        /* 转义序列：方向键 \033[A/B/C/D，翻页 \033[5~/6~ */
                         char s1, s2;
                         if (read(0, &s1, 1) != 1)
                                 continue;
@@ -328,8 +390,23 @@ int main(int argc, char *argv[])
                         case 'D':
                                 move_left();
                                 break;
+                        case '5':
+                        case '6':
+                        {
+                                /* Page Up: \033[5~  Page Down: \033[6~ */
+                                char s3;
+                                if (read(0, &s3, 1) != 1)
+                                        break;
+                                if (s3 == '~')
+                                {
+                                        if (s2 == '5')
+                                                page_up();
+                                        else
+                                                page_down();
+                                }
+                                break;
                         }
-                        is_move = 1;
+                        }
                 }
                 else if (c == 0x11)
                 {
@@ -344,25 +421,20 @@ int main(int argc, char *argv[])
                 else if (c == '\r' || c == '\n')
                 {
                         insert_newline();
+                        adjust_scroll();
                 }
                 else if (c == '\b' || c == 0x7f)
                 {
                         delete_char();
+                        adjust_scroll();
                 }
                 else if (c >= 0x20 && c < 0x7f)
                 {
                         insert_char(c);
+                        adjust_scroll();
                 }
-                if (is_move)
-                {
-                        /* 只定位光标，内容没变 */
-                        move_cursor(cur_row, cur_col);
-                }
-                else
-                {
-                        /* 文本编辑/保存后 full redraw */
-                        redraw();
-                }
+                /* 光标色块需随光标移动重绘，统一走 redraw */
+                redraw();
         }
 
         clear_screen();
