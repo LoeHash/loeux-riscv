@@ -129,11 +129,7 @@ uint64_t user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
                 if (ts->dead)
                 {
                         // we need the exit
-                        // kexit(-1);
-                        while (1)
-                        {
-                                /* code */
-                        }
+                        kexit(-1);
                 }
 
                 ts->utf->sepc += 4; // ecall 指令为 4字节
