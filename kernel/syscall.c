@@ -201,12 +201,20 @@ void syscall()
         }
 
         int sys_id = ts->utf->a7;
+        uint64_t start;
+        if (SYSCALL_DEBUGGING_TRACING_COST_TIME_SWITCHER)
+        {
+                start = rdtime();
+        }
 
-        uint64_t start = rdtime();
         if (sys_id > 0 && syscalls[sys_id] && sys_id < ARR_LEN(syscalls))
         {
                 ts->utf->a0 = syscalls[sys_id]();
-                printk("the syscall: %s costs: %llu ticks\n", syscalls_names[sys_id], (rdtime() - start));
+                if (SYSCALL_DEBUGGING_TRACING_COST_TIME_SWITCHER)
+                {
+
+                        printk("the syscall: %s costs: %llu ticks\n", syscalls_names[sys_id], (rdtime() - start));
+                }
         }
         else
         {

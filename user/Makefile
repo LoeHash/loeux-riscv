@@ -27,6 +27,9 @@ CRT0 := crt0.o
 IMAGE := ../loeux.img
 MOUNT_POINT := /media/loe
 
+# 用户程序在镜像内的工作目录（放 .c 源文件）
+WORK_BIN := $(MOUNT_POINT)/work/bin
+
 # 用户库
 
 LIB_SRCS ?= ulib.c stdio.c malloc.c mem.c
@@ -49,10 +52,16 @@ all: $(PROGS)
 		sudo umount $(MOUNT_POINT) 2>/dev/null || true; \
 	fi
 	sudo mount $(IMAGE) $(MOUNT_POINT)
+	
 	sudo cp $(PROGS) $(MOUNT_POINT)/
+
+	@sudo mkdir -p $(WORK_BIN)
+	@if [ -n "$(PROG_SRCS)" ]; then \
+		sudo cp $(PROG_SRCS) $(WORK_BIN)/; \
+	fi
+
 	@sync
 	@cd / && sudo umount $(MOUNT_POINT) 2>/dev/null || true
-
 
 
 bin:
