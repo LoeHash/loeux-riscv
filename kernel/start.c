@@ -43,7 +43,7 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         w_tp(hart_id);
         w_sie(r_sie() | SIE_SEIE | SIE_STIE);
 
-        /* 启用 FPU：设置 sstatus.FS = Initial，允许内核态执行浮点指令 */
+        // 开启内核浮点数支持
         w_sstatus((r_sstatus() & ~SSTATUS_FS) | SSTATUS_FS_INITIAL);
 
         init_cpu();
