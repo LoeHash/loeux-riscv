@@ -43,6 +43,9 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         w_tp(hart_id);
         w_sie(r_sie() | SIE_SEIE | SIE_STIE);
 
+        /* 启用 FPU：设置 sstatus.FS = Initial，允许内核态执行浮点指令 */
+        w_sstatus((r_sstatus() & ~SSTATUS_FS) | SSTATUS_FS_INITIAL);
+
         init_cpu();
         main_core = hart_id;
 
@@ -108,6 +111,9 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
                 panic(PANIC_ERROR, "kstart vfs_mount: error!\n");
         }
         print_mount_table();
+
+        double test_double = (double)(8.00 - 0.001);
+        printk("double: %.5f\n", test_double);
 
         // 初始化第一个进程
         init_user();

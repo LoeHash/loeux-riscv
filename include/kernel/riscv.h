@@ -54,6 +54,8 @@ static inline uint64_t r_satp()
 #define SSTATUS_UPIE (1L << 4) // User Previous Interrupt Enable
 #define SSTATUS_SIE (1L << 1)  // Supervisor Interrupt Enable
 #define SSTATUS_UIE (1L << 0)  // User Interrupt Enable
+#define SSTATUS_FS  (3L << 13) // Floating-point Status (FS field, bits 13:14)
+#define SSTATUS_FS_INITIAL (1L << 13) // FS = Initial (FPU enabled, state clean)
 
 // Supervisor Interrupt Pending
 static inline uint64_t

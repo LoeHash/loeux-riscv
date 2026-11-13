@@ -26,6 +26,8 @@ static int msg_fg = -1;
 
 #define is_digit(c) ((c) >= '0' && (c) <= '9')
 
+static char *format_float(char *str, double num, int field_width, int precision, int flags);
+
 int vsprintf(char *buf, const char *fmt, va_list args)
 {
         char *str, *s;
@@ -272,6 +274,15 @@ int vsprintf(char *buf, const char *fmt, va_list args)
                         }
                         break;
 
+                case 'f':
+                        flags |= SMALL; /* %f 输出小写 nan/inf */
+                case 'F':
+                {
+                        double num = va_arg(args, double);
+                        str = format_float(str, num, field_width, precision, flags);
+                        break;
+                }
+
                 case '%':
 
                         *str++ = '%';
@@ -307,8 +318,8 @@ static void printk_emit(const char *s, int len)
         int i;
 
         /* 串口（SBI 控制台）：纯文本 */
-        // for (i = 0; i < len; i++)
-        // 	sbi_putchar(s[i]);
+        for (i = 0; i < len; i++)
+        	sbi_putchar(s[i]);
 
         /* 屏幕gpu_tty：文本只写一次；msg_fg 生效时由 printk 自己
          * 拼装 \033[<n>m ... \033[0m 包裹，未就绪则整体退化仅串口 */
@@ -487,6 +498,220 @@ number(char *str, unsigned long long num, int base, int size, int precision, int
         while (i-- > 0)
                 *str++ = tmp[i];
         while (size-- > 0)
+                *str++ = ' ';
+
+        return str;
+}
+
+/*
+ * 浮点数格式化 %f / %F。
+ * 支持：精度（默认 6）、字段宽度、左对齐、零填充、+/-/空格 符号、
+ *       # 强制小数点、NaN / Inf。
+ * 整数与小数部分均用整数运算输出，仅取参和拆分时使用 FPU。
+ */
+static char *
+format_float(char *str, double num, int field_width, int precision, int flags)
+{
+        char tmp[128];
+        char *p = tmp;
+        char sign = 0;
+        int len, i;
+        int is_nan = 0, is_inf = 0;
+
+        if (precision < 0)
+                precision = 6;
+        /* 限制精度上限：double 尾数 52 位，仅 2^53≈9e15 以内的整数可被
+         * 精确表示，故 scale=10^precision 中 precision 超过 15 时
+         * frac*scale 会丢位导致末几位偏差。内核调试场景 15 位已足够。 */
+        if (precision > 15)
+                precision = 15;
+
+        /* 通过 IEEE 754 位模式检测 NaN / Inf */
+        {
+                union
+                {
+                        double d;
+                        uint64_t u;
+                } conv;
+                conv.d = num;
+                uint64_t bits = conv.u;
+                int exp = (int)((bits >> 52) & 0x7ff);
+                uint64_t mant = bits & 0xfffffffffffffULL;
+
+                if (exp == 0x7ff)
+                {
+                        if (mant == 0)
+                                is_inf = 1;
+                        else
+                                is_nan = 1;
+                }
+        }
+
+        if (is_nan)
+        {
+                const char *s = (flags & SMALL) ? "nan" : "NAN";
+                if (sign)
+                        *p++ = sign;
+                for (i = 0; s[i]; i++)
+                        *p++ = s[i];
+                len = p - tmp;
+                if (!(flags & LEFT))
+                        while (len < field_width--)
+                                *str++ = ' ';
+                for (i = 0; i < len; i++)
+                        *str++ = tmp[i];
+                while (len < field_width--)
+                        *str++ = ' ';
+                return str;
+        }
+
+        if (is_inf)
+        {
+                const char *s;
+                if (num < 0)
+                {
+                        sign = '-';
+                        s = (flags & SMALL) ? "inf" : "INF";
+                }
+                else
+                {
+                        s = (flags & SMALL) ? "inf" : "INF";
+                        if (flags & PLUS)
+                                sign = '+';
+                        else if (flags & SPACE)
+                                sign = ' ';
+                }
+                if (sign)
+                        *p++ = sign;
+                for (i = 0; s[i]; i++)
+                        *p++ = s[i];
+                len = p - tmp;
+                if (!(flags & LEFT))
+                        while (len < field_width--)
+                                *str++ = ' ';
+                for (i = 0; i < len; i++)
+                        *str++ = tmp[i];
+                while (len < field_width--)
+                        *str++ = ' ';
+                return str;
+        }
+
+        /* 符号 */
+        if (num < 0)
+        {
+                sign = '-';
+                num = -num;
+        }
+        else if (flags & PLUS)
+        {
+                sign = '+';
+        }
+        else if (flags & SPACE)
+        {
+                sign = ' ';
+        }
+
+        /* 拆分整数部分与小数部分 */
+        unsigned long long int_part = (unsigned long long)num;
+        double frac = num - (double)int_part;
+
+        /* 计算 10^precision，用于把小数放大成整数 */
+        unsigned long long scale = 1;
+        for (i = 0; i < precision; i++)
+                scale *= 10;
+
+        /* 四舍五入 */
+        unsigned long long frac_int = (unsigned long long)(frac * scale + 0.5);
+
+        /* 进位到整数部分 */
+        if (frac_int >= scale)
+        {
+                int_part++;
+                frac_int -= scale;
+        }
+
+        /* 数字部分（不含符号）写入 tmp */
+        char ibuf[32];
+        int ilen = 0;
+        unsigned long long ip = int_part;
+        if (ip == 0)
+        {
+                ibuf[ilen++] = '0';
+        }
+        else
+        {
+                while (ip > 0)
+                {
+                        ibuf[ilen++] = '0' + (ip % 10);
+                        ip /= 10;
+                }
+        }
+        for (i = ilen - 1; i >= 0; i--)
+                *p++ = ibuf[i];
+
+        /* 小数点 */
+        if (precision > 0 || (flags & SPECIAL))
+                *p++ = '.';
+
+        /* 小数部分：补足 precision 位（前导零），倒序输出 */
+        if (precision > 0)
+        {
+                char fbuf[32];
+                int flen = 0;
+                unsigned long long f = frac_int;
+                if (f == 0)
+                {
+                        fbuf[flen++] = '0';
+                }
+                else
+                {
+                        while (f > 0)
+                        {
+                                fbuf[flen++] = '0' + (f % 10);
+                                f /= 10;
+                        }
+                }
+                /* 前导补零到 precision 位 */
+                while (flen < precision)
+                        fbuf[flen++] = '0';
+                /* 只取 precision 位，倒序写出 */
+                for (i = precision - 1; i >= 0; i--)
+                        *p++ = fbuf[i];
+        }
+
+        len = p - tmp;
+
+        /* 总宽度需扣除符号所占的 1 字节 */
+        int sign_len = sign ? 1 : 0;
+
+        if (!(flags & LEFT))
+        {
+                if ((flags & ZEROPAD))
+                {
+                        /* 零填充：先输出符号，再补零，再输出数字 */
+                        if (sign)
+                                *str++ = sign;
+                        while (len + sign_len < field_width--)
+                                *str++ = '0';
+                }
+                else
+                {
+                        /* 空格填充：先补空格，再输出符号+数字 */
+                        while (len + sign_len < field_width--)
+                                *str++ = ' ';
+                        if (sign)
+                                *str++ = sign;
+                }
+        }
+        else
+        {
+                /* 左对齐：先符号+数字，再补空格 */
+                if (sign)
+                        *str++ = sign;
+        }
+        for (i = 0; i < len; i++)
+                *str++ = tmp[i];
+        while (len + sign_len < field_width--)
                 *str++ = ' ';
 
         return str;
