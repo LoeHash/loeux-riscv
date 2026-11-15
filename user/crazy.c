@@ -3,13 +3,13 @@
 
 int main(int argc, char **argv)
 {
-        int counter = 10000;
+        int counter = 3;
         while (counter > 0)
         {
                 int a = fork();
                 if (a == 0)
                 {
-                        execvp("/slabtest", NULL);
+                        execvp("ls", NULL);
                 }
                 counter--;
         }

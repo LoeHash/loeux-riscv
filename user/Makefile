@@ -17,7 +17,7 @@ CFLAGS := -march=rv64gc -mabi=lp64 \
           -nostdlib -ffreestanding -fno-builtin \
           -fno-tree-loop-distribute-patterns \
           $(INCLUDES) -g \
-          -MMD -MP
+          -MMD -MP -DLOEUX
 
 ASFLAGS := -march=rv64gc -mabi=lp64 \
            $(INCLUDES) -g
