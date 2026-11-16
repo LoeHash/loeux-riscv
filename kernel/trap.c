@@ -183,6 +183,8 @@ uint64_t user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
                 kexit(-1);
         }
 
+        // TODO: 检查是否有信号需要处理
+
         setup_return_trapframe(ts);
         // intr_on(); 不要开启，否则会创造出一个窗口期
         return (uint64_t)(MAKE_SATP(ts->pg));
