@@ -24,6 +24,10 @@
 #define O_READ O_RDONLY
 #define O_WRITE O_WRONLY
 #define O_RW O_RDWR
-///////////////////////////////MACROS END///////////////////////////////
 
+#define STDIN_FILENO 0
+#define STDOUT_FILENO 1
+#define STDERR_FILENO 2
+
+///////////////////////////////MACROS END///////////////////////////////
 #endif

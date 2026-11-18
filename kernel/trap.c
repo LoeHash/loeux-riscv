@@ -170,10 +170,11 @@ uint64_t user_trap_hanlder(uint64_t scause, uint64_t sepc, uint64_t stval)
         {
                 // wrong
                 printk("User trap!\n");
+                printk("kernel Dumped!\n");
                 printk("Wrong with the cpu id: %d\n", get_cpu_id());
-                printk("   scause 保存异常发生时的 PC: %0#lx\n", scause);
-                printk("   sepc   保存异常发生时的 PC: %0#lx\n", sepc);
-                printk("   stval  异常的附加信息:%0#lx\n", stval);
+                printk("   scause : %0#lx\n", scause);
+                printk("   sepc   : %0#lx\n", sepc);
+                printk("   stval  : %0#lx\n", stval);
 
                 to_kill(ts);
         }
