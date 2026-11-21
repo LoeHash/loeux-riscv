@@ -1,12 +1,23 @@
 #ifndef _INC_TYPE
 #define _INC_TYPE
+
 #include <stdbool.h>
 #include <stdint.h>
+
 #ifndef NULL
 #define NULL ((void *)0)
 #endif
+
 #define NOFILE 64
 #define NGROUPS_MAX 32
+
+/*
+ 最大信号处理函数数量
+        每个进程最多可以注册128个信号处理函数
+        此外，内核会直接根据索引号调用对应的信号处理函数
+ */
+#define NSIGNAL_HANDLERS_MAX 128
+
 typedef char padding_t;
 
 struct spinlock
@@ -18,6 +29,9 @@ struct spinlock
 typedef unsigned long phys_addr_t;
 typedef unsigned long vir_addr_t;
 typedef struct spinlock spinlock_t;
+typedef int signal_t;
+typedef int32_t signal_pending_mask_t;
+typedef void (*signal_handler_t)(int); // 信号处理函数指针类型
 
 /// @brief 表示一页的管理信息
 struct page
@@ -214,6 +228,11 @@ struct task_struct
         uint64_t heap_start;       // 堆起始
         uint64_t heap_brk;         // 堆当前指针，可以做懒分配
         uint64_t heap_history_max; // 堆历史上到达的最大指针，在kexit中会使用
+
+        // signal 相关
+        signal_handler_t signal_handlers[NSIGNAL_HANDLERS_MAX]; // 信号处理函数数组
+        signal_pending_mask_t signal_pending_mask;              // 信号待处理掩码
+        signal_t signal_pending;                                // 当前待处理信号, 无信号为-1
 };
 
 struct cpu
