@@ -112,9 +112,6 @@ void kstart(unsigned long hart_id, unsigned long ft_addr)
         }
         print_mount_table();
 
-        double test_double = (double)(8.00 - 0.001);
-        printk("double: %.5f\n", test_double);
-
         // 初始化第一个进程
         init_user();
         __atomic_store_n(&kernel_inited, 1, __ATOMIC_RELEASE);
@@ -151,6 +148,8 @@ void secondary_start(uint64_t hart_id, uint64_t data_addr)
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
         w_tp(hart_id);
+        w_sstatus((r_sstatus() & ~SSTATUS_FS) | SSTATUS_FS_INITIAL);
+
         init_cpu();
         init_kvmhart();
         init_kernel_trap_vec();
