@@ -31,26 +31,27 @@
 ///////////////////////////////SYSCALLS END///////////////////////////////
 
 //////////////////////////////////////////////////////////////////////////
-int pwd(char *buf, int max);
-int write(int fd, void *buf, uint64_t count);
+int pwd(char* buf, int max);
+int write(int fd, void* buf, uint64_t count);
 int fork();
-int exec(const char *path, char **argv);
-int execvp(const char *file, char **argv); // 在 PATH 中搜索后 exec
-const char *get_path(void);                // 读取当前搜索路径
-void set_path(const char *path);           // 设置搜索路径 "dir1:dir2:..."
+int exec(const char* path, char** argv);
+int execvp(const char* file, char** argv); // 在 PATH 中搜索后 exec
+const char* get_path(void);		   // 读取当前搜索路径
+void set_path(const char* path);	   // 设置搜索路径 "dir1:dir2:..."
 int get_pid();
 int get_ppid();
-void *sbrk(int64_t delta);
-int wait(int *status);
-int waitpid(int pid, int *status);
+void* sbrk(int64_t delta);
+int wait(int* status);
+int waitpid(int pid, int* status);
 int exit(int exit_code);
-int read(int fd, void *buf, uint64_t count);
-int chdir(const char *path);
-int mkdir(const char *path);
-int open(const char *path, int flags);
+int read(int fd, void* buf, uint64_t count);
+int chdir(const char* path);
+int mkdir(const char* path);
+int open(const char* path, int flags);
 int close(int fd);
-int fstat(int fd, struct stat *buf);
-int getdents(int fd, struct dirent *buf, uint32_t count);
-int unlink(const char *path);
-int rmdir(const char *path);
+int fstat(int fd, struct stat* buf);
+int getdents(int fd, struct dirent* buf, uint32_t count);
+int unlink(const char* path);
+int rmdir(const char* path);
+uint64_t get_tick();
 #endif
